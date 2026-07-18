@@ -43,7 +43,7 @@ void axpy(const void* X, void* Y, size_t num_elements, DType_t dtype, cudaStream
   const void* alpha_ptr =
       (dtype == DType_t::FP64) ? (const void*)&alpha_f64 : (const void*)&alpha_f32;
 
-  cublasStatus_t status = cublasAxpyEx(handle, num_elements, alpha_ptr, data_type, X, data_type, 1,
+  cublasStatus_t status = cublasAxpyEx(handle, num_elements, alpha_ptr, compute_type, X, data_type, 1,
                                        Y, data_type, 1, compute_type);
 
   if (status != CUBLAS_STATUS_SUCCESS) {

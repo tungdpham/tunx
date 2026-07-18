@@ -614,7 +614,8 @@ inline void print_tensor(const Tensor &tensor, size_t num_elements_, std::string
   auto host_tensor = tensor.to_host();
   fmt::print("{}: ", label);
   for (size_t i = 0; i < num_elements_; i++) {
-    fmt::print("{} ", host_tensor.data_as<float>()[i]);
+    DISPATCH_ANY_DTYPE(tensor.dtype(), T,
+                       { fmt::print("{:.3f} ", static_cast<float>(host_tensor.data_as<T>()[i])); })
   }
   fmt::print("\n");
 }

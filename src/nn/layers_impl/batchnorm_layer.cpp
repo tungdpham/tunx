@@ -57,7 +57,7 @@ Tensor BatchNormLayerImpl::forward_impl(const Tensor &input, Residuals &residual
                                 std::to_string(input.dims()) + " dims");
   }
   if (input.dim(3) != num_features_) {
-    throw std::invalid_argument("BatchNorm: Input channels must match num_features" +
+    throw std::invalid_argument("BatchNorm: Input channels must match num_features " +
                                 std::to_string(num_features_) + ", but got " +
                                 std::to_string(input.dim(3)));
   }

@@ -11,6 +11,7 @@
 
 #include "nn/siso_layer.hpp"
 #include "tensor/tensor.hpp"
+#include "type/type.hpp"
 
 namespace tunx {
 
@@ -47,14 +48,14 @@ public:
     Vec<ParamDescriptor> descriptors;
     if (affine_) {
       auto gamma_desc = ParamDescriptor{
-          param_dtype_,
+          DType_t::FP32,
           {normalized_shape_},
           &gamma_,
           &grad_gamma_,
       };
       descriptors.push_back(gamma_desc);
       auto beta_desc = ParamDescriptor{
-          param_dtype_,
+          DType_t::FP32,
           {normalized_shape_},
           &beta_,
           &grad_beta_,

@@ -172,6 +172,10 @@ __global__ void fill_random_uniform_kernel(T* data, size_t size, T min_val, T ma
     curand_init(seed, idx, 0, &state);
     if constexpr (std::is_same<T, double>::value) {
       data[idx] = min_val + curand_uniform_double(&state) * (max_val - min_val);
+    } else if constexpr (std::is_same<T, bf16>::value) {
+      data[idx] = __float2bfloat16(__bfloat162float(min_val) +
+                                   curand_uniform(&state) *
+                                       (__bfloat162float(max_val) - __bfloat162float(min_val)));
     } else {
       data[idx] = min_val + (T)curand_uniform(&state) * (max_val - min_val);
     }
@@ -195,6 +199,9 @@ __global__ void fill_random_normal_kernel(T* data, size_t size, T mean, T stddev
     } else if constexpr (std::is_same<T, fp16>::value) {
       fp16 val = curand_normal(&state);
       data[i] = mean + stddev * val;
+    } else if constexpr (std::is_same<T, bf16>::value) {
+      float val = curand_normal(&state);
+      data[i] = __float2bfloat16(__bfloat162float(mean) + __bfloat162float(stddev) * val);
     }
   }
 }
@@ -465,6 +472,10 @@ void zero(T* c, size_t size, cudaStream_t stream) {
 template <typename T>
 void fill_random_uniform(T* data, size_t size, T min_val, T max_val, unsigned long long seed,
                          cudaStream_t stream) {
+  if constexpr (!(std::is_same_v<T, float> || std::is_same_v<T, double> ||
+                  std::is_same_v<T, fp16> || std::is_same_v<T, bf16>)) {
+    throw std::runtime_error("fatal: fill_random_uniform not implemented for this type");
+  }
   if (size == 0) return;
   int blocks = get_num_blocks(size);
   fill_random_uniform_kernel<<<blocks, BLOCK_SIZE, 0, stream>>>(data, size, min_val, max_val, seed);
@@ -474,6 +485,10 @@ void fill_random_uniform(T* data, size_t size, T min_val, T max_val, unsigned lo
 template <typename T>
 void fill_random_normal(T* data, size_t size, T mean, T stddev, unsigned long long seed,
                         cudaStream_t stream) {
+  if constexpr (!(std::is_same_v<T, float> || std::is_same_v<T, double> ||
+                  std::is_same_v<T, fp16> || std::is_same_v<T, bf16>)) {
+    throw std::runtime_error("fatal: fill_random_normal not implemented for this type");
+  }
   if (size == 0) return;
   int blocks = get_num_blocks(size);
   fill_random_normal_kernel<T><<<blocks, BLOCK_SIZE, 0, stream>>>(data, size, mean, stddev, seed);

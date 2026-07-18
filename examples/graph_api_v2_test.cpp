@@ -7,9 +7,14 @@
 #include "device/pool_allocator.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
+#include "nn/layers_impl/batchnorm_layer.hpp"
+#include "nn/layers_impl/conv2d_layer.hpp"
+#include "nn/layers_impl/layer_norm_layer.hpp"
 #include "nn/loss.hpp"
 #include "nn/metrics.hpp"
 #include "nn/optimizers.hpp"
+#include "tensor/tensor.hpp"
+#include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
 
 using namespace std;
@@ -20,12 +25,18 @@ std::shared_ptr<Graph> make_mlp(const Device& device) {
 
   auto input = graph->input();
 
+  auto conv2d_1 = Conv2DLayer(1, 8, 5, 5, 1, 1, 0, 0, false, "conv2d_1");
+  auto bn1 = BatchNormLayer(8, 1e-5, 0.1f, true, true, "bn1");
   auto flatten = FlattenLayer(1, -1, "flatten");
-  auto fc1 = DenseLayer(28 * 28, 100, true, "fc1");
+  auto fc1 = DenseLayer(24 * 24 * 8, 100, true, "fc1");
+  auto layer_norm = LayerNormLayer(100, 1e-5, true, "layer_norm");
   auto fc2 = DenseLayer(100, 10, false, "fc2");
 
-  auto x = flatten(input);
+  auto x = conv2d_1(input);
+  x = bn1(x);
+  x = flatten(x);
   x = fc1(x);
+  x = layer_norm(x);
   auto output = fc2(x);
   output->set_uid("output");
   graph->set_output(output);
@@ -67,8 +78,10 @@ std::shared_ptr<Graph> make_mnist_model(const Device& device) {
   auto output = fc(x);
   output->set_uid("output");
   graph->set_output(output);
+  graph->set_io_dtype(DType_t::BF16);
+  graph->set_param_dtype(DType_t::BF16);
 
-  auto& allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto& allocator = PoolAllocator::instance(device, defaultFlowHandle);
 
   graph->compile(allocator);
 
@@ -79,11 +92,12 @@ signed main() {
   cout << "Testing Graph API v2" << endl;
 
   const Device& device = getGPU();
-  // auto graph = make_mnist_model(device);
+  auto graph = make_mnist_model(device);
 
-  auto graph = make_mlp(device);
+  // auto graph = make_mlp(device);
 
-  auto [train_loader, val_loader] = DataLoaderFactory::create("mnist", "data/mnist", DType_t::BF16);
+  auto [train_loader, val_loader] =
+      DataLoaderFactory::create("mnist", "../data/mnist", DType_t::BF16);
   if (!train_loader || !val_loader) {
     cerr << "Failed to create data loaders for MNIST dataset" << endl;
     return 1;
@@ -128,6 +142,20 @@ signed main() {
       });
 
       auto grad_input_map = graph->backward(output_grad_map);
+
+      // DEBUGGING
+      // for (auto& edges : graph->edges()) {
+      //   auto layer = edges->layer();
+      //   Vec<Tensor*> params = layer->parameters();
+      //   Vec<Tensor*> grads = layer->gradients();
+      //   for (size_t i = 0; i < params.size(); ++i) {
+      //     print_tensor(*params[i], 10, layer->name() + " param " + to_string(i));
+      //   }
+
+      //   for (size_t i = 0; i < params.size(); ++i) {
+      //     print_tensor(*grads[i], 10, layer->name() + " grad " + to_string(i));
+      //   }
+      // }
 
       optimizer->update();
       optimizer->zero_grads();

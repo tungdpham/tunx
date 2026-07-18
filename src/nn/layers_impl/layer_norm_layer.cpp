@@ -61,8 +61,8 @@ Tensor LayerNormLayerImpl::forward_impl(const Tensor &input, Residuals &residual
   WorkspaceReq ws_req = engine_->query_layernorm_graph(backend_handle_, stats, type_desc);
 
   if (this->is_training_) {
-    Tensor batch_mean = get_tensor({batch_size}, compute_dtype_);
-    Tensor batch_invar = get_tensor({batch_size}, compute_dtype_);
+    Tensor batch_mean = get_tensor({batch_size}, DType_t::FP32);
+    Tensor batch_invar = get_tensor({batch_size}, DType_t::FP32);
     residuals["batch_mean"] = batch_mean;
     residuals["batch_invar"] = batch_invar;
 
