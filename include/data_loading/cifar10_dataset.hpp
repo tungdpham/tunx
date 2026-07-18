@@ -18,7 +18,7 @@
 #include <numeric>
 #include <string>
 
-#include "data_loading/image_data_loader.hpp"
+#include "data_loading/dataset.hpp"
 #include "device/iallocator.hpp"
 #include "tensor/tensor.hpp"
 #include "threading/thread_handler.hpp"
@@ -35,12 +35,12 @@ constexpr size_t RECORD_SIZE = 1 + IMAGE_SIZE;
 
 namespace tunx {
 /**
- *  CIFAR-10 data loader for binary format adapted for CNN (2D RGB images)
+ *  CIFAR-10 data dataset for binary format adapted for CNN (2D RGB images)
  *  NHWC format: (Batch, Height, Width, Channels)
  *  Uses memory-mapped I/O for lazy loading — only pages that are actually
  *  accessed are brought into RAM, keeping the full dataset off-heap.
  */
-class CIFAR10DataLoader : public ImageDataLoader {
+class CIFAR10 : public Dataset {
 private:
   struct MappedFile {
     int fd = -1;
@@ -181,12 +181,12 @@ private:
   }
 
 public:
-  explicit CIFAR10DataLoader(DType_t dtype = DType_t::FP32)
-      : ImageDataLoader(),
+  explicit CIFAR10(DType_t dtype = DType_t::FP32)
+      : Dataset(),
         allocator_(PoolAllocator::instance(getHost(), defaultFlowHandle)),
         dtype_(dtype) {}
 
-  virtual ~CIFAR10DataLoader() { cleanup_maps(); }
+  virtual ~CIFAR10() { cleanup_maps(); }
 
   /**
    * Load CIFAR-10 data from a single binary file
@@ -233,10 +233,6 @@ public:
             cifar10_constants::NUM_CHANNELS};
   }
 
-  int get_num_classes() const override { return static_cast<int>(cifar10_constants::NUM_CLASSES); }
-
-  Vec<std::string> get_class_names() const override { return class_names_; }
-
   void print_data_stats() const override {
     size_t n = sample_map_.size();
     if (n == 0) {
@@ -266,21 +262,21 @@ public:
     }
   }
 
-  static void create(const std::string &data_path, CIFAR10DataLoader &train_loader,
-                     CIFAR10DataLoader &test_loader) {
+  static void create(const std::string &data_path, CIFAR10 &train_dataset, CIFAR10 &test_dataset) {
     const std::string label_file = data_path + "/cifar-10-batches-bin/batches.meta.txt";
-    train_loader.set_label_file(label_file);
-    test_loader.set_label_file(label_file);
+    train_dataset.set_label_file(label_file);
+    test_dataset.set_label_file(label_file);
 
-    if (!train_loader.load_multiple_files({data_path + "/cifar-10-batches-bin/data_batch_1.bin",
-                                           data_path + "/cifar-10-batches-bin/data_batch_2.bin",
-                                           data_path + "/cifar-10-batches-bin/data_batch_3.bin",
-                                           data_path + "/cifar-10-batches-bin/data_batch_4.bin",
-                                           data_path + "/cifar-10-batches-bin/data_batch_5.bin"})) {
+    if (!train_dataset.load_multiple_files(
+            {data_path + "/cifar-10-batches-bin/data_batch_1.bin",
+             data_path + "/cifar-10-batches-bin/data_batch_2.bin",
+             data_path + "/cifar-10-batches-bin/data_batch_3.bin",
+             data_path + "/cifar-10-batches-bin/data_batch_4.bin",
+             data_path + "/cifar-10-batches-bin/data_batch_5.bin"})) {
       throw std::runtime_error("Failed to load training data!");
     }
 
-    if (!test_loader.load_data(data_path + "/cifar-10-batches-bin/test_batch.bin")) {
+    if (!test_dataset.load_data(data_path + "/cifar-10-batches-bin/test_batch.bin")) {
       throw std::runtime_error("Failed to load test data!");
     }
   }

@@ -18,12 +18,12 @@
 namespace tunx {
 
 /**
- * Abstract base class for all data loaders
+ * Abstract base class for all data datasets
  * Provides common interface and functionality for training neural networks
  */
-class BaseDataLoader {
+class Dataset {
 public:
-  virtual ~BaseDataLoader() = default;
+  virtual ~Dataset() = default;
 
   /**
    * Load data from file(s)

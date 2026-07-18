@@ -9,13 +9,13 @@
 #include <string>
 
 #include "data_augmentation/augmentation.hpp"
-#include "data_loading/cifar100_data_loader.hpp"
-#include "data_loading/cifar10_data_loader.hpp"
-#include "data_loading/data_loader_factory.hpp"
-#include "data_loading/imagenet100_data_loader.hpp"
-#include "data_loading/mnist_data_loader.hpp"
-#include "data_loading/open_webtext_data_loader.hpp"
-#include "data_loading/tiny_imagenet_data_loader.hpp"
+#include "data_loading/cifar100_dataset.hpp"
+#include "data_loading/cifar10_dataset.hpp"
+#include "data_loading/dataset_factory.hpp"
+#include "data_loading/imagenet100_dataset.hpp"
+#include "data_loading/mnist_dataset.hpp"
+#include "data_loading/open_webtext_dataset.hpp"
+#include "data_loading/tiny_imagenet_dataset.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -35,13 +35,13 @@ bool env_flag_enabled(const char *primary, const char *fallback, bool default_va
 }
 }  // namespace
 
-DataLoaderPair DataLoaderFactory::create(const std::string &dataset_type,
-                                         const std::string &dataset_path, DType_t io_dtype_) {
-  DataLoaderPair pair;
+DatasetPair DatasetFactory::create(const std::string &dataset_type, const std::string &dataset_path,
+                                   DType_t io_dtype_) {
+  DatasetPair pair;
 
   if (dataset_type == "mnist") {
-    auto train = std::make_unique<MNISTDataLoader>(io_dtype_);
-    auto val = std::make_unique<MNISTDataLoader>(io_dtype_);
+    auto train = std::make_unique<MNIST>(io_dtype_);
+    auto val = std::make_unique<MNIST>(io_dtype_);
 
     if (train->load_data(dataset_path + "/train.csv") ||
         train->load_data(dataset_path + "/mnist_train.csv")) {
@@ -53,8 +53,8 @@ DataLoaderPair DataLoaderFactory::create(const std::string &dataset_type,
       pair.val = std::move(val);
     }
   } else if (dataset_type == "cifar-10") {
-    auto train = std::make_unique<CIFAR10DataLoader>(io_dtype_);
-    auto val = std::make_unique<CIFAR10DataLoader>(io_dtype_);
+    auto train = std::make_unique<CIFAR10>(io_dtype_);
+    auto val = std::make_unique<CIFAR10>(io_dtype_);
 
     Vec<std::string> train_files = {
         dataset_path + "/data_batch_1.bin", dataset_path + "/data_batch_2.bin",
@@ -69,8 +69,8 @@ DataLoaderPair DataLoaderFactory::create(const std::string &dataset_type,
       pair.val = std::move(val);
     }
   } else if (dataset_type == "cifar-100") {
-    auto train = std::make_unique<CIFAR100DataLoader>(false, io_dtype_);
-    auto val = std::make_unique<CIFAR100DataLoader>(false, io_dtype_);
+    auto train = std::make_unique<CIFAR100>(false, io_dtype_);
+    auto val = std::make_unique<CIFAR100>(false, io_dtype_);
 
     if (train->load_data(dataset_path + "/train.bin")) {
       pair.train = std::move(train);
@@ -80,8 +80,8 @@ DataLoaderPair DataLoaderFactory::create(const std::string &dataset_type,
       pair.val = std::move(val);
     }
   } else if (dataset_type == "tiny_imagenet") {
-    auto train = std::make_unique<TinyImageNetDataLoader>(io_dtype_);
-    auto val = std::make_unique<TinyImageNetDataLoader>(io_dtype_);
+    auto train = std::make_unique<TinyImageNet>(io_dtype_);
+    auto val = std::make_unique<TinyImageNet>(io_dtype_);
 
     if (train->load_data(dataset_path, true)) {
       pair.train = std::move(train);
@@ -91,8 +91,8 @@ DataLoaderPair DataLoaderFactory::create(const std::string &dataset_type,
       pair.val = std::move(val);
     }
   } else if (dataset_type == "imagenet-100") {
-    auto train = std::make_unique<ImageNet100DataLoader>(io_dtype_);
-    auto val = std::make_unique<ImageNet100DataLoader>(io_dtype_);
+    auto train = std::make_unique<ImageNet100>(io_dtype_);
+    auto val = std::make_unique<ImageNet100>(io_dtype_);
 
     if (train->load_data(dataset_path, true)) {
       const bool use_aug = env_flag_enabled("tunx_AUGMENTATION", "AUGMENTATION", true);
@@ -123,8 +123,8 @@ DataLoaderPair DataLoaderFactory::create(const std::string &dataset_type,
       pair.val = std::move(val);
     }
   } else if (dataset_type == "open-web-text") {
-    auto train = std::make_unique<OpenWebTextDataLoader>(1024, io_dtype_);
-    auto val = std::make_unique<OpenWebTextDataLoader>(1024, io_dtype_);
+    auto train = std::make_unique<OpenWebText>(1024, io_dtype_);
+    auto val = std::make_unique<OpenWebText>(1024, io_dtype_);
 
     if (train->load_data(dataset_path + "/train.bin")) {
       pair.train = std::move(train);

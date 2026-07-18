@@ -12,7 +12,7 @@
 #include <iostream>
 #include <memory>
 
-#include "data_loading/data_loader_factory.hpp"
+#include "data_loading/dataset_factory.hpp"
 #include "device/pool_allocator.hpp"
 #include "distributed/coordinator.hpp"
 #include "distributed/endpoint.hpp"
@@ -69,13 +69,13 @@ int main(int argc, char *argv[]) {
   if (train_config.dataset_name.empty()) {
     throw std::runtime_error("dataset_name variable is not set!");
   }
-  auto [train_loader, val_loader] =
-      DataLoaderFactory::create(train_config.dataset_name, train_config.dataset_path);
-  if (!train_loader || !val_loader) {
+  auto [train_dataset, val_dataset] =
+      DatasetFactory::create(train_config.dataset_name, train_config.dataset_path);
+  if (!train_dataset || !val_dataset) {
     cerr << "Failed to create data loaders for model: " << train_config.model_name << endl;
     return 1;
   }
-  train_loader->set_seed(123456);
+  train_dataset->set_seed(123456);
 
   auto criterion = LossFactory::create_from_config(train_config.loss_config);
 
@@ -123,7 +123,7 @@ int main(int argc, char *argv[]) {
   }
 
   coordinator.start();
-  train_model(coordinator, train_loader, val_loader, criterion, train_config);
+  train_model(coordinator, train_dataset, val_dataset, criterion, train_config);
   coordinator.stop();
   return 0;
 }

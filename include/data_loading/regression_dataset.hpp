@@ -4,16 +4,16 @@
  * This software is licensed under the MIT License. See the LICENSE file in the
  * project root for the full license text.
  */
-#include "data_loader.hpp"
+#include "dataset.hpp"
 
 namespace tunx {
 /**
  * Specialized base class for regression datasets
  * Provides common functionality for continuous target prediction
  */
-class RegressionDataLoader : public BaseDataLoader {
+class Regression : public Dataset {
 public:
-  virtual ~RegressionDataLoader() = default;
+  virtual ~Regression() = default;
 
   /**
    * Get number of input features

@@ -1,6 +1,6 @@
 #include <getopt.h>
 
-#include "data_loading/data_loader_factory.hpp"
+#include "data_loading/dataset_factory.hpp"
 #include "device/device_manager.hpp"
 #include "nn/example_graphs.hpp"
 #include "nn/loss.hpp"
@@ -47,9 +47,9 @@ signed main(int argc, char *argv[]) {
   const auto &device = train_config.device_type == DeviceType::CUDA ? getGPU(0) : getHost();
   auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
 
-  auto [train_loader, val_loader] =
-      DataLoaderFactory::create(train_config.dataset_name, train_config.dataset_path);
-  if (!train_loader || !val_loader) {
+  auto [train_dataset, val_dataset] =
+      DatasetFactory::create(train_config.dataset_name, train_config.dataset_path);
+  if (!train_dataset || !val_dataset) {
     cerr << "Failed to create data loaders for model: " << train_config.model_name << endl;
     return 1;
   }
@@ -59,7 +59,7 @@ signed main(int argc, char *argv[]) {
   auto criterion = LossFactory::create_crossentropy();
 
   try {
-    auto res = validate_model(graph, val_loader, criterion, train_config);
+    auto res = validate_model(graph, val_dataset, criterion, train_config);
     std::cout << "Validation Loss: " << res.avg_loss << ", Accuracy: " << res.avg_accuracy * 100.0
               << "%" << std::endl;
   } catch (const std::exception &e) {

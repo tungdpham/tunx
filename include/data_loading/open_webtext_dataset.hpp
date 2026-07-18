@@ -3,13 +3,13 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "data_loader.hpp"
+#include "dataset.hpp"
 #include "device/iallocator.hpp"
 #include "tokenizer/tokenizer.hpp"
 
 namespace tunx {
 
-class OpenWebTextDataLoader : public BaseDataLoader {
+class OpenWebText : public Dataset {
 private:
   IAllocator &allocator_;
   DType_t dtype_ = DType_t::FP32;
@@ -46,14 +46,14 @@ private:
   }
 
 public:
-  OpenWebTextDataLoader(size_t context_length, DType_t dtype = DType_t::FP32,
+  OpenWebText(size_t context_length, DType_t dtype = DType_t::FP32,
                         int padding_token_id = -1)
       : allocator_(PoolAllocator::instance(getHost(), defaultFlowHandle)),
         dtype_(dtype),
         context_length_(context_length),
         padding_token_id_(padding_token_id) {}
 
-  ~OpenWebTextDataLoader() {
+  ~OpenWebText() {
     if (mapped_data_ != MAP_FAILED && mapped_data_ != nullptr) {
       munmap(mapped_data_, file_size_);
     }
@@ -63,7 +63,7 @@ public:
   }
 
   bool load_data(const std::string &source) override {
-    fd_ = open(source.c_str(), O_RDONLY);
+    fd_ = open((source + "train.bin").c_str(), O_RDONLY);
     if (fd_ == -1) {
       perror("Error opening file");
       return false;
@@ -86,8 +86,8 @@ public:
 
     std::cout << "Total tokens in dataset: " << total_tokens_ << std::endl;
 
-    if (!tokenizer_.load("data/open-web-text/vocab.bin")) {
-      std::cerr << "Failed to load vocab from: data/open-web-text/vocab.bin" << std::endl;
+    if (!tokenizer_.load(source + "/vocab.bin")) {
+      std::cerr << "Failed to load vocab from: " << source + "/vocab.bin" << std::endl;
       return false;
     }
     vocab_size_ = tokenizer_.vocab_size();

@@ -21,20 +21,20 @@
 
 namespace tunx {
 
-inline bool get_next_batch(BaseDataLoader &loader, BatchPrefetcher *prefetcher, size_t batch_size,
+inline bool get_next_batch(Dataset &dataset, BatchPrefetcher *prefetcher, size_t batch_size,
                            Tensor &batch_data, Tensor &batch_labels) {
   if (prefetcher) {
     return prefetcher->next(batch_data, batch_labels);
   }
-  return loader.get_batch(batch_size, batch_data, batch_labels);
+  return dataset.get_batch(batch_size, batch_data, batch_labels);
 }
 
 inline Result train_semi_async_epoch(Coordinator &coordinator,
-                                     std::unique_ptr<BaseDataLoader> &train_loader,
+                                     std::unique_ptr<Dataset> &train_dataset,
                                      const std::unique_ptr<Loss> &criterion,
                                      const TrainingConfig &config, CsvLogger &logger, int epoch) {
-  train_loader->shuffle();
-  train_loader->reset();
+  train_dataset->shuffle();
+  train_dataset->reset();
 
   Tensor batch_data, batch_labels;
   size_t batch_index = 0;
@@ -53,12 +53,12 @@ inline Result train_semi_async_epoch(Coordinator &coordinator,
   std::unique_ptr<BatchPrefetcher> prefetcher;
   if (config.prefetch_data) {
     prefetcher =
-        std::make_unique<BatchPrefetcher>(*train_loader, config.batch_size, config.prefetch_depth);
+        std::make_unique<BatchPrefetcher>(*train_dataset, config.batch_size, config.prefetch_depth);
     prefetcher->start();
     std::cout << "Data prefetching enabled. Depth:" << config.prefetch_depth << std::endl;
   }
 
-  while (get_next_batch(*train_loader, prefetcher.get(), config.batch_size, batch_data,
+  while (get_next_batch(*train_dataset, prefetcher.get(), config.batch_size, batch_data,
                         batch_labels)) {
     Vec<Tensor> splitted_inputs;
     split(batch_data, splitted_inputs, config.num_microbatches);
@@ -151,11 +151,11 @@ inline Result train_semi_async_epoch(Coordinator &coordinator,
 }
 
 inline Result validate_semi_async_epoch(Coordinator &coordinator,
-                                        std::unique_ptr<BaseDataLoader> &val_loader,
+                                        std::unique_ptr<Dataset> &val_dataset,
                                         const std::unique_ptr<Loss> &criterion,
                                         const TrainingConfig &config, CsvLogger &logger,
                                         int epoch) {
-  val_loader->reset();
+  val_dataset->reset();
 
   Tensor batch_data, batch_labels;
   float total_val_loss = 0.0f;
@@ -164,7 +164,7 @@ inline Result validate_semi_async_epoch(Coordinator &coordinator,
 
   coordinator.set_training(false);
 
-  while (val_loader->get_batch(config.batch_size, batch_data, batch_labels)) {
+  while (val_dataset->get_batch(config.batch_size, batch_data, batch_labels)) {
     Vec<TensorBundle> micro_batch_inputs{TensorBundle{{{"input", batch_data}}}};
     Vec<Tensor> micro_batch_labels{std::move(batch_labels)};
     auto [val_loss, val_correct] =
@@ -195,16 +195,16 @@ inline Result validate_semi_async_epoch(Coordinator &coordinator,
   std::cout << "Validation completed." << std::endl;
   std::cout << "Average Validation Loss: " << (total_val_loss / val_batches)
             << ", Average Validation Accuracy: "
-            << (total_val_correct / val_loader->size()) * 100.0f << "%" << std::endl;
-  return {total_val_loss / val_batches, (total_val_correct / val_loader->size()) * 100.0f};
+            << (total_val_correct / val_dataset->size()) * 100.0f << "%" << std::endl;
+  return {total_val_loss / val_batches, (total_val_correct / val_dataset->size()) * 100.0f};
 }
 
 inline void train_semi_async_step(Coordinator &coordinator,
-                                  std::unique_ptr<BaseDataLoader> &train_loader,
+                                  std::unique_ptr<Dataset> &train_dataset,
                                   const std::unique_ptr<Loss> &criterion,
                                   const TrainingConfig &config, CsvLogger &logger) {
-  train_loader->shuffle();
-  train_loader->reset();
+  train_dataset->shuffle();
+  train_dataset->reset();
 
   Tensor batch_data, batch_labels;
   int accumulation_steps = 0;
@@ -221,7 +221,7 @@ inline void train_semi_async_step(Coordinator &coordinator,
   auto start_prefetcher = [&]() {
     prefetcher.reset();
     if (config.prefetch_data) {
-      prefetcher = std::make_unique<BatchPrefetcher>(*train_loader, config.batch_size,
+      prefetcher = std::make_unique<BatchPrefetcher>(*train_dataset, config.batch_size,
                                                      config.prefetch_depth);
       prefetcher->start();
     }
@@ -229,15 +229,15 @@ inline void train_semi_async_step(Coordinator &coordinator,
   start_prefetcher();
 
   for (int step = 0; step < config.max_steps; ++step) {
-    if (!get_next_batch(*train_loader, prefetcher.get(), config.batch_size, batch_data,
+    if (!get_next_batch(*train_dataset, prefetcher.get(), config.batch_size, batch_data,
                         batch_labels)) {
       if (prefetcher) {
         prefetcher->stop();
       }
-      train_loader->shuffle();
-      train_loader->reset();
+      train_dataset->shuffle();
+      train_dataset->reset();
       start_prefetcher();
-      get_next_batch(*train_loader, prefetcher.get(), config.batch_size, batch_data, batch_labels);
+      get_next_batch(*train_dataset, prefetcher.get(), config.batch_size, batch_data, batch_labels);
     }
 
     Vec<Tensor> splitted_inputs;
@@ -323,8 +323,8 @@ inline void train_semi_async_step(Coordinator &coordinator,
   std::cout << "\nTraining completed in " << train_duration.count() << " milliseconds" << std::endl;
 }
 
-inline void train_model(Coordinator &coordinator, std::unique_ptr<BaseDataLoader> &train_loader,
-                        std::unique_ptr<BaseDataLoader> &val_loader,
+inline void train_model(Coordinator &coordinator, std::unique_ptr<Dataset> &train_dataset,
+                        std::unique_ptr<Dataset> &val_dataset,
                         const std::unique_ptr<Loss> &criterion,
                         TrainingConfig config = TrainingConfig()) {
   coordinator.start_profiling();
@@ -343,11 +343,11 @@ inline void train_model(Coordinator &coordinator, std::unique_ptr<BaseDataLoader
 
         auto train_start = std::chrono::high_resolution_clock::now();
         auto [train_loss, train_acc] =
-            train_semi_async_epoch(coordinator, train_loader, criterion, config, logger, epoch + 1);
+            train_semi_async_epoch(coordinator, train_dataset, criterion, config, logger, epoch + 1);
         auto train_end = std::chrono::high_resolution_clock::now();
 
         auto val_start = std::chrono::high_resolution_clock::now();
-        auto [val_loss, val_acc] = validate_semi_async_epoch(coordinator, val_loader, criterion,
+        auto [val_loss, val_acc] = validate_semi_async_epoch(coordinator, val_dataset, criterion,
                                                              config, logger, epoch + 1);
         auto val_end = std::chrono::high_resolution_clock::now();
 
@@ -384,9 +384,9 @@ inline void train_model(Coordinator &coordinator, std::unique_ptr<BaseDataLoader
     } else {
       TrainingConfig batch_config = config;
       if (batch_config.max_steps <= 0) {
-        batch_config.max_steps = static_cast<int64>(train_loader->size());
+        batch_config.max_steps = static_cast<int64>(train_dataset->size());
       }
-      train_semi_async_step(coordinator, train_loader, criterion, batch_config, logger);
+      train_semi_async_step(coordinator, train_dataset, criterion, batch_config, logger);
     }
 
     coordinator.fetch_profiling();

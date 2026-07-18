@@ -198,7 +198,7 @@ void TrainingConfig::load_from_json(const string &config_path) {
   if (config.contains("loss")) parse_loss_json(config["loss"], loss_config);
 }
 
-static Result train_epoch(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
+static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
                           unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
                           unique_ptr<Scheduler> &scheduler, const TrainingConfig &config,
                           CsvLogger &logger, int epoch) {
@@ -209,8 +209,8 @@ static Result train_epoch(Graph &graph, unique_ptr<BaseDataLoader> &train_loader
 
   cout << "Starting training epoch..." << endl;
   graph.set_mode(ExecutionMode::TRAIN);
-  train_loader->shuffle();
-  train_loader->reset();
+  train_dataset->shuffle();
+  train_dataset->reset();
 
   float total_loss = 0.0;
   int total_corrects = 0;
@@ -221,7 +221,7 @@ static Result train_epoch(Graph &graph, unique_ptr<BaseDataLoader> &train_loader
   std::unique_ptr<BatchPrefetcher> prefetcher;
   if (config.prefetch_data) {
     prefetcher =
-        std::make_unique<BatchPrefetcher>(*train_loader, config.batch_size, config.prefetch_depth);
+        std::make_unique<BatchPrefetcher>(*train_dataset, config.batch_size, config.prefetch_depth);
     prefetcher->start();
     cout << "Data prefetching enabled. Depth: " << config.prefetch_depth << endl;
   }
@@ -230,10 +230,10 @@ static Result train_epoch(Graph &graph, unique_ptr<BaseDataLoader> &train_loader
     if (prefetcher) {
       return prefetcher->next(data, labels);
     }
-    return train_loader->get_batch(config.batch_size, data, labels);
+    return train_dataset->get_batch(config.batch_size, data, labels);
   };
 
-  cout << "Training batches: " << train_loader->size() << endl;
+  cout << "Training batches: " << train_dataset->size() << endl;
   while (get_next(batch_data, batch_labels) &&
          (config.max_steps == -1 || num_batches < config.max_steps)) {
     auto batch_start = chrono::high_resolution_clock::now();
@@ -340,8 +340,8 @@ static Result train_epoch(Graph &graph, unique_ptr<BaseDataLoader> &train_loader
   return {avg_train_loss, avg_train_accuracy};
 }
 
-static void train_val(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
-                      unique_ptr<BaseDataLoader> &val_loader, unique_ptr<Optimizer> &optimizer,
+static void train_val(Graph &graph, unique_ptr<Dataset> &train_dataset,
+                      unique_ptr<Dataset> &val_dataset, unique_ptr<Optimizer> &optimizer,
                       const unique_ptr<Loss> &criterion, unique_ptr<Scheduler> &scheduler,
                       const TrainingConfig &config) {
   ThreadWrapper thread_wrapper({config.num_threads});
@@ -356,11 +356,11 @@ static void train_val(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
 
       // train phrase
       auto [avg_train_loss, avg_train_accuracy] = train_epoch(
-          graph, train_loader, optimizer, criterion, scheduler, config, logger, epoch + 1);
+          graph, train_dataset, optimizer, criterion, scheduler, config, logger, epoch + 1);
 
       // validation phrase
       auto [avg_val_loss, avg_val_accuracy] =
-          validate_model(graph, val_loader, criterion, config, &logger, epoch + 1);
+          validate_model(graph, val_dataset, criterion, config, &logger, epoch + 1);
 
       if (avg_val_accuracy > best_val_accuracy) {
         best_val_accuracy = avg_val_accuracy;
@@ -408,7 +408,7 @@ static void train_val(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
   thread_wrapper.clean_buffers();
 }
 
-static void train_step(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
+static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
                        const unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
                        const unique_ptr<Scheduler> &scheduler, const TrainingConfig &config) {
   ThreadWrapper thread_wrapper({config.num_threads});
@@ -416,8 +416,8 @@ static void train_step(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
   Tensor batch_data, batch_labels;
   cout << "Starting training epoch..." << endl;
   graph.set_mode(ExecutionMode::TRAIN);
-  train_loader->shuffle();
-  train_loader->reset();
+  train_dataset->shuffle();
+  train_dataset->reset();
 
   const Device &model_device = graph.device();
   auto &mem_pool = PoolAllocator::instance(model_device, defaultFlowHandle);
@@ -426,14 +426,14 @@ static void train_step(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
   const std::string artifact_name = training_artifact_name(config);
   CsvLogger logger("tunx_" + artifact_name, config.log_dir, &config.log_mode);
 
-  train_loader->reset();
+  train_dataset->reset();
   auto start_time = chrono::high_resolution_clock::now();
 
   std::unique_ptr<BatchPrefetcher> prefetcher;
   auto start_prefetcher = [&]() {
     prefetcher.reset();
     if (config.prefetch_data) {
-      prefetcher = std::make_unique<BatchPrefetcher>(*train_loader, config.batch_size,
+      prefetcher = std::make_unique<BatchPrefetcher>(*train_dataset, config.batch_size,
                                                      config.prefetch_depth);
       prefetcher->start();
     }
@@ -447,7 +447,7 @@ static void train_step(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
     if (prefetcher) {
       return prefetcher->next(data, labels);
     }
-    return train_loader->get_batch(config.batch_size, data, labels);
+    return train_dataset->get_batch(config.batch_size, data, labels);
   };
 
   thread_wrapper.execute([&]() -> void {
@@ -456,8 +456,8 @@ static void train_step(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
         if (prefetcher) {
           prefetcher->stop();
         }
-        train_loader->shuffle();
-        train_loader->reset();
+        train_dataset->shuffle();
+        train_dataset->reset();
         start_prefetcher();
         if (!get_next(batch_data, batch_labels)) {
           break;
@@ -568,16 +568,16 @@ static void train_step(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
   });
 }
 
-void train_model(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
-                 unique_ptr<BaseDataLoader> &val_loader, unique_ptr<Optimizer> &optimizer,
+void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset,
+                 unique_ptr<Dataset> &val_dataset, unique_ptr<Optimizer> &optimizer,
                  const unique_ptr<Loss> &criterion, unique_ptr<Scheduler> &scheduler,
                  const TrainingConfig &config) {
   optimizer->attach(graph);
 
-  cout << "Training batches: " << train_loader->size() / config.batch_size << endl;
-  cout << "Validation batches: " << val_loader->size() / config.batch_size << endl;
+  cout << "Training batches: " << train_dataset->size() / config.batch_size << endl;
+  cout << "Validation batches: " << val_dataset->size() / config.batch_size << endl;
 
-  vector<size_t> data_shape = train_loader->get_data_shape();
+  vector<size_t> data_shape = train_dataset->get_data_shape();
   data_shape.insert(data_shape.begin(), config.batch_size);  // add batch dim
 
   graph.set_io_dtype(config.io_dtype);
@@ -587,19 +587,19 @@ void train_model(Graph &graph, unique_ptr<BaseDataLoader> &train_loader,
   bool is_val = config.max_steps == -1;
 
   if (is_val) {
-    train_val(graph, train_loader, val_loader, optimizer, criterion, scheduler, config);
+    train_val(graph, train_dataset, val_dataset, optimizer, criterion, scheduler, config);
   } else {
-    train_step(graph, train_loader, optimizer, criterion, scheduler, config);
+    train_step(graph, train_dataset, optimizer, criterion, scheduler, config);
   }
 }
 
-Result validate_model(Graph &graph, unique_ptr<BaseDataLoader> &val_loader,
+Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
                       const unique_ptr<Loss> &criterion, const TrainingConfig &config,
                       CsvLogger *logger, int epoch) {
   Tensor batch_data, batch_labels;
 
   graph.set_mode(ExecutionMode::EVAL);
-  val_loader->reset();
+  val_dataset->reset();
 
   cout << "Starting validation..." << endl;
   double val_loss = 0.0;
@@ -609,7 +609,7 @@ Result validate_model(Graph &graph, unique_ptr<BaseDataLoader> &val_loader,
 
   Tensor device_batch_labels;
 
-  while (val_loader->get_batch(config.batch_size, batch_data, batch_labels)) {
+  while (val_dataset->get_batch(config.batch_size, batch_data, batch_labels)) {
     Tensor device_input = batch_data.to_device(model_device);
     TensorBundle inputs{{"input", device_input}};
     TensorBundle outputs = graph.forward(inputs);
@@ -654,7 +654,7 @@ Result validate_model(Graph &graph, unique_ptr<BaseDataLoader> &val_loader,
   }
 
   double avg_val_loss = val_loss / val_batches;
-  double avg_val_accuracy = val_corrects / val_loader->size();
+  double avg_val_accuracy = val_corrects / val_dataset->size();
 
   return {avg_val_loss, avg_val_accuracy};
 }

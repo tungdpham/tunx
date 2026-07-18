@@ -1,7 +1,7 @@
 #include <iostream>
 #include <memory>
 
-#include "data_loading/data_loader_factory.hpp"
+#include "data_loading/dataset_factory.hpp"
 #include "device/device_manager.hpp"
 #include "device/flow.hpp"
 #include "device/pool_allocator.hpp"
@@ -96,13 +96,13 @@ signed main() {
 
   // auto graph = make_mlp(device);
 
-  auto [train_loader, val_loader] =
-      DataLoaderFactory::create("open-web-text", "../data/mnist", DType_t::BF16);
-  if (!train_loader || !val_loader) {
+  auto [train_dataset, val_dataset] =
+      DatasetFactory::create("open-web-text", "../data/mnist", DType_t::BF16);
+  if (!train_dataset || !val_dataset) {
     cerr << "Failed to create data loaders for MNIST dataset" << endl;
     return 1;
   }
-  train_loader->set_seed(123456);
+  train_dataset->set_seed(123456);
 
   Tensor data, labels;
 
@@ -113,13 +113,13 @@ signed main() {
 
   int epochs = 20;
   for (int i = 0; i < epochs; ++i) {
-    train_loader->shuffle();
-    train_loader->reset();
+    train_dataset->shuffle();
+    train_dataset->reset();
 
     graph.set_mode(ExecutionMode::TRAIN);
     int batch_idx = 0;
     // train
-    while (train_loader->get_batch(256, data, labels)) {
+    while (train_dataset->get_batch(256, data, labels)) {
       data = data.to_device(device);
       labels = labels.to_device(device);
 
@@ -168,12 +168,12 @@ signed main() {
     }
 
     graph.set_mode(ExecutionMode::EVAL);
-    val_loader->reset();
+    val_dataset->reset();
     // validation
     float total_val_loss = 0.0f;
     int val_samples = 0;
     int val_corrects = 0;
-    while (val_loader->get_batch(256, data, labels)) {
+    while (val_dataset->get_batch(256, data, labels)) {
       data = data.to_device(device);
       labels = labels.to_device(device);
       auto input_map = TensorBundle({

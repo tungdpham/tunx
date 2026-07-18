@@ -13,12 +13,12 @@
 #include <string>
 #include <vector>
 
-#include "data_loader.hpp"
+#include "dataset.hpp"
 
 namespace tunx {
 
 // needs an overhaul
-class WiFiDataLoader : public BaseDataLoader {
+class WiFi : public Dataset {
 private:
   Vec<Vec<float>> features_;
   Vec<Vec<float>> targets_;
@@ -34,7 +34,7 @@ private:
   bool is_normalized_;
 
 public:
-  WiFiDataLoader(bool is_regression = true)
+  WiFi(bool is_regression = true)
       : num_features_(0),
         num_outputs_(0),
         is_regression_(is_regression),

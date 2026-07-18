@@ -2,7 +2,7 @@
 
 #include <memory>
 
-#include "data_loading/data_loader_factory.hpp"
+#include "data_loading/dataset_factory.hpp"
 #include "device/device_manager.hpp"
 #include "nn/example_graphs.hpp"
 #include "nn/graph.hpp"
@@ -58,13 +58,13 @@ signed main(int argc, char *argv[]) {
   if (train_config.dataset_name.empty()) {
     throw std::runtime_error("DATASET_NAME environment variable is not set!");
   }
-  auto [train_loader, val_loader] = DataLoaderFactory::create(
+  auto [train_dataset, val_dataset] = DatasetFactory::create(
       train_config.dataset_name, train_config.dataset_path, train_config.io_dtype);
-  if (!train_loader || !val_loader) {
+  if (!train_dataset || !val_dataset) {
     cerr << "Failed to create data loaders for dataset: " << train_config.dataset_name << endl;
     return 1;
   }
-  train_loader->set_seed(123456);
+  train_dataset->set_seed(123456);
 
   Graph graph = load_or_create_graph(train_config.model_name, train_config.model_path, allocator);
 
@@ -76,7 +76,7 @@ signed main(int argc, char *argv[]) {
       SchedulerFactory::create_from_config(train_config.scheduler_config, optimizer.get());
 
   try {
-    train_model(graph, train_loader, val_loader, optimizer, criterion, scheduler, train_config);
+    train_model(graph, train_dataset, val_dataset, optimizer, criterion, scheduler, train_config);
   } catch (const std::exception &e) {
     cerr << "Training failed: " << e.what() << endl;
     return 1;

@@ -1,30 +1,30 @@
 #pragma once
 
-#include "data_loading/data_loader.hpp"
+#include "data_loading/dataset.hpp"
 
 namespace tunx {
 
 /**
- * A pair of data loaders for training and validation/testing
+ * A pair of data datasets for training and validation/testing
  */
-struct DataLoaderPair {
-  std::unique_ptr<BaseDataLoader> train;
-  std::unique_ptr<BaseDataLoader> val;
+struct DatasetPair {
+  std::unique_ptr<Dataset> train;
+  std::unique_ptr<Dataset> val;
 };
 
 /**
- * Factory class for creating data loaders by string name
+ * Factory class for creating data datasets by string name
  */
-class DataLoaderFactory {
+class DatasetFactory {
 public:
   /**
-   * Create a pair of data loaders (train and val) for a given dataset type
+   * Create a pair of data datasets (train and val) for a given dataset type
    * @param dataset_type Type of dataset (e.g., "mnist", "cifar10", "cifar100", "tiny_imagenet",
    * "imagenet100")
    * @param dataset_path Path to the dataset directory or file
-   * @return DataLoaderPair containing the created loaders
+   * @return DatasetPair containing the created datasets
    */
-  static DataLoaderPair create(const std::string &dataset_type, const std::string &dataset_path,
+  static DatasetPair create(const std::string &dataset_type, const std::string &dataset_path,
                                DType_t io_dtype_ = DType_t::FP32);
 
   /**

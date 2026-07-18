@@ -1,7 +1,7 @@
 /*
- * Batch-level asynchronous prefetcher for tunx data loaders.
+ * Batch-level asynchronous prefetcher for tunx data datasets.
  *
- * This wraps an existing BaseDataLoader and overlaps get_batch(batch N+1)
+ * This wraps an existing Dataset and overlaps get_batch(batch N+1)
  * with model compute/communication for batch N. It does not change dataset
  * semantics; it only moves get_batch calls to one background producer thread.
  */
@@ -14,7 +14,7 @@
 #include <mutex>
 #include <thread>
 
-#include "data_loading/data_loader.hpp"
+#include "data_loading/dataset.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
@@ -27,8 +27,8 @@ public:
     bool valid = false;
   };
 
-  BatchPrefetcher(BaseDataLoader &loader, size_t batch_size, size_t prefetch_depth = 2)
-      : loader_(loader),
+  BatchPrefetcher(Dataset &dataset, size_t batch_size, size_t prefetch_depth = 2)
+      : dataset_(dataset),
         batch_size_(batch_size),
         prefetch_depth_(prefetch_depth > 0 ? prefetch_depth : 1) {}
 
@@ -109,7 +109,7 @@ private:
         }
 
         Batch batch;
-        batch.valid = loader_.get_batch(batch_size_, batch.data, batch.labels);
+        batch.valid = dataset_.get_batch(batch_size_, batch.data, batch.labels);
 
         if (batch.valid) {
           batch.data = batch.data.clone();
@@ -138,7 +138,7 @@ private:
     }
   }
 
-  BaseDataLoader &loader_;
+  Dataset &dataset_;
   size_t batch_size_;
   size_t prefetch_depth_;
 

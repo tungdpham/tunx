@@ -17,7 +17,7 @@
 #include <numeric>
 #include <string>
 
-#include "data_loading/image_data_loader.hpp"
+#include "data_loading/dataset.hpp"
 #include "tensor/tensor.hpp"
 
 namespace cifar100_constants {
@@ -33,12 +33,12 @@ constexpr size_t RECORD_SIZE = 1 + 1 + IMAGE_SIZE;
 
 namespace tunx {
 /**
- * Enhanced CIFAR-100 data loader for binary format adapted for CNN (2D RGB images)
+ * Enhanced CIFAR-100 data dataset for binary format adapted for CNN (2D RGB images)
  * NHWC format: (Batch, Height, Width, Channels)
  * Uses memory-mapped I/O for lazy loading — only pages that are actually
  * accessed are brought into RAM, keeping the full dataset off-heap.
  */
-class CIFAR100DataLoader : public ImageDataLoader {
+class CIFAR100 : public Dataset {
 private:
   struct MappedFile {
     int fd = -1;
@@ -178,13 +178,13 @@ private:
   }
 
 public:
-  explicit CIFAR100DataLoader(bool use_coarse_labels = false, DType_t dtype = DType_t::FP32)
-      : ImageDataLoader(),
+  explicit CIFAR100(bool use_coarse_labels = false, DType_t dtype = DType_t::FP32)
+      : Dataset(),
         use_coarse_labels_(use_coarse_labels),
         allocator_(PoolAllocator::instance(getHost(), defaultFlowHandle)),
         dtype_(dtype) {}
 
-  virtual ~CIFAR100DataLoader() { cleanup_maps(); }
+  virtual ~CIFAR100() { cleanup_maps(); }
 
   /**
    * Load CIFAR-100 data from a single binary file.
@@ -233,15 +233,6 @@ public:
             cifar100_constants::NUM_CHANNELS};
   }
 
-  int get_num_classes() const override {
-    return use_coarse_labels_ ? static_cast<int>(cifar100_constants::NUM_COARSE_CLASSES)
-                              : static_cast<int>(cifar100_constants::NUM_CLASSES);
-  }
-
-  Vec<std::string> get_class_names() const override {
-    return use_coarse_labels_ ? coarse_class_names_ : fine_class_names_;
-  }
-
   void set_use_coarse_labels(bool use_coarse) { use_coarse_labels_ = use_coarse; }
 
   void print_data_stats() const override {
@@ -271,18 +262,17 @@ public:
     std::cout << "Number of classes: " << num_classes << std::endl;
   }
 
-  static void create(const std::string &data_path, CIFAR100DataLoader &train_loader,
-                     CIFAR100DataLoader &test_loader) {
+  static void create(const std::string &data_path, CIFAR100 &train_dataset, CIFAR100 &test_dataset) {
     const std::string fine_labels = data_path + "/cifar-100-binary/fine_label_names.txt";
     const std::string coarse_labels = data_path + "/cifar-100-binary/coarse_label_names.txt";
-    train_loader.set_label_files(fine_labels, coarse_labels);
-    test_loader.set_label_files(fine_labels, coarse_labels);
+    train_dataset.set_label_files(fine_labels, coarse_labels);
+    test_dataset.set_label_files(fine_labels, coarse_labels);
 
-    if (!train_loader.load_data(data_path + "/cifar-100-binary/train.bin")) {
+    if (!train_dataset.load_data(data_path + "/cifar-100-binary/train.bin")) {
       throw std::runtime_error("Failed to load training data!");
     }
 
-    if (!test_loader.load_data(data_path + "/cifar-100-binary/test.bin")) {
+    if (!test_dataset.load_data(data_path + "/cifar-100-binary/test.bin")) {
       throw std::runtime_error("Failed to load test data!");
     }
   }

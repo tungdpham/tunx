@@ -4,7 +4,7 @@
 
 #include <iostream>
 
-#include "data_loading/data_loader_factory.hpp"
+#include "data_loading/dataset_factory.hpp"
 #include "distributed/roce_worker.hpp"
 #include "distributed/train.hpp"
 #include "nn/example_graphs.hpp"
@@ -69,9 +69,9 @@ int main(int argc, char *argv[]) {
   if (train_config.dataset_name.empty()) {
     throw std::runtime_error("dataset_name variable is not set!");
   }
-  auto [train_loader, val_loader] =
-      DataLoaderFactory::create(train_config.dataset_name, train_config.dataset_path);
-  if (!train_loader || !val_loader) {
+  auto [train_dataset, val_dataset] =
+      DatasetFactory::create(train_config.dataset_name, train_config.dataset_path);
+  if (!train_dataset || !val_dataset) {
     cerr << "Failed to create data loaders for model: " << train_config.model_name << endl;
     return 1;
   }
@@ -118,7 +118,7 @@ int main(int argc, char *argv[]) {
   }
 
   try {
-    train_model(coordinator, train_loader, val_loader, criterion, train_config);
+    train_model(coordinator, train_dataset, val_dataset, criterion, train_config);
     std::cout << "Coordinator initialized successfully." << std::endl;
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;

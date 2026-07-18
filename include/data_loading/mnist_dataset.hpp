@@ -16,7 +16,7 @@
 #include <numeric>
 #include <string>
 
-#include "data_loading/image_data_loader.hpp"
+#include "data_loading/dataset.hpp"
 #include "device/iallocator.hpp"
 #include "tensor/tensor.hpp"
 
@@ -31,14 +31,14 @@ constexpr float NORMALIZATION_FACTOR = 255.0f;
 
 namespace tunx {
 /**
- * Enhanced MNIST data loader for CSV format adapted for CNN (2D images)
+ * Enhanced MNIST data dataset for CSV format adapted for CNN (2D images)
  * NHWC format: (Batch, Height, Width, Channels)
  *
  * Uses memory-mapped I/O + a line-position index built at load time.
  * Only the line-start offsets (~480 KB for 60 k rows) are kept in RAM;
  * the raw CSV bytes stay on disk and are paged in by the OS on demand.
  */
-class MNISTDataLoader : public ImageDataLoader {
+class MNIST : public Dataset {
 private:
   int fd_ = -1;
   const char *mapped_ = nullptr;
@@ -191,12 +191,12 @@ private:
   }
 
 public:
-  explicit MNISTDataLoader(DType_t dtype = DType_t::FP32)
-      : ImageDataLoader(),
+  explicit MNIST(DType_t dtype = DType_t::FP32)
+      : Dataset(),
         allocator_(PoolAllocator::instance(getHost(), defaultFlowHandle)),
         dtype_(dtype) {}
 
-  virtual ~MNISTDataLoader() { cleanup_map(); }
+  virtual ~MNIST() { cleanup_map(); }
 
   /**
    * Lazy-map MNIST data from a CSV file.
@@ -226,9 +226,9 @@ public:
             mnist_constants::NUM_CHANNELS};
   }
 
-  int get_num_classes() const override { return static_cast<int>(mnist_constants::NUM_CLASSES); }
+  int get_num_classes() const { return static_cast<int>(mnist_constants::NUM_CLASSES); }
 
-  Vec<std::string> get_class_names() const override {
+  Vec<std::string> get_class_names() const {
     return {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
   }
 
@@ -243,12 +243,12 @@ public:
               << mnist_constants::IMAGE_WIDTH << "x" << mnist_constants::NUM_CHANNELS << std::endl;
   }
 
-  static void create(const std::string &data_path, MNISTDataLoader &train_loader,
-                     MNISTDataLoader &test_loader) {
-    if (!train_loader.load_data(data_path + "/mnist_train.csv")) {
+  static void create(const std::string &data_path, MNIST &train_dataset,
+                     MNIST &test_dataset) {
+    if (!train_dataset.load_data(data_path + "/mnist_train.csv")) {
       throw std::runtime_error("Failed to load training data!");
     }
-    if (!test_loader.load_data(data_path + "/mnist_test.csv")) {
+    if (!test_dataset.load_data(data_path + "/mnist_test.csv")) {
       throw std::runtime_error("Failed to load test data!");
     }
   }

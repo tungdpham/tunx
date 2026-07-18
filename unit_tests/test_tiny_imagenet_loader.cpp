@@ -2,7 +2,7 @@
 
 #include <iostream>
 
-#include "data_loading/tiny_imagenet_data_loader.hpp"
+#include "data_loading/tiny_imagenet_dataset.hpp"
 
 using namespace tunx;
 
@@ -10,8 +10,8 @@ using namespace tunx;
 class TinyImageNetLoaderTest : public ::testing::Test {
 protected:
   static std::string dataset_path;
-  static TinyImageNetDataLoader train_loader;
-  static TinyImageNetDataLoader val_loader;
+  static TinyImageNet train_dataset;
+  static TinyImageNet val_dataset;
   static bool data_loaded;
 
   static void SetUpTestSuite() {
@@ -19,55 +19,55 @@ protected:
       std::cout << "\n=== Loading datasets once for all tests ===\n" << std::endl;
 
       std::cout << "Loading training data..." << std::endl;
-      ASSERT_TRUE(train_loader.load_data(dataset_path, true)) << "Failed to load training data";
-      std::cout << "Loaded " << train_loader.size() << " training samples\n" << std::endl;
+      ASSERT_TRUE(train_dataset.load_data(dataset_path, true)) << "Failed to load training data";
+      std::cout << "Loaded " << train_dataset.size() << " training samples\n" << std::endl;
 
       std::cout << "Loading validation data..." << std::endl;
-      ASSERT_TRUE(val_loader.load_data(dataset_path, false)) << "Failed to load validation data";
-      std::cout << "Loaded " << val_loader.size() << " validation samples\n" << std::endl;
+      ASSERT_TRUE(val_dataset.load_data(dataset_path, false)) << "Failed to load validation data";
+      std::cout << "Loaded " << val_dataset.size() << " validation samples\n" << std::endl;
 
       data_loaded = true;
     }
   }
 
   void SetUp() override {
-    // Reset loaders before each test
-    train_loader.reset();
-    val_loader.reset();
+    // Reset datasets before each test
+    train_dataset.reset();
+    val_dataset.reset();
   }
 };
 
 // Initialize static members
 std::string TinyImageNetLoaderTest::dataset_path = "data/tiny-imagenet-200";
-TinyImageNetDataLoader TinyImageNetLoaderTest::train_loader;
-TinyImageNetDataLoader TinyImageNetLoaderTest::val_loader;
+TinyImageNet TinyImageNetLoaderTest::train_dataset;
+TinyImageNet TinyImageNetLoaderTest::val_dataset;
 bool TinyImageNetLoaderTest::data_loaded = false;
 
 TEST_F(TinyImageNetLoaderTest, TrainingDataSize) {
   // Check expected number of training samples (200 classes * 500 images)
-  EXPECT_EQ(train_loader.size(), 100000) << "Expected 100,000 training samples";
+  EXPECT_EQ(train_dataset.size(), 100000) << "Expected 100,000 training samples";
 }
 
 TEST_F(TinyImageNetLoaderTest, ValidationDataSize) {
   // Check expected number of validation samples
-  EXPECT_EQ(val_loader.size(), 10000) << "Expected 10,000 validation samples";
+  EXPECT_EQ(val_dataset.size(), 10000) << "Expected 10,000 validation samples";
 }
 
 TEST_F(TinyImageNetLoaderTest, ImageShape) {
-  auto shape = train_loader.get_data_shape();
+  auto shape = train_dataset.get_data_shape();
   ASSERT_EQ(shape.size(), 3);
   EXPECT_EQ(shape[0], 64);  // Height
   EXPECT_EQ(shape[1], 64);  // Width
   EXPECT_EQ(shape[2], 3);   // Channels
 }
 
-TEST_F(TinyImageNetLoaderTest, NumClasses) { EXPECT_EQ(train_loader.get_num_classes(), 200); }
+TEST_F(TinyImageNetLoaderTest, NumClasses) { EXPECT_EQ(train_dataset.get_num_classes(), 200); }
 
 TEST_F(TinyImageNetLoaderTest, BatchRetrieval) {
   Tensor batch_data, batch_labels;
   size_t batch_size = 32;
 
-  ASSERT_TRUE(train_loader.get_batch(batch_size, batch_data, batch_labels));
+  ASSERT_TRUE(train_dataset.get_batch(batch_size, batch_data, batch_labels));
 
   // Check batch shapes
   EXPECT_EQ(batch_data.shape()[0], batch_size);
@@ -81,7 +81,7 @@ TEST_F(TinyImageNetLoaderTest, BatchRetrieval) {
 
 TEST_F(TinyImageNetLoaderTest, OneHotLabels) {
   Tensor batch_data, batch_labels;
-  ASSERT_TRUE(train_loader.get_batch(16, batch_data, batch_labels));
+  ASSERT_TRUE(train_dataset.get_batch(16, batch_data, batch_labels));
 
   // Verify one-hot encoding
   for (size_t i = 0; i < 16; ++i) {
@@ -102,12 +102,12 @@ TEST_F(TinyImageNetLoaderTest, OneHotLabels) {
 TEST_F(TinyImageNetLoaderTest, ShuffleAndReset) {
   // Get first batch
   Tensor batch1_data, batch1_labels;
-  train_loader.get_batch(4, batch1_data, batch1_labels);
+  train_dataset.get_batch(4, batch1_data, batch1_labels);
 
   // Reset and get first batch again - should be identical
-  train_loader.reset();
+  train_dataset.reset();
   Tensor batch2_data, batch2_labels;
-  train_loader.get_batch(4, batch2_data, batch2_labels);
+  train_dataset.get_batch(4, batch2_data, batch2_labels);
 
   // Compare first samples
   bool identical = true;
@@ -120,10 +120,10 @@ TEST_F(TinyImageNetLoaderTest, ShuffleAndReset) {
   EXPECT_TRUE(identical) << "Reset should return to beginning";
 
   // Shuffle and verify it changes
-  train_loader.shuffle();
-  train_loader.reset();
+  train_dataset.shuffle();
+  train_dataset.reset();
   Tensor batch3_data, batch3_labels;
-  train_loader.get_batch(4, batch3_data, batch3_labels);
+  train_dataset.get_batch(4, batch3_data, batch3_labels);
 
   bool changed = false;
   for (size_t i = 0; i < batch1_data.size(); ++i) {
@@ -136,8 +136,8 @@ TEST_F(TinyImageNetLoaderTest, ShuffleAndReset) {
 }
 
 TEST_F(TinyImageNetLoaderTest, ClassIdsAndNames) {
-  auto class_ids = train_loader.get_class_ids();
-  auto class_names = train_loader.get_class_names();
+  auto class_ids = train_dataset.get_class_ids();
+  auto class_names = train_dataset.get_class_names();
 
   EXPECT_EQ(class_ids.size(), 200);
   EXPECT_EQ(class_names.size(), 200);

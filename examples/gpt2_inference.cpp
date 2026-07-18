@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-#include "data_loading/open_webtext_data_loader.hpp"
+#include "data_loading/open_webtext_dataset.hpp"
 #include "nn/example_graphs.hpp"
 #include "tensor/tensor.hpp"
 #include "tokenizer/tokenizer.hpp"
@@ -39,16 +39,16 @@ int main(int argc, char **argv) {
 
   size_t seq_len = 512;
 
-  OpenWebTextDataLoader loader(seq_len);
-  if (!loader.load_data(data_path)) {
+  OpenWebText dataset(seq_len);
+  if (!dataset.load_data(data_path)) {
     cerr << "Could not load data for prompt from: " << data_path << endl;
     return 1;
   }
 
   Tensor raw_input, raw_target;
-  loader.shuffle();
-  if (!loader.get_batch(1, raw_input, raw_target)) {
-    cerr << "Failed to get a batch from data loader." << endl;
+  dataset.shuffle();
+  if (!dataset.get_batch(1, raw_input, raw_target)) {
+    cerr << "Failed to get a batch from data dataset." << endl;
     return 1;
   }
 

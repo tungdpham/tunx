@@ -15,7 +15,7 @@
 #include <sstream>
 #include <string>
 
-#include "data_loading/image_data_loader.hpp"
+#include "data_loading/dataset.hpp"
 #include "tensor/tensor.hpp"
 #include "threading/thread_handler.hpp"
 
@@ -39,7 +39,7 @@ constexpr size_t IMAGE_SIZE = NUM_CHANNELS * IMAGE_HEIGHT * IMAGE_WIDTH;
 
 namespace tunx {
 /**
- * Tiny ImageNet-200 data loader for JPEG format adapted for CNN (2D RGB images)
+ * Tiny ImageNet-200 data dataset for JPEG format adapted for CNN (2D RGB images)
  * NHWC format: (Batch, Height, Width, Channels)
  *
  * Uses lazy loading: only the file paths and labels are stored in memory.
@@ -52,7 +52,7 @@ namespace tunx {
  * - 50 validation images per class (10,000 total)
  * - Images are 64x64 RGB
  */
-class TinyImageNetDataLoader : public ImageDataLoader {
+class TinyImageNet : public Dataset {
 private:
   // (image_path, class_index) — the only persistent storage per sample
   Vec<std::pair<std::string, int>> sample_list_;
@@ -278,14 +278,14 @@ private:
   }
 
 public:
-  explicit TinyImageNetDataLoader(DType_t dtype = DType_t::FP32)
-      : ImageDataLoader(),
+  explicit TinyImageNet(DType_t dtype = DType_t::FP32)
+      : Dataset(),
         allocator_(PoolAllocator::instance(getHost(), defaultFlowHandle)),
         dtype_(dtype) {
     sample_list_.reserve(100000);
   }
 
-  virtual ~TinyImageNetDataLoader() = default;
+  virtual ~TinyImageNet() = default;
 
   /**
    * Load Tiny ImageNet-200 data.
@@ -336,11 +336,11 @@ public:
             tiny_imagenet_constants::NUM_CHANNELS};
   }
 
-  int get_num_classes() const override {
+  int get_num_classes() const {
     return static_cast<int>(tiny_imagenet_constants::NUM_CLASSES);
   }
 
-  Vec<std::string> get_class_names() const override {
+  Vec<std::string> get_class_names() const {
     Vec<std::string> names;
     names.reserve(class_ids_.size());
     for (const auto &class_id : class_ids_) {
@@ -381,12 +381,12 @@ public:
     }
   }
 
-  static void create(const std::string &data_path, TinyImageNetDataLoader &train_loader,
-                     TinyImageNetDataLoader &val_loader) {
-    if (!train_loader.load_data(data_path, true)) {
+  static void create(const std::string &data_path, TinyImageNet &train_dataset,
+                     TinyImageNet &val_dataset) {
+    if (!train_dataset.load_data(data_path, true)) {
       throw std::runtime_error("Failed to index training data!");
     }
-    if (!val_loader.load_data(data_path, false)) {
+    if (!val_dataset.load_data(data_path, false)) {
       throw std::runtime_error("Failed to index validation data!");
     }
   }
