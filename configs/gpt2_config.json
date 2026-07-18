@@ -11,7 +11,7 @@
   "device_type": "CUDA",
   "model_name": "flash_gpt2_small",
   "model_path": "",
-  "dataset_name": "open_webtext",
+  "dataset_name": "open-web-text",
   "dataset_path": "data/open-web-text",
   "io_dtype": "FP32",
   "param_dtype": "FP32",

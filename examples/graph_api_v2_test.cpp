@@ -97,7 +97,7 @@ signed main() {
   // auto graph = make_mlp(device);
 
   auto [train_loader, val_loader] =
-      DataLoaderFactory::create("mnist", "../data/mnist", DType_t::BF16);
+      DataLoaderFactory::create("open-web-text", "../data/mnist", DType_t::BF16);
   if (!train_loader || !val_loader) {
     cerr << "Failed to create data loaders for MNIST dataset" << endl;
     return 1;

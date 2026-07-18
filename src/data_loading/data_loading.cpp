@@ -52,7 +52,7 @@ DataLoaderPair DataLoaderFactory::create(const std::string &dataset_type,
         val->load_data(dataset_path + "/mnist_test.csv")) {
       pair.val = std::move(val);
     }
-  } else if (dataset_type == "cifar10") {
+  } else if (dataset_type == "cifar-10") {
     auto train = std::make_unique<CIFAR10DataLoader>(io_dtype_);
     auto val = std::make_unique<CIFAR10DataLoader>(io_dtype_);
 
@@ -68,7 +68,7 @@ DataLoaderPair DataLoaderFactory::create(const std::string &dataset_type,
     if (val->load_data(dataset_path + "/test_batch.bin")) {
       pair.val = std::move(val);
     }
-  } else if (dataset_type == "cifar100") {
+  } else if (dataset_type == "cifar-100") {
     auto train = std::make_unique<CIFAR100DataLoader>(false, io_dtype_);
     auto val = std::make_unique<CIFAR100DataLoader>(false, io_dtype_);
 
@@ -90,7 +90,7 @@ DataLoaderPair DataLoaderFactory::create(const std::string &dataset_type,
     if (val->load_data(dataset_path, false)) {
       pair.val = std::move(val);
     }
-  } else if (dataset_type == "imagenet100") {
+  } else if (dataset_type == "imagenet-100") {
     auto train = std::make_unique<ImageNet100DataLoader>(io_dtype_);
     auto val = std::make_unique<ImageNet100DataLoader>(io_dtype_);
 
@@ -122,7 +122,7 @@ DataLoaderPair DataLoaderFactory::create(const std::string &dataset_type,
                                 .build());
       pair.val = std::move(val);
     }
-  } else if (dataset_type == "open_webtext") {
+  } else if (dataset_type == "open-web-text") {
     auto train = std::make_unique<OpenWebTextDataLoader>(1024, io_dtype_);
     auto val = std::make_unique<OpenWebTextDataLoader>(1024, io_dtype_);
 

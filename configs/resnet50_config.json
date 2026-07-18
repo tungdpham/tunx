@@ -12,7 +12,7 @@
   "device_type": "CUDA",
   "model_name": "imagenet100_resnet50",
   "model_path": "",
-  "dataset_name": "imagenet100",
+  "dataset_name": "imagenet-100",
   "dataset_path": "data/imagenet-100",
   "io_dtype": "FP32",
   "param_dtype": "FP32",
