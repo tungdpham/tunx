@@ -115,13 +115,8 @@ echo ""
 # clean build if requested
 if [ "$CLEAN_BUILD" = true ]; then
     echo -e "${YELLOW}Cleaning all build artifacts.${NC}"
-    find . -name "CMakeFiles" -type d -exec rm -rf {} +
-    find . -name "cmake_install.cmake" -type f -delete
-    find . -name "CMakeCache.txt" -type f -delete
-    find . -name "Makefile" -type f -delete
-    rm -rf bin/ lib/ build/ compile_commands.json
-    
-    echo "Cleaned build files from current directory and all subdirectories"
+    rm -rf build/    
+    echo "Cleaned build directory"
     echo ""
 fi
 
@@ -138,19 +133,19 @@ CMAKE_ARGS=(
     -DBUILD_DOCS="$BUILD_DOCS"
 )
 
-cmake . "${CMAKE_ARGS[@]}"
+cmake -B build -S . "${CMAKE_ARGS[@]}"
 
 # doing full build
 echo -e "${GREEN}Building project...${NC}"
 if [ "$VERBOSE" = true ]; then
-    cmake --build . --verbose
+    cmake --build build --verbose
 else
-    cmake --build . -j$(nproc)
+    cmake --build build -j$(nproc)
 fi
 
 echo -e "${GREEN}Build completed successfully!${NC}"
 echo ""
-echo -e "${YELLOW}Available executables in bin/:${NC}"
+echo -e "${YELLOW}Available executables in build/bin/:${NC}"
 echo "  - mnist_cnn_trainer"
 echo "  - cifar10_cnn_trainer"
 echo "  - cifar100_cnn_trainer"
@@ -162,5 +157,5 @@ echo "  - distributed_pipeline_docker"
 echo "  - More because I'm lazy to type them all out"
 echo ""
 echo -e "${YELLOW}To run a specific executable:${NC}"
-echo "  ./bin/mnist_cnn_trainer or ./bin/Release/mnist_cnn_trainer (Windows with MSVC)"
+echo "  ./build/bin/mnist_cnn_trainer or ./build/bin/Release/mnist_cnn_trainer (Windows with MSVC)"
 

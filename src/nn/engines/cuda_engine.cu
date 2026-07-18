@@ -2219,7 +2219,7 @@ void CUDAEngine::transpose(void* backend_handle, const TransposeStats& stats, co
     total_elements *= p.shape[i];
   }
   
-  size_t out_shape[8];
+  size_t out_shape[8] = {0};
   for(size_t i=0; i<p.ndim; ++i) out_shape[i] = p.shape[i];
   std::swap(out_shape[p.dim0], out_shape[p.dim1]);
   

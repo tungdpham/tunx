@@ -1,8 +1,12 @@
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
 #include <cudnn_frontend.h>
 #include <cudnn_graph.h>
+#pragma GCC diagnostic pop
+
 #include <fmt/core.h>
 
 #include <memory>
@@ -10,9 +14,13 @@
 #include <unordered_map>
 
 #include "cuda/helpers.cuh"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
 #include "cudnn_frontend/graph_interface.h"
 #include "cudnn_frontend/graph_properties.h"
 #include "cudnn_frontend_utils.h"
+#pragma GCC diagnostic pop
+
 #include "math/cuda/axpy.hpp"
 #include "nn/engines/cudnn_engine.hpp"
 #include "nn/stats/stats.hpp"
@@ -2860,7 +2868,7 @@ void CuDNNEngine::transpose(void* backend_handle, const TransposeStats& stats, c
     total_elements *= p.shape[i];
   }
   
-  size_t out_shape[8];
+  size_t out_shape[8] = {0};
   for(size_t i=0; i<p.ndim; ++i) out_shape[i] = p.shape[i];
   std::swap(out_shape[p.dim0], out_shape[p.dim1]);
   

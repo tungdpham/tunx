@@ -41,6 +41,21 @@ __device__ __forceinline__ T warp_reduce_sum(T val) {
 }
 
 template <typename T>
+struct MinLimit {
+  static __device__ __forceinline__ constexpr T value() { return T(-1e37); }
+};
+
+template <>
+struct MinLimit<int8> {
+  static __device__ __forceinline__ constexpr int8 value() { return -128; }
+};
+
+template <>
+struct MinLimit<int> {
+  static __device__ __forceinline__ constexpr int value() { return -2147483647 - 1; }
+};
+
+template <typename T>
 __device__ __forceinline__ T block_reduce_max(T val, T* shared) {
   int lane = threadIdx.x % 32;
   int wid = threadIdx.x / 32;
@@ -50,7 +65,7 @@ __device__ __forceinline__ T block_reduce_max(T val, T* shared) {
   if (lane == 0) shared[wid] = val;
   __syncthreads();
 
-  val = (threadIdx.x < blockDim.x / 32) ? shared[lane] : T(-1e37);
+  val = (threadIdx.x < blockDim.x / 32) ? shared[lane] : MinLimit<T>::value();
   if (wid == 0) val = warp_reduce_max(val);
 
   return val;
@@ -81,7 +96,7 @@ __global__ void fused_logsoftmax_loss_kernel(const T* logits, const int* labels,
 
   __shared__ ComputeT shared_mem[BLOCK_SIZE / 32];
 
-  ComputeT thread_max = ComputeT(-1e37);
+  ComputeT thread_max = MinLimit<ComputeT>::value();
   for (size_t c = threadIdx.x; c < num_classes; c += BLOCK_SIZE) {
     thread_max = fmaxf(thread_max, static_cast<ComputeT>(logits[base_ptr + c]));
   }
@@ -157,7 +172,7 @@ __global__ void fused_logsoftmax_gradient_kernel(
 
   __shared__ ComputeT shared_mem[BLOCK_SIZE / 32];
 
-  ComputeT thread_max = ComputeT(-1e37);
+  ComputeT thread_max = MinLimit<ComputeT>::value();
   for (size_t c = threadIdx.x; c < num_classes; c += BLOCK_SIZE) {
     thread_max = fmaxf(thread_max, static_cast<ComputeT>(logits[base_ptr + c]));
   }
