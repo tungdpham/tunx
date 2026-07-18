@@ -15,6 +15,7 @@
 #endif
 
 namespace tunx {
+namespace func {
 
 std::unique_ptr<Task> Tanh::apply(const Tensor &input, Tensor &output) const {
   if (input.shape() != output.shape()) {
@@ -93,4 +94,5 @@ std::unique_ptr<Task> Tanh::compute_gradient_impl(const Tensor &input, const Ten
   return nullptr;
 }
 
+}  // namespace func
 }  // namespace tunx

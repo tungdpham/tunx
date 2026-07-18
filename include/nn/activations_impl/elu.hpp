@@ -9,6 +9,7 @@
 #include "tensor/tensor.hpp"
 
 namespace tunx {
+namespace func {
 class ELU : public ActivationFunction {
 private:
   float alpha_;
@@ -33,4 +34,5 @@ private:
                                               Tensor &grad_input, flowHandle_t handle) const;
 };
 
+}  // namespace func
 }  // namespace tunx

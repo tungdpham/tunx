@@ -3,6 +3,7 @@
 #include <cstddef>
 
 namespace tunx {
+namespace func {
 namespace cpu {
 
 template <typename T>
@@ -12,4 +13,5 @@ template <typename T>
 void gelu_gradient(const T *input, const T *grad_output, T *grad_input, size_t size);
 
 }  // namespace cpu
+}  // namespace func
 }  // namespace tunx

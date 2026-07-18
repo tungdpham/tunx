@@ -1,0 +1,91 @@
+/*
+ * Copyright (c) 2025 Tung D. Pham
+ *
+ * This software is licensed under the MIT License. See the LICENSE file in the
+ * project root for the full license text.
+ */
+#include "nn/layers_impl/leaky_relu.hpp"
+
+#include <memory>
+#include <stdexcept>
+
+namespace tunx {
+namespace internal {
+
+LeakyReLUImpl::LeakyReLUImpl(float negative_slope, const std::string &name)
+    : SISOLayerImpl(name),
+      activation_(std::make_unique<func::LeakyReLU>(negative_slope)),
+      negative_slope_(negative_slope) {}
+
+Tensor LeakyReLUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
+  Tensor output = get_tensor(input.shape(), io_dtype_);
+
+  if (this->is_training_) {
+    Tensor mask = this->get_tensor(input.shape(), DType_t::UINT8_T);
+    residuals["mask"] = mask;
+
+    activation_->apply(input, output);
+
+    size_t num_elements = input.size();
+    if (input.device_type() == DeviceType::CPU) {
+      const float *input_data = input.data_as<float>();
+      uint8_t *mask_data = mask.data_as<uint8_t>();
+      for (size_t i = 0; i < num_elements; ++i) {
+        mask_data[i] = (input_data[i] > 0.0f) ? 1 : 0;
+      }
+    }
+#ifdef USE_CUDA
+    else if (input.device_type() == DeviceType::CUDA) {
+      throw std::runtime_error("LeakyReLUImpl: CUDA mask computation not yet implemented");
+    }
+#endif
+  } else {
+    activation_->apply(input, output);
+  }
+
+  return output;
+}
+
+Tensor LeakyReLUImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
+  Tensor &mask = residuals["mask"];
+  if (!mask) {
+    throw std::runtime_error("No cached mask found for backward pass in LeakyReLUImpl");
+  }
+
+  Tensor grad_input = get_tensor(grad_output.shape(), io_dtype_);
+
+  // Gradient: grad_input = grad_output * (mask ? 1.0 : negative_slope)
+  size_t num_elements = grad_output.size();
+  if (grad_output.device_type() == DeviceType::CPU) {
+    const float *grad_out_data = grad_output.data_as<float>();
+    const uint8_t *mask_data = mask.data_as<uint8_t>();
+    float *grad_in_data = grad_input.data_as<float>();
+    for (size_t i = 0; i < num_elements; ++i) {
+      float slope = mask_data[i] ? 1.0f : negative_slope_;
+      grad_in_data[i] = grad_out_data[i] * slope;
+    }
+  }
+#ifdef USE_CUDA
+  else if (grad_output.device_type() == DeviceType::CUDA) {
+    throw std::runtime_error("LeakyReLUImpl: CUDA backward not yet implemented");
+  }
+#endif
+
+  return grad_input;
+}
+
+LayerConfig LeakyReLUImpl::get_config() const {
+  LayerConfig config;
+  config.name = this->name_;
+  config.type = this->type();
+  config.set("negative_slope", negative_slope_);
+  return config;
+}
+
+std::shared_ptr<LeakyReLUImpl> LeakyReLUImpl::create_from_config(const LayerConfig &config) {
+  float negative_slope = config.get<float>("negative_slope", 0.01f);
+  return std::make_shared<LeakyReLUImpl>(negative_slope, config.name);
+}
+
+}  // namespace internal
+}  // namespace tunx

@@ -595,7 +595,8 @@ public:
    * @param q_data Query tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
    * @param k_data Key tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
    * @param v_data Value tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
-   * @param o_data Output tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
+   * @param o_data Output tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType:
+   * io_dtype.
    * @param stats_data Statistics tensor (e.g. softmax stats). DType: compute_dtype.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
@@ -611,12 +612,17 @@ public:
    * @param q_data Query tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
    * @param k_data Key tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
    * @param v_data Value tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
-   * @param o_data Output tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
-   * @param dO_data Gradient w.r.t output tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
+   * @param o_data Output tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType:
+   * io_dtype.
+   * @param dO_data Gradient w.r.t output tensor. Shape: [batch_size, num_heads, seq_len, head_dim],
+   * DType: io_dtype.
    * @param stats_data Statistics tensor from forward pass. DType: compute_dtype.
-   * @param dQ_data Gradient w.r.t Query tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
-   * @param dK_data Gradient w.r.t Key tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
-   * @param dV_data Gradient w.r.t Value tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
+   * @param dQ_data Gradient w.r.t Query tensor. Shape: [batch_size, num_heads, seq_len, head_dim],
+   * DType: io_dtype.
+   * @param dK_data Gradient w.r.t Key tensor. Shape: [batch_size, num_heads, seq_len, head_dim],
+   * DType: io_dtype.
+   * @param dV_data Gradient w.r.t Value tensor. Shape: [batch_size, num_heads, seq_len, head_dim],
+   * DType: io_dtype.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
@@ -625,8 +631,8 @@ public:
                 const void* stats_data, void* dQ_data, void* dK_data, void* dV_data,
                 void* workspace, DTypeDesc type_desc) override;
 
-  void transpose(void* backend_handle, const TransposeStats& stats, const void* input,
-                 void* output, void* workspace, DTypeDesc type_desc) override;
+  void transpose(void* backend_handle, const TransposeStats& stats, const void* input, void* output,
+                 void* workspace, DTypeDesc type_desc) override;
 
   // --- Legacy APIs ---
 private:

@@ -2,7 +2,7 @@
 #include "device/pool_allocator.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
-#include "nn/layers_impl/legacy_dense_layer.hpp"
+#include "nn/layers_impl/legacy_dense.hpp"
 #include "nn/loss.hpp"
 #include "tensor/tensor.hpp"
 
@@ -21,10 +21,10 @@ signed main() {
   Graph graph;
   auto input = graph.make_node("input");
 
-  auto dense_layer = DenseLayer(INPUT_FEATURES, OUTPUT_FEATURES, "dense_test");
+  auto dense_layer = Dense(INPUT_FEATURES, OUTPUT_FEATURES, "dense_test");
   auto dense_output = dense_layer(input);
 
-  auto legacy_layer = LegacyDenseLayer(INPUT_FEATURES, OUTPUT_FEATURES, true, "legacy_dense_test");
+  auto legacy_layer = LegacyDense(INPUT_FEATURES, OUTPUT_FEATURES, true, "legacy_dense_test");
   auto legacy_dense_output = legacy_layer(input);
 
   graph.compile(allocator);

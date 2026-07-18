@@ -1,0 +1,86 @@
+/*
+ * Copyright (c) 2025 Tung D. Pham
+ *
+ * This software is licensed under the MIT License. See the LICENSE file in the
+ * project root for the full license text.
+ */
+#include "nn/layers_impl/mul.hpp"
+
+#include <stdexcept>
+
+#include "ops/ops.hpp"
+#include "type/type.hpp"
+
+namespace tunx {
+namespace internal {
+
+Vec<Vec<size_t>> MulImpl::output_shapes(const Vec<Vec<size_t>> &input_shapes) const {
+  if (input_shapes.size() != 2) {
+    throw std::runtime_error("MulImpl: expected exactly 2 inputs");
+  }
+  if (input_shapes[0] != input_shapes[1]) {
+    throw std::runtime_error("MulImpl: both inputs must have the same shape");
+  }
+  return {input_shapes[0]};
+}
+
+Vec<Tensor> MulImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) {
+  if (inputs.size() != 2) {
+    throw std::runtime_error("MulImpl: expected exactly 2 inputs");
+  }
+  const Tensor &a = inputs[0];
+  const Tensor &b = inputs[1];
+
+  if (a.shape() != b.shape()) {
+    throw std::runtime_error("MulImpl: both inputs must have the same shape");
+  }
+
+  Tensor output = get_tensor(a.shape(), io_dtype_);
+  size_t n = a.size();
+
+  if (this->is_training_) {
+    residuals["a"] = a;
+    residuals["b"] = b;
+  }
+
+  DISPATCH_DTYPE(a.dtype(), T, {
+    ops::mul<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n, this->flow_handle_);
+  });
+
+  return {output};
+}
+
+Vec<Tensor> MulImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &residuals) {
+  if (grad_outputs.size() != 1) {
+    throw std::runtime_error("MulImpl: expected exactly 1 grad output");
+  }
+  const Tensor &grad_out = grad_outputs[0];
+  const Tensor &a = residuals["a"];
+  const Tensor &b = residuals["b"];
+  size_t n = grad_out.size();
+
+  // grad_a = grad_out * b,  grad_b = grad_out * a
+  Tensor grad_a = get_tensor(grad_out.shape(), this->io_dtype_);
+  Tensor grad_b = get_tensor(grad_out.shape(), this->io_dtype_);
+
+  DISPATCH_DTYPE(grad_out.dtype(), T, {
+    ops::mul<T>(grad_out.data_ptr(), b.data_ptr(), grad_a.data_ptr(), n, this->flow_handle_);
+    ops::mul<T>(grad_out.data_ptr(), a.data_ptr(), grad_b.data_ptr(), n, this->flow_handle_);
+  });
+
+  return {grad_a, grad_b};
+}
+
+LayerConfig MulImpl::get_config() const {
+  LayerConfig config;
+  config.type = TYPE_NAME;
+  config.name = this->name_;
+  return config;
+}
+
+std::shared_ptr<MulImpl> MulImpl::create_from_config(const LayerConfig &config) {
+  return std::make_shared<MulImpl>(config.name.empty() ? "mul" : config.name);
+}
+
+}  // namespace internal
+}  // namespace tunx

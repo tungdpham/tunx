@@ -15,6 +15,7 @@
 #endif
 
 namespace tunx {
+namespace func {
 ELU::ELU(float alpha)
     : alpha_(alpha) {}
 
@@ -98,4 +99,5 @@ std::unique_ptr<Task> ELU::compute_gradient_impl(const Tensor &input, const Tens
   return nullptr;
 }
 
+}  // namespace func
 }  // namespace tunx

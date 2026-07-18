@@ -15,6 +15,7 @@
 #endif
 
 namespace tunx {
+namespace func {
 
 std::unique_ptr<Task> Sigmoid::apply(const Tensor &input, Tensor &output) const {
   if (input.shape() != output.shape()) {
@@ -97,4 +98,5 @@ std::unique_ptr<Task> Sigmoid::compute_gradient_impl(const Tensor &input, const 
   return nullptr;
 }
 
+}  // namespace func
 }  // namespace tunx

@@ -9,6 +9,7 @@
 #include "tensor/tensor.hpp"
 
 namespace tunx {
+namespace func {
 class GELU : public ActivationFunction {
 public:
   std::unique_ptr<Task> apply(const Tensor &input, Tensor &output) const override;
@@ -26,4 +27,5 @@ private:
   std::unique_ptr<Task> compute_gradient_impl(const Tensor &input, const Tensor &grad_output,
                                               Tensor &grad_input, flowHandle_t handle) const;
 };
+}  // namespace func
 }  // namespace tunx

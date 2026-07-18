@@ -4,7 +4,7 @@
 #include "device/pool_allocator.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
-#include "nn/layers_impl/dense_layer.hpp"
+#include "nn/layers_impl/dense.hpp"
 #include "type/type.hpp"
 
 using namespace std;
@@ -18,10 +18,10 @@ protected:
 TEST_F(FP16Test, Dense) {
   auto &allocator = PoolAllocator::instance(getGPU(), defaultFlowHandle);
 
-  auto fp32_dense_layer = DenseLayer(128, 64, false, "fp32_dense");
+  auto fp32_dense_layer = Dense(128, 64, false, "fp32_dense");
   fp32_dense_layer.set_io_dtype(DType_t::FP32);
 
-  auto fp16_dense_layer = DenseLayer(128, 64, false, "fp16_dense");
+  auto fp16_dense_layer = Dense(128, 64, false, "fp16_dense");
   fp16_dense_layer.set_io_dtype(DType_t::FP16);
   fp16_dense_layer.set_param_dtype(DType_t::FP16);
 

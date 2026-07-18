@@ -331,7 +331,7 @@ private:
 };
 
 /**
- * @brief Linear warmup scheduler - linearly increases LR from start_lr to base_lr.
+ * @brief function::Linear warmup scheduler - linearly increases LR from start_lr to base_lr.
  */
 class LinearWarmup : public Scheduler {
 public:
@@ -382,7 +382,7 @@ private:
 };
 
 /**
- * @brief Linear warmup followed by cosine annealing decay.
+ * @brief function::Linear warmup followed by cosine annealing decay.
  */
 class WarmupCosineAnnealing : public Scheduler {
 public:

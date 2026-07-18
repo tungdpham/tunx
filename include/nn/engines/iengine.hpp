@@ -160,9 +160,9 @@ public:
                                              DTypeDesc type_desc) = 0;
 
   /**
-   * @brief Queries the workspace memory requirement for ReLU graphs.
+   * @brief Queries the workspace memory requirement for function::ReLU graphs.
    * @param backend_handle Opaque handle to the backend context.
-   * @param stats ReLU layer configuration.
+   * @param stats function::ReLU layer configuration.
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
@@ -220,7 +220,7 @@ public:
                                              DTypeDesc type_desc) = 0;
 
   /**
-   * @brief Forward pass for a Dense (Linear) layer.
+   * @brief Forward pass for a Dense (function::Linear) layer.
    * @param backend_handle Opaque handle to the backend context.
    * @param stats Dense layer configuration.
    * @param input Input tensor. Shape: [batch_size, in_features], DType: io_dtype.
@@ -445,9 +445,9 @@ public:
                              void* workspace, DTypeDesc type_desc) = 0;
 
   /**
-   * @brief Forward pass for a ReLU activation.
+   * @brief Forward pass for a function::ReLU activation.
    * @param backend_handle Opaque handle to the backend context.
-   * @param stats ReLU layer configuration.
+   * @param stats function::ReLU layer configuration.
    * @param input Input tensor. Shape: Total elements flattened, DType: io_dtype.
    * @param output Output tensor. Shape: Total elements flattened, DType: io_dtype.
    * @param mask Mask tensor (bitmask or bool) for backward pass.
@@ -458,9 +458,9 @@ public:
                         void* output, bool* mask, void* workspace, DTypeDesc type_desc) = 0;
 
   /**
-   * @brief Backward pass for a ReLU activation.
+   * @brief Backward pass for a function::ReLU activation.
    * @param backend_handle Opaque handle to the backend context.
-   * @param stats ReLU layer configuration.
+   * @param stats function::ReLU layer configuration.
    * @param grad_output Gradient w.r.t output. Shape: Total elements flattened, DType: io_dtype.
    * @param grad_input Computed gradient w.r.t input. Shape: Total elements flattened, DType:
    * io_dtype.
@@ -493,7 +493,7 @@ public:
    * compute_dtype.
    * @param batch_invar Computed batch inverse variance (for backward pass). Shape: [1, 1, 1,
    * channels], DType: compute_dtype.
-   * @param relu_mask Optional bitmask if fused with ReLU.
+   * @param relu_mask Optional bitmask if fused with function::ReLU.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
@@ -530,7 +530,7 @@ public:
    * @param grad_output Gradient w.r.t output. NHWC Shape: [batch_size, height, width, channels],
    * DType: io_dtype.
    * @param input Input tensor. NHWC Shape: [batch_size, height, width, channels], DType: io_dtype.
-   * @param relu_mask Optional bitmask if fused with ReLU.
+   * @param relu_mask Optional bitmask if fused with function::ReLU.
    * @param gamma Scale parameter tensor. Shape: [1, 1, 1, channels], DType: param_dtype.
    * @param grad_input Computed gradient w.r.t input. NHWC Shape: [batch_size, height, width,
    * channels], DType: io_dtype.

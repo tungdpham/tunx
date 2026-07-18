@@ -15,6 +15,7 @@
 #endif
 
 namespace tunx {
+namespace func {
 LeakyReLU::LeakyReLU(float negative_slope)
     : negative_slope_(negative_slope) {}
 
@@ -103,4 +104,5 @@ std::unique_ptr<Task> LeakyReLU::compute_gradient_impl(const Tensor &input,
   return nullptr;
 }
 
+}  // namespace func
 }  // namespace tunx

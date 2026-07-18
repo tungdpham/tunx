@@ -9,6 +9,7 @@
 #include "tensor/tensor.hpp"
 
 namespace tunx {
+namespace func {
 class Linear : public ActivationFunction {
 public:
   std::unique_ptr<Task> apply(const Tensor &input, Tensor &output) const override;
@@ -20,4 +21,5 @@ public:
   std::unique_ptr<ActivationFunction> clone() const override;
 };
 
+}  // namespace func
 }  // namespace tunx

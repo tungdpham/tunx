@@ -7,9 +7,9 @@
 #include "device/pool_allocator.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
-#include "nn/layers_impl/batchnorm_layer.hpp"
-#include "nn/layers_impl/conv2d_layer.hpp"
-#include "nn/layers_impl/layer_norm_layer.hpp"
+#include "nn/layers_impl/batchnorm.hpp"
+#include "nn/layers_impl/conv2d.hpp"
+#include "nn/layers_impl/layer_norm.hpp"
 #include "nn/loss.hpp"
 #include "nn/metrics.hpp"
 #include "nn/optimizers.hpp"
@@ -20,17 +20,17 @@
 using namespace std;
 using namespace tunx;
 
-std::shared_ptr<Graph> make_mlp(const Device& device) {
-  auto graph = make_shared<Graph>();
+Graph make_mlp(const Device& device) {
+  Graph graph;
 
-  auto input = graph->input();
+  auto input = graph.input();
 
-  auto conv2d_1 = Conv2DLayer(1, 8, 5, 5, 1, 1, 0, 0, false, "conv2d_1");
-  auto bn1 = BatchNormLayer(8, 1e-5, 0.1f, true, true, "bn1");
-  auto flatten = FlattenLayer(1, -1, "flatten");
-  auto fc1 = DenseLayer(24 * 24 * 8, 100, true, "fc1");
-  auto layer_norm = LayerNormLayer(100, 1e-5, true, "layer_norm");
-  auto fc2 = DenseLayer(100, 10, false, "fc2");
+  auto conv2d_1 = Conv2D(1, 8, 5, 5, 1, 1, 0, 0, false, "conv2d_1");
+  auto bn1 = BatchNorm(8, 1e-5, 0.1f, true, true, "bn1");
+  auto flatten = Flatten(1, -1, "flatten");
+  auto fc1 = Dense(24 * 24 * 8, 100, true, "fc1");
+  auto layer_norm = LayerNorm(100, 1e-5, true, "layer_norm");
+  auto fc2 = Dense(100, 10, false, "fc2");
 
   auto x = conv2d_1(input);
   x = bn1(x);
@@ -39,31 +39,31 @@ std::shared_ptr<Graph> make_mlp(const Device& device) {
   x = layer_norm(x);
   auto output = fc2(x);
   output->set_uid("output");
-  graph->set_output(output);
-  graph->set_io_dtype(DType_t::BF16);
-  graph->set_param_dtype(DType_t::BF16);
+  graph.set_output(output);
+  graph.set_io_dtype(DType_t::BF16);
+  graph.set_param_dtype(DType_t::BF16);
 
   auto& allocator = PoolAllocator::instance(device, defaultFlowHandle);
-  graph->compile(allocator);
+  graph.compile(allocator);
 
   return graph;
 }
 
-std::shared_ptr<Graph> make_mnist_model(const Device& device) {
-  auto graph = make_shared<Graph>();
+Graph make_mnist_model(const Device& device) {
+  Graph graph;
 
-  auto input = graph->input("input");
+  auto input = graph.input("input");
 
-  auto conv2d_1 = Conv2DLayer(1, 8, 5, 5, 1, 1, 0, 0, false, "conv1");
-  auto bn1 = BatchNormLayer(8, 1e-5, 0.1f, true, true, "bn1");
-  auto pool1 = MaxPool2DLayer(3, 3, 3, 3, 0, 0, "pool1");
-  auto conv2d_2 = Conv2DLayer(8, 16, 1, 1, 1, 1, 0, 0, false, "conv2_1x1");
-  auto bn2_1x1 = BatchNormLayer(16, 1e-5, 0.1f, true, true, "bn2_1x1");
-  auto conv2d_3 = Conv2DLayer(16, 48, 5, 5, 1, 1, 0, 0, false, "conv3");
-  auto bn3 = BatchNormLayer(48, 1e-5, 0.1f, true, true, "bn3");
-  auto pool2 = MaxPool2DLayer(2, 2, 2, 2, 0, 0, "pool2");
-  auto flatten = FlattenLayer(1, -1, "flatten");
-  auto fc = DenseLayer(192, 10, false, "output");
+  auto conv2d_1 = Conv2D(1, 8, 5, 5, 1, 1, 0, 0, false, "conv1");
+  auto bn1 = BatchNorm(8, 1e-5, 0.1f, true, true, "bn1");
+  auto pool1 = MaxPool2D(3, 3, 3, 3, 0, 0, "pool1");
+  auto conv2d_2 = Conv2D(8, 16, 1, 1, 1, 1, 0, 0, false, "conv2_1x1");
+  auto bn2_1x1 = BatchNorm(16, 1e-5, 0.1f, true, true, "bn2_1x1");
+  auto conv2d_3 = Conv2D(16, 48, 5, 5, 1, 1, 0, 0, false, "conv3");
+  auto bn3 = BatchNorm(48, 1e-5, 0.1f, true, true, "bn3");
+  auto pool2 = MaxPool2D(2, 2, 2, 2, 0, 0, "pool2");
+  auto flatten = Flatten(1, -1, "flatten");
+  auto fc = Dense(192, 10, false, "output");
 
   // testing
   auto x = conv2d_1(input);
@@ -77,13 +77,13 @@ std::shared_ptr<Graph> make_mnist_model(const Device& device) {
   x = flatten(x);
   auto output = fc(x);
   output->set_uid("output");
-  graph->set_output(output);
-  graph->set_io_dtype(DType_t::BF16);
-  graph->set_param_dtype(DType_t::BF16);
+  graph.set_output(output);
+  graph.set_io_dtype(DType_t::BF16);
+  graph.set_param_dtype(DType_t::BF16);
 
   auto& allocator = PoolAllocator::instance(device, defaultFlowHandle);
 
-  graph->compile(allocator);
+  graph.compile(allocator);
 
   return graph;
 }
@@ -109,14 +109,14 @@ signed main() {
   auto criterion = LossFactory::create_crossentropy(true, 1e-15);
   auto optimizer = OptimizerFactory::create_adam(0.01f, 0.9f, 0.999f);
 
-  optimizer->attach(*graph);
+  optimizer->attach(graph);
 
   int epochs = 20;
   for (int i = 0; i < epochs; ++i) {
     train_loader->shuffle();
     train_loader->reset();
 
-    graph->set_mode(ExecutionMode::TRAIN);
+    graph.set_mode(ExecutionMode::TRAIN);
     int batch_idx = 0;
     // train
     while (train_loader->get_batch(256, data, labels)) {
@@ -127,7 +127,7 @@ signed main() {
           {"input", data},
       });
 
-      auto output_map = graph->forward(input_map);
+      auto output_map = graph.forward(input_map);
 
       Tensor output = output_map.get("output");
 
@@ -141,7 +141,7 @@ signed main() {
           {"output", grad_output},
       });
 
-      auto grad_input_map = graph->backward(output_grad_map);
+      auto grad_input_map = graph.backward(output_grad_map);
 
       // DEBUGGING
       // for (auto& edges : graph->edges()) {
@@ -167,7 +167,7 @@ signed main() {
       ++batch_idx;
     }
 
-    graph->set_mode(ExecutionMode::EVAL);
+    graph.set_mode(ExecutionMode::EVAL);
     val_loader->reset();
     // validation
     float total_val_loss = 0.0f;
@@ -180,7 +180,7 @@ signed main() {
           {"input", data},
       });
 
-      auto output_map = graph->forward(input_map);
+      auto output_map = graph.forward(input_map);
       Tensor output = output_map.get("output");
       float val_loss;
       criterion->compute_loss(output, labels, val_loss);

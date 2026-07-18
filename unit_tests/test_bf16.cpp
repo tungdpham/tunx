@@ -7,7 +7,7 @@
 #include "nn/example_graphs.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
-#include "nn/layers_impl/dense_layer.hpp"
+#include "nn/layers_impl/dense.hpp"
 #include "nn/loss.hpp"
 #include "type/type.hpp"
 
@@ -25,10 +25,10 @@ TEST_F(BF16Test, Dense) {
   constexpr size_t output_dim = 16;
   auto &allocator = PoolAllocator::instance(getGPU(), defaultFlowHandle);
 
-  auto fp32_dense_layer = DenseLayer(input_dim, output_dim, false, "fp32_dense");
+  auto fp32_dense_layer = Dense(input_dim, output_dim, false, "fp32_dense");
   fp32_dense_layer.set_io_dtype(DType_t::FP32);
 
-  auto bf16_dense_layer = DenseLayer(input_dim, output_dim, false, "bf16_dense");
+  auto bf16_dense_layer = Dense(input_dim, output_dim, false, "bf16_dense");
   bf16_dense_layer.set_io_dtype(DType_t::BF16);
   bf16_dense_layer.set_param_dtype(DType_t::BF16);
 

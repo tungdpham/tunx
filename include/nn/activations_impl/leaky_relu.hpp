@@ -9,6 +9,7 @@
 #include "tensor/tensor.hpp"
 
 namespace tunx {
+namespace func {
 class LeakyReLU : public ActivationFunction {
 private:
   float negative_slope_;
@@ -33,4 +34,5 @@ private:
                                               Tensor &grad_input, flowHandle_t handle) const;
 };
 
+}  // namespace func
 }  // namespace tunx

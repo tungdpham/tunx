@@ -6,6 +6,7 @@
 #include "type/type.hpp"
 
 namespace tunx {
+namespace func {
 namespace cpu {
 template <typename T>
 void elu(const T *input, T *output, size_t size, T alpha) {
@@ -31,4 +32,5 @@ void elu_gradient(const T *input, const T *grad_output, T *grad_input, size_t si
 #undef INSTANTIATE
 
 }  // namespace cpu
+}  // namespace func
 }  // namespace tunx

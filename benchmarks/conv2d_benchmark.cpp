@@ -2,8 +2,8 @@
 #include "device/pool_allocator.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
-#include "nn/layers_impl/conv2d_layer.hpp"
-#include "nn/layers_impl/legacy_conv2d_layer.hpp"
+#include "nn/layers_impl/conv2d.hpp"
+#include "nn/layers_impl/legacy_conv2d.hpp"
 #include "tensor/tensor.hpp"
 
 using namespace tunx;
@@ -16,10 +16,10 @@ signed main() {
   Graph graph;
   auto input = graph.make_node("input");
 
-  auto conv_layer = Conv2DLayer(16, 128, 3, 3, 1, 1, 0, 0, true, "conv2d_test");
+  auto conv_layer = Conv2D(16, 128, 3, 3, 1, 1, 0, 0, true, "conv2d_test");
   auto conv_output = conv_layer(input);
 
-  auto legacy_layer = LegacyConv2DLayer(16, 128, 3, 3, 1, 1, 0, 0, true, "legacy_conv2d_test");
+  auto legacy_layer = LegacyConv2D(16, 128, 3, 3, 1, 1, 0, 0, true, "legacy_conv2d_test");
   auto legacy_conv_output = legacy_layer(input);
 
   graph.compile(allocator);

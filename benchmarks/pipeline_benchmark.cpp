@@ -2,9 +2,9 @@
 #include "device/pool_allocator.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
-#include "nn/layers_impl/batchnorm_layer.hpp"
-#include "nn/layers_impl/conv2d_layer.hpp"
-#include "nn/layers_impl/maxpool2d_layer.hpp"
+#include "nn/layers_impl/batchnorm.hpp"
+#include "nn/layers_impl/conv2d.hpp"
+#include "nn/layers_impl/maxpool2d.hpp"
 #include "tensor/tensor.hpp"
 
 using namespace tunx;
@@ -17,13 +17,13 @@ signed main() {
   Graph graph;
   auto input = graph.make_node("input");
 
-  auto conv_layer = Conv2DLayer(3, 64, 3, 3, 1, 1, 1, 1, true, "conv2d_test");
+  auto conv_layer = Conv2D(3, 64, 3, 3, 1, 1, 1, 1, true, "conv2d_test");
   auto conv_output_node = conv_layer(input);
 
-  auto bn_layer = BatchNormLayer(64, 1e-5f, 0.1, true, true, "batchnorm_test");
+  auto bn_layer = BatchNorm(64, 1e-5f, 0.1, true, true, "batchnorm_test");
   auto bn_output_node = bn_layer(conv_output_node);
 
-  auto maxpool_layer = MaxPool2DLayer(2, 2, 2, 2, 0, 0, "maxpool_test");
+  auto maxpool_layer = MaxPool2D(2, 2, 2, 2, 0, 0, "maxpool_test");
   auto maxpool_output_node = maxpool_layer(bn_output_node);
 
   graph.compile(allocator);

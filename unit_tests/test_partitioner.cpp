@@ -22,13 +22,13 @@ Graph build_linear_graph() {
 
   Node input = graph.make_node("input");
   graph.set_input(input);
-  Node hidden_a = DenseLayer(8, 8, false, "dense_a")(input);
+  Node hidden_a = Dense(8, 8, false, "dense_a")(input);
   hidden_a->set_uid("hidden_a");
-  Node hidden_b = DenseLayer(8, 8, false, "dense_b")(hidden_a);
+  Node hidden_b = Dense(8, 8, false, "dense_b")(hidden_a);
   hidden_b->set_uid("hidden_b");
-  Node hidden_c = DenseLayer(8, 8, false, "dense_c")(hidden_b);
+  Node hidden_c = Dense(8, 8, false, "dense_c")(hidden_b);
   hidden_c->set_uid("hidden_c");
-  Node output = DenseLayer(8, 8, false, "dense_d")(hidden_c);
+  Node output = Dense(8, 8, false, "dense_d")(hidden_c);
   output->set_uid("output");
   graph.set_output(output);
 
@@ -40,13 +40,13 @@ Graph build_branched_graph() {
 
   Node input = graph.make_node("input");
   graph.set_input(input);
-  Node left = DenseLayer(8, 8, false, "left_dense")(input);
+  Node left = Dense(8, 8, false, "left_dense")(input);
   left->set_uid("left");
-  Node right = DenseLayer(8, 8, false, "right_dense")(input);
+  Node right = Dense(8, 8, false, "right_dense")(input);
   right->set_uid("right");
-  Node merged = AddLayer("merge")(left, right);
+  Node merged = Add("merge")(left, right);
   merged->set_uid("merged");
-  Node output = DenseLayer(8, 8, false, "tail_dense")(merged);
+  Node output = Dense(8, 8, false, "tail_dense")(merged);
   output->set_uid("output");
   graph.set_output(output);
 
@@ -212,14 +212,14 @@ TEST_F(GraphPlannerStateTest, BackwardAccumulatesGradientsAcrossFanOut) {
   Node input = graph.make_node("input");
   graph.set_input(input);
 
-  auto left_dense = DenseLayer(1, 1, false, "left_dense");
-  auto right_dense = DenseLayer(1, 1, false, "right_dense");
+  auto left_dense = Dense(1, 1, false, "left_dense");
+  auto right_dense = Dense(1, 1, false, "right_dense");
 
   Node left = left_dense(input);
   left->set_uid("left");
   Node right = right_dense(input);
   right->set_uid("right");
-  Node output = AddLayer("merge")(left, right);
+  Node output = Add("merge")(left, right);
   output->set_uid("output");
   graph.set_output(output);
   graph.compile(allocator);
@@ -249,14 +249,14 @@ TEST_F(GraphPlannerStateTest, BackwardClearsAccumulatedGradientsBetweenPasses) {
   Node input = graph.make_node("input");
   graph.set_input(input);
 
-  auto left_dense = DenseLayer(1, 1, false, "left_dense");
-  auto right_dense = DenseLayer(1, 1, false, "right_dense");
+  auto left_dense = Dense(1, 1, false, "left_dense");
+  auto right_dense = Dense(1, 1, false, "right_dense");
 
   Node left = left_dense(input);
   left->set_uid("left");
   Node right = right_dense(input);
   right->set_uid("right");
-  Node output = AddLayer("merge")(left, right);
+  Node output = Add("merge")(left, right);
   output->set_uid("output");
   graph.set_output(output);
   graph.compile(allocator);

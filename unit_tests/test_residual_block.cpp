@@ -110,7 +110,7 @@ protected:
 TEST_F(ResidualBlockTest, IdentityShortcutForward) {
   // Create simple main path: single layer that multiplies by 2
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2x"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2x"));
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "identity_residual");
   auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
@@ -133,7 +133,7 @@ TEST_F(ResidualBlockTest, IdentityShortcutForward) {
 
 TEST_F(ResidualBlockTest, IdentityShortcutForwardWithReLU) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_neg2x"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_neg2x"));
 
   auto residual_layer = ResidualBlock(std::move(main_path), Vec<Layer>{}, "relu", "identity_relu");
   auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
@@ -157,7 +157,7 @@ TEST_F(ResidualBlockTest, IdentityShortcutForwardWithReLU) {
 
 TEST_F(ResidualBlockTest, IdentityShortcutMultiChannel) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(2, 2, 1, 1, 1, 1, 0, 0, false, "scale_half"));
+  main_path.push_back(Conv2D(2, 2, 1, 1, 1, 1, 0, 0, false, "scale_half"));
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "identity_multichannel");
@@ -189,7 +189,7 @@ TEST_F(ResidualBlockTest, IdentityShortcutMultiChannel) {
 
 TEST_F(ResidualBlockTest, IdentityShortcutMultiBatch) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1x"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1x"));
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "identity_multibatch");
@@ -220,11 +220,11 @@ TEST_F(ResidualBlockTest, IdentityShortcutMultiBatch) {
 
 TEST_F(ResidualBlockTest, ProjectionShortcutForward) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_half"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_half"));
 
   // Projection shortcut: 1x1 conv with scale 0.25
   Vec<Layer> shortcut;
-  shortcut.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_quarter"));
+  shortcut.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_quarter"));
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), std::move(shortcut), "none", "projection_residual");
@@ -249,10 +249,10 @@ TEST_F(ResidualBlockTest, ProjectionShortcutForward) {
 
 TEST_F(ResidualBlockTest, ProjectionShortcutWithReLU) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_neg"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_neg"));
 
   Vec<Layer> shortcut;
-  shortcut.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_short"));
+  shortcut.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_short"));
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), std::move(shortcut), "relu", "projection_relu");
@@ -279,7 +279,7 @@ TEST_F(ResidualBlockTest, ProjectionShortcutWithReLU) {
 
 TEST_F(ResidualBlockTest, IdentityShortcutBackward) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2x"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2x"));
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "identity_backward");
@@ -320,7 +320,7 @@ TEST_F(ResidualBlockTest, IdentityShortcutBackward) {
 
 TEST_F(ResidualBlockTest, ComputeOutputShape) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(3, 3, 1, 1, 1, 1, 0, 0, false, "scale"));
+  main_path.push_back(Conv2D(3, 3, 1, 1, 1, 1, 0, 0, false, "scale"));
 
   auto residual_layer = ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "test_shape");
 
@@ -335,7 +335,7 @@ TEST_F(ResidualBlockTest, ComputeOutputShape) {
 
 TEST_F(ResidualBlockTest, EdgeCaseZeroGradient) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2x"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2x"));
 
   auto residual_layer = ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "zero_gradient");
   auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
@@ -360,7 +360,7 @@ TEST_F(ResidualBlockTest, EdgeCaseZeroGradient) {
 
 TEST_F(ResidualBlockTest, EdgeCaseLargeValues) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1x"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1x"));
 
   auto residual_layer = ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "large_values");
   auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
@@ -384,7 +384,7 @@ TEST_F(ResidualBlockTest, EdgeCaseLargeValues) {
 
 TEST_F(ResidualBlockTest, EdgeCaseNegativeValues) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_neg"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_neg"));
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "negative_values");
@@ -409,7 +409,7 @@ TEST_F(ResidualBlockTest, EdgeCaseNegativeValues) {
 
 TEST_F(ResidualBlockTest, NumericalStabilitySmallValues) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1x"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1x"));
 
   auto residual_layer = ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "small_values");
   auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
@@ -433,7 +433,7 @@ TEST_F(ResidualBlockTest, NumericalStabilitySmallValues) {
 
 TEST_F(ResidualBlockTest, NumericalStabilityBackward) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1x"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1x"));
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "backward_stability");
@@ -463,8 +463,8 @@ TEST_F(ResidualBlockTest, NumericalStabilityBackward) {
 
 TEST_F(ResidualBlockTest, MultiLayerMainPath) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1"));
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2"));
 
   auto residual_layer = ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "multi_layer");
   auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
@@ -489,8 +489,8 @@ TEST_F(ResidualBlockTest, MultiLayerMainPath) {
 
 TEST_F(ResidualBlockTest, MultiLayerMainPathBackward) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1"));
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2"));
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "multi_layer_backward");
@@ -522,7 +522,7 @@ TEST_F(ResidualBlockTest, MultiLayerMainPathBackward) {
 
 TEST_F(ResidualBlockTest, ReLUNegativeInputSuppressionForward) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_zero"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_zero"));
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "relu", "relu_suppression");
@@ -547,7 +547,7 @@ TEST_F(ResidualBlockTest, ReLUNegativeInputSuppressionForward) {
 
 TEST_F(ResidualBlockTest, ReLUNegativeInputSuppressionBackward) {
   Vec<Layer> main_path;
-  main_path.push_back(Conv2DLayer(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_zero"));
+  main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_zero"));
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "relu", "relu_suppression_bwd");

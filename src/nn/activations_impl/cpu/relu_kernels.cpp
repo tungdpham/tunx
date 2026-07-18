@@ -4,6 +4,7 @@
 #include "type/type.hpp"
 
 namespace tunx {
+namespace func {
 namespace cpu {
 template <typename T>
 void relu(const T *input, T *output, size_t size) {
@@ -24,4 +25,5 @@ void relu_gradient(const T *input, const T *grad_output, T *grad_input, size_t s
 #undef INSTANTIATE
 
 }  // namespace cpu
+}  // namespace func
 }  // namespace tunx

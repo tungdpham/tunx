@@ -15,6 +15,7 @@
 #endif
 
 namespace tunx {
+namespace func {
 ReLU::ReLU() {}
 
 std::unique_ptr<Task> ReLU::apply(const Tensor &input, Tensor &output) const {
@@ -94,4 +95,5 @@ std::unique_ptr<Task> ReLU::compute_gradient_impl(const Tensor &input, const Ten
   return nullptr;
 }
 
+}  // namespace func
 }  // namespace tunx

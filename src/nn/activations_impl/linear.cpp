@@ -14,6 +14,7 @@
 #include "tensor/tensor.hpp"
 
 namespace tunx {
+namespace func {
 
 std::unique_ptr<Task> Linear::apply(const Tensor &input, Tensor &output) const {
   if (input.shape() != output.shape()) {
@@ -42,4 +43,5 @@ std::unique_ptr<ActivationFunction> Linear::clone() const {
   return std::make_unique<Linear>(*this);
 }
 
+}  // namespace func
 }  // namespace tunx

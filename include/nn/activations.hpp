@@ -45,13 +45,13 @@ public:
 
   static void register_defaults() {
     register_activation("none", []() { return nullptr; });
-    register_activation("relu", []() { return std::make_unique<ReLU>(); });
-    register_activation("leaky_relu", []() { return std::make_unique<LeakyReLU>(0.01); });
-    register_activation("sigmoid", []() { return std::make_unique<Sigmoid>(); });
-    register_activation("linear", []() { return std::make_unique<Linear>(); });
-    register_activation("tanh", []() { return std::make_unique<Tanh>(); });
-    register_activation("elu", []() { return std::make_unique<ELU>(); });
-    register_activation("gelu", []() { return std::make_unique<GELU>(); });
+    register_activation("relu", []() { return std::make_unique<func::ReLU>(); });
+    register_activation("leaky_relu", []() { return std::make_unique<func::LeakyReLU>(0.01); });
+    register_activation("sigmoid", []() { return std::make_unique<func::Sigmoid>(); });
+    register_activation("linear", []() { return std::make_unique<func::Linear>(); });
+    register_activation("tanh", []() { return std::make_unique<func::Tanh>(); });
+    register_activation("elu", []() { return std::make_unique<func::ELU>(); });
+    register_activation("gelu", []() { return std::make_unique<func::GELU>(); });
   }
 
   static Vec<std::string> get_available_activations() {

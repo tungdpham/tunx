@@ -9,6 +9,7 @@
 #include "tensor/tensor.hpp"
 
 namespace tunx {
+namespace func {
 class ReLU : public ActivationFunction {
 public:
   explicit ReLU();
@@ -30,4 +31,5 @@ private:
                                               Tensor &grad_input, flowHandle_t handle) const;
 };
 
+}  // namespace func
 }  // namespace tunx

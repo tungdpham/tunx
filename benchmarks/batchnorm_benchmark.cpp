@@ -6,8 +6,8 @@
 #include "nn/activations_impl/relu.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
-#include "nn/layers_impl/batchnorm_layer.hpp"
-#include "nn/layers_impl/legacy_batchnorm_layer.hpp"
+#include "nn/layers_impl/batchnorm.hpp"
+#include "nn/layers_impl/legacy_batchnorm.hpp"
 #include "tensor/tensor.hpp"
 
 using namespace tunx;
@@ -27,13 +27,13 @@ signed main() {
   auto input = graph.make_node("input");
 
   // fuse relu
-  auto bn_layer = BatchNormLayer(NUM_FEATURES, 1e-5f, 0.1f, true, true, "batchnorm_test");
+  auto bn_layer = BatchNorm(NUM_FEATURES, 1e-5f, 0.1f, true, true, "batchnorm_test");
   auto bn_output_node = bn_layer(input);
 
   auto legacy_batchnorm_layer =
-      LegacyBatchNormLayer(NUM_FEATURES, 1e-5f, 0.1f, true, "legacy_batchnorm_test");
+      LegacyBatchNorm(NUM_FEATURES, 1e-5f, 0.1f, true, "legacy_batchnorm_test");
   auto legacy_bn_output = legacy_batchnorm_layer(input);
-  auto relu_layer = ActivationLayer(std::make_unique<ReLU>(), "relu_activation");
+  auto relu_layer = Activation(std::make_unique<tunx::func::ReLU>(), "relu_activation");
   auto legacy_relu_output_node = relu_layer(legacy_bn_output);
 
   graph.compile(allocator);

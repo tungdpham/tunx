@@ -9,6 +9,7 @@
 #include "tensor/tensor.hpp"
 
 namespace tunx {
+namespace func {
 class Sigmoid : public ActivationFunction {
 public:
   std::unique_ptr<Task> apply(const Tensor &input, Tensor &output) const override;
@@ -28,4 +29,5 @@ private:
                                               Tensor &grad_input, flowHandle_t handle) const;
 };
 
+}  // namespace func
 }  // namespace tunx

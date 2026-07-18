@@ -12,7 +12,7 @@
 
 #include "nn/block.hpp"
 #include "nn/layer.hpp"
-#include "nn/layers_impl/dense_layer.hpp"
+#include "nn/layers_impl/dense.hpp"
 
 namespace tunx {
 
@@ -23,10 +23,10 @@ private:
   size_t head_dim_;
   bool is_causal_;
 
-  DenseLayer q_proj_;
-  DenseLayer k_proj_;
-  DenseLayer v_proj_;
-  DenseLayer out_proj_;
+  Dense q_proj_;
+  Dense k_proj_;
+  Dense v_proj_;
+  Dense out_proj_;
 
   // Expects input: [batch_size, seq_len, embed_dim], output: [batch_size, seq_len, embed_dim]
   Vec<Tensor> forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) override;
