@@ -97,7 +97,7 @@ signed main() {
   // auto graph = make_mlp(device);
 
   auto [train_dataset, val_dataset] =
-      DatasetFactory::create("open-web-text", "../data/mnist", DType_t::BF16);
+      DatasetFactory::create("mnist", "../data/mnist", DType_t::BF16);
   if (!train_dataset || !val_dataset) {
     cerr << "Failed to create data loaders for MNIST dataset" << endl;
     return 1;
@@ -144,7 +144,7 @@ signed main() {
       auto grad_input_map = graph.backward(output_grad_map);
 
       // DEBUGGING
-      // for (auto& edges : graph->edges()) {
+      // for (auto& edges : graph.edges()) {
       //   auto layer = edges->layer();
       //   Vec<Tensor*> params = layer->parameters();
       //   Vec<Tensor*> grads = layer->gradients();

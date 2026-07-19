@@ -1,3 +1,4 @@
+#ifdef USE_CUDNN
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -609,6 +610,7 @@ struct batchnorm_fwd_graph {
     const int64 h = static_cast<int64>(stats.height);
     const int64 w = static_cast<int64>(stats.width);
     auto io_type = to_fe_data_type(type_desc.io_dtype);
+    auto param_type = to_fe_data_type(type_desc.param_dtype);
     auto compute_type = to_fe_compute_type(type_desc.compute_dtype);
 
     graph = std::make_shared<fe::graph::Graph>();
@@ -626,25 +628,25 @@ struct batchnorm_fwd_graph {
                               .set_name("scale")
                               .set_dim({1, c, 1, 1})
                               .set_stride({c, 1, c, c})
-                              .set_data_type(compute_type));
+                              .set_data_type(param_type));
 
     bias = graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("bias")
                              .set_dim({1, c, 1, 1})
                              .set_stride({c, 1, c, c})
-                             .set_data_type(compute_type));
+                             .set_data_type(param_type));
 
     prev_mean = graph->tensor(fe::graph::Tensor_attributes()
                                   .set_name("prev_running_mean")
                                   .set_dim({1, c, 1, 1})
                                   .set_stride({c, 1, c, c})
-                                  .set_data_type(compute_type));
+                                  .set_data_type(fe::DataType_t::FLOAT));
 
     prev_var = graph->tensor(fe::graph::Tensor_attributes()
                                  .set_name("prev_running_var")
                                  .set_dim({1, c, 1, 1})
                                  .set_stride({c, 1, c, c})
-                                 .set_data_type(compute_type));
+                                 .set_data_type(fe::DataType_t::FLOAT));
 
     auto epsilon = graph->tensor(stats.epsilon);
     auto momentum = graph->tensor(stats.momentum);
@@ -709,6 +711,7 @@ struct batchnorm_inf_graph {
     const int64 h = static_cast<int64>(stats.height);
     const int64 w = static_cast<int64>(stats.width);
     auto io_type = to_fe_data_type(type_desc.io_dtype);
+    auto param_type = to_fe_data_type(type_desc.param_dtype);
     auto compute_type = to_fe_compute_type(type_desc.compute_dtype);
 
     graph = std::make_shared<fe::graph::Graph>();
@@ -726,13 +729,13 @@ struct batchnorm_inf_graph {
                               .set_name("scale")
                               .set_dim({1, c, 1, 1})
                               .set_stride({c, 1, c, c})
-                              .set_data_type(compute_type));
+                              .set_data_type(param_type));
 
     bias = graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("bias")
                              .set_dim({1, c, 1, 1})
                              .set_stride({c, 1, c, c})
-                             .set_data_type(compute_type));
+                             .set_data_type(param_type));
 
     saved_mean = graph->tensor(fe::graph::Tensor_attributes()
                                    .set_name("saved_mean")
@@ -803,7 +806,7 @@ struct batchnorm_bwd_graph {
     const int64 w = static_cast<int64>(stats.width);
 
     auto io_type = to_fe_data_type(type_desc.io_dtype);
-    // auto param_type = to_fe_data_type(type_desc.param_dtype);
+    auto param_type = to_fe_data_type(type_desc.param_dtype);
     auto compute_type = to_fe_compute_type(type_desc.compute_dtype);
 
     graph = std::make_shared<fe::graph::Graph>();
@@ -837,19 +840,19 @@ struct batchnorm_bwd_graph {
                               .set_name("scale")
                               .set_dim({1, c, 1, 1})
                               .set_stride({c, 1, c, c})
-                              .set_data_type(fe::DataType_t::FLOAT));
+                              .set_data_type(param_type));
 
     mean = graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("mean")
                              .set_dim({1, c, 1, 1})
                              .set_stride({c, 1, c, c})
-                             .set_data_type(fe::DataType_t::FLOAT));
+                             .set_data_type(compute_type));
 
     invar = graph->tensor(fe::graph::Tensor_attributes()
                               .set_name("inv_variance")
                               .set_dim({1, c, 1, 1})
                               .set_stride({c, 1, c, c})
-                              .set_data_type(fe::DataType_t::FLOAT));
+                              .set_data_type(compute_type));
 
     auto DBN_options =
         fe::graph::Batchnorm_backward_attributes().set_saved_mean_and_inv_variance(mean, invar);
@@ -859,8 +862,8 @@ struct batchnorm_bwd_graph {
     dbias = outputs[2];
 
     dx->set_output(true);
-    dscale->set_output(true).set_data_type(fe::DataType_t::FLOAT);
-    dbias->set_output(true).set_data_type(fe::DataType_t::FLOAT);
+    dscale->set_output(true).set_data_type(param_type);
+    dbias->set_output(true).set_data_type(param_type);
 
     ensure_ok(graph->validate(), "batchnorm backward validate");
     ensure_ok(graph->build_operation_graph(handle), "batchnorm backward build op graph");
@@ -891,6 +894,7 @@ struct layernorm_fwd_graph {
     const int64 c = static_cast<int64>(stats.channels);
 
     auto io_type = to_fe_data_type(type_desc.io_dtype);
+    auto param_type = to_fe_data_type(type_desc.param_dtype);
     auto compute_type = to_fe_compute_type(type_desc.compute_dtype);
 
     graph = std::make_shared<fe::graph::Graph>();
@@ -914,13 +918,13 @@ struct layernorm_fwd_graph {
                               .set_name("scale")
                               .set_dim({1, c, 1, 1})
                               .set_stride({c, 1, c, c})
-                              .set_data_type(fe::DataType_t::FLOAT));
+                              .set_data_type(param_type));
 
     bias = graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("bias")
                              .set_dim({1, c, 1, 1})
                              .set_stride({c, 1, c, c})
-                             .set_data_type(fe::DataType_t::FLOAT));
+                             .set_data_type(param_type));
 
     auto outputs = graph->layernorm(x, scale, bias, ln_options);
     y = outputs[0];
@@ -928,8 +932,8 @@ struct layernorm_fwd_graph {
     inv_variance = outputs[2];
 
     y->set_output(true).set_data_type(io_type);
-    mean->set_output(true).set_data_type(fe::DataType_t::FLOAT);
-    inv_variance->set_output(true).set_data_type(fe::DataType_t::FLOAT);
+    mean->set_output(true).set_data_type(compute_type);
+    inv_variance->set_output(true).set_data_type(compute_type);
 
     ensure_ok(graph->validate(), "layernorm_fwd validate");
     ensure_ok(graph->build_operation_graph(handle), "layernorm_fwd build op graph");
@@ -957,6 +961,7 @@ struct layernorm_inf_graph {
     const int64 c = static_cast<int64>(stats.channels);
 
     auto io_type = to_fe_data_type(type_desc.io_dtype);
+    auto param_type = to_fe_data_type(type_desc.param_dtype);
     auto compute_type = to_fe_compute_type(type_desc.compute_dtype);
 
     graph = std::make_shared<fe::graph::Graph>();
@@ -980,13 +985,13 @@ struct layernorm_inf_graph {
                               .set_name("scale")
                               .set_dim({1, c, 1, 1})
                               .set_stride({c, 1, c, c})
-                              .set_data_type(fe::DataType_t::FLOAT));
+                              .set_data_type(param_type));
 
     bias = graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("bias")
                              .set_dim({1, c, 1, 1})
                              .set_stride({c, 1, c, c})
-                             .set_data_type(fe::DataType_t::FLOAT));
+                             .set_data_type(param_type));
 
     auto outputs = graph->layernorm(x, scale, bias, ln_options);
     y = outputs[0];
@@ -1023,7 +1028,7 @@ struct layernorm_bwd_graph {
     const int64 c = static_cast<int64>(stats.channels);
 
     auto io_type = to_fe_data_type(type_desc.io_dtype);
-    // auto param_type = to_fe_data_type(type_desc.param_dtype);
+    auto param_type = to_fe_data_type(type_desc.param_dtype);
     auto compute_type = to_fe_compute_type(type_desc.compute_dtype);
 
     graph = std::make_shared<fe::graph::Graph>();
@@ -1047,13 +1052,13 @@ struct layernorm_bwd_graph {
                              .set_name("mean")
                              .set_dim({n, 1, 1, 1})
                              .set_stride({1, 1, 1, 1})
-                             .set_data_type(fe::DataType_t::FLOAT));
+                             .set_data_type(compute_type));
 
     inv_variance = graph->tensor(fe::graph::Tensor_attributes()
                                      .set_name("inv_variance")
                                      .set_dim({n, 1, 1, 1})
                                      .set_stride({1, 1, 1, 1})
-                                     .set_data_type(fe::DataType_t::FLOAT));
+                                     .set_data_type(compute_type));
 
     auto ln_bwd_options =
         fe::graph::Layernorm_backward_attributes().set_saved_mean_and_inv_variance(mean,
@@ -1063,7 +1068,7 @@ struct layernorm_bwd_graph {
                               .set_name("scale")
                               .set_dim({1, c, 1, 1})
                               .set_stride({c, 1, c, c})
-                              .set_data_type(fe::DataType_t::FLOAT));
+                              .set_data_type(param_type));
 
     auto outputs = graph->layernorm_backward(dy, x, scale, ln_bwd_options);
     dx = outputs[0];
@@ -1071,8 +1076,8 @@ struct layernorm_bwd_graph {
     dbias = outputs[2];
 
     dx->set_output(true).set_data_type(io_type);
-    dscale->set_output(true).set_data_type(fe::DataType_t::FLOAT);
-    dbias->set_output(true).set_data_type(fe::DataType_t::FLOAT);
+    dscale->set_output(true).set_data_type(param_type);
+    dbias->set_output(true).set_data_type(param_type);
 
     ensure_ok(graph->validate(), "layernorm_bwd validate");
     ensure_ok(graph->build_operation_graph(handle), "layernorm_bwd build op graph");
@@ -2581,8 +2586,8 @@ void CuDNNEngine::batchnorm_bwd(void* backend_handle, const BatchNormStats& stat
   ensure_ok(status, "batchnorm backward execute");
 
   size_t num_elements = stats.channels;
-  tunx::cuda::axpy(grad_gamma_temp, grad_gamma, num_elements, DType_t::FP32, stream);
-  tunx::cuda::axpy(grad_beta_temp, grad_beta, num_elements, DType_t::FP32, stream);
+  tunx::cuda::axpy(grad_gamma_temp, grad_gamma, num_elements, type_desc.param_dtype, stream);
+  tunx::cuda::axpy(grad_beta_temp, grad_beta, num_elements, type_desc.param_dtype, stream);
 }
 
 void CuDNNEngine::conv2d_fwd(void* backend_handle, const Conv2DStats& stats, const void* input,
@@ -2837,8 +2842,8 @@ void CuDNNEngine::layernorm_bwd(void* backend_handle, const LayerNormStats& stat
   ensure_ok(status, "layernorm bwd execute");
 
   size_t num_elements = stats.channels;
-  tunx::cuda::axpy(grad_gamma_temp, grad_gamma, num_elements, DType_t::FP32, stream);
-  tunx::cuda::axpy(grad_beta_temp, grad_beta, num_elements, DType_t::FP32, stream);
+  tunx::cuda::axpy(grad_gamma_temp, grad_gamma, num_elements, type_desc.param_dtype, stream);
+  tunx::cuda::axpy(grad_beta_temp, grad_beta, num_elements, type_desc.param_dtype, stream);
 }
 
 WorkspaceReq CuDNNEngine::query_transpose_graph(void* backend_handle, const TransposeStats& stats,
@@ -2923,3 +2928,4 @@ void CuDNNEngine::transpose(void* backend_handle, const TransposeStats& stats, c
 }
 
 }  // namespace tunx
+#endif

@@ -41,8 +41,8 @@ private:
 
 public:
   explicit BatchNormImpl(size_t num_features, float epsilon = 1e-5f, float momentum = 0.1f,
-                              bool affine = true, bool use_relu = false,
-                              const std::string &name = "batchnorm");
+                         bool affine = true, bool use_relu = false,
+                         const std::string &name = "batchnorm");
   ~BatchNormImpl() override;
 
   static constexpr const char *TYPE_NAME = "batchnorm";
@@ -53,14 +53,14 @@ public:
   Vec<ParamDescriptor> param_descriptors() override {
     Vec<ParamDescriptor> descriptors;
     auto gamma_desc = ParamDescriptor{
-        DType_t::FP32,
+        param_dtype_,
         {num_features_},
         &gamma_,
         &grad_gamma_,
     };
     descriptors.push_back(gamma_desc);
     auto beta_desc = ParamDescriptor{
-        DType_t::FP32,
+        param_dtype_,
         {num_features_},
         &beta_,
         &grad_beta_,
@@ -89,10 +89,10 @@ public:
 
 class BatchNorm : public LayerRef<internal::BatchNormImpl> {
 public:
-  BatchNorm(size_t num_features, float epsilon = 1e-5f, float momentum = 0.1f,
-                 bool affine = true, bool use_relu = false, const std::string &name = "batchnorm")
+  BatchNorm(size_t num_features, float epsilon = 1e-5f, float momentum = 0.1f, bool affine = true,
+            bool use_relu = false, const std::string &name = "batchnorm")
       : LayerRef(std::make_shared<internal::BatchNormImpl>(num_features, epsilon, momentum, affine,
-                                                      use_relu, name)) {}
+                                                           use_relu, name)) {}
 
   using LayerRef<internal::BatchNormImpl>::LayerRef;
 };

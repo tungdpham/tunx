@@ -33,7 +33,7 @@ private:
 
 public:
   explicit LayerNormImpl(size_t normalized_shape, float epsilon = 1e-5f, bool affine = true,
-                              const std::string &name = "layer_norm");
+                         const std::string &name = "layer_norm");
 
   ~LayerNormImpl();
 
@@ -49,14 +49,14 @@ public:
     Vec<ParamDescriptor> descriptors;
     if (affine_) {
       auto gamma_desc = ParamDescriptor{
-          DType_t::FP32,
+          param_dtype_,
           {normalized_shape_},
           &gamma_,
           &grad_gamma_,
       };
       descriptors.push_back(gamma_desc);
       auto beta_desc = ParamDescriptor{
-          DType_t::FP32,
+          param_dtype_,
           {normalized_shape_},
           &beta_,
           &grad_beta_,
@@ -74,8 +74,9 @@ public:
 class LayerNorm : public LayerRef<internal::LayerNormImpl> {
 public:
   explicit LayerNorm(size_t normalized_shape, float epsilon = 1e-5f, bool affine = true,
-                          const std::string &name = "layer_norm")
-      : LayerRef(std::make_shared<internal::LayerNormImpl>(normalized_shape, epsilon, affine, name)) {}
+                     const std::string &name = "layer_norm")
+      : LayerRef(
+            std::make_shared<internal::LayerNormImpl>(normalized_shape, epsilon, affine, name)) {}
 
   using LayerRef<internal::LayerNormImpl>::LayerRef;
 };

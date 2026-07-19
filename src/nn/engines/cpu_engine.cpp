@@ -409,9 +409,9 @@ void batchnorm_infer_impl(const T* input, const float* running_mean, const float
   });
 }
 
-template <typename T>
+template <typename T, typename ParamT>
 void batchnorm_fwd_impl(const T* input, float* mean, float* inv_std, float* running_mean,
-                        float* running_var, const float* gamma, const float* beta, T* output,
+                        float* running_var, const ParamT* gamma, const ParamT* beta, T* output,
                         bool* relu_mask, size_t N, size_t C, size_t S, float momentum,
                         float epsilon, bool affine, bool use_relu) {
   size_t M = N * S;
@@ -446,8 +446,8 @@ void batchnorm_fwd_impl(const T* input, float* mean, float* inv_std, float* runn
     float unbiased_var = (M > 1) ? (var * M) / static_cast<float>(M - 1) : 0.0f;
     running_mean[c] = (1.0f - momentum) * running_mean[c] + momentum * mu;
     running_var[c] = (1.0f - momentum) * running_var[c] + momentum * unbiased_var;
-    float g = affine ? gamma[c] : 1.0f;
-    float b = beta[c];
+    float g = affine ? static_cast<float>(gamma[c]) : 1.0f;
+    float b = static_cast<float>(beta[c]);
     scale[c] = g * istd;
     bias_term[c] = b - (mu * scale[c]);
   }
@@ -518,8 +518,8 @@ void batchnorm_bwd_impl(const T* grad_output, const T* input, const float* mean,
   });
 }
 
-template <typename T>
-void layernorm_fwd_impl(const T* input, T* output, const T* gamma, const T* beta, size_t batch_size,
+template <typename T, typename ParamT>
+void layernorm_fwd_impl(const T* input, T* output, const ParamT* gamma, const ParamT* beta, size_t batch_size,
                         size_t channels, T epsilon) {
   size_t batch_stride = channels;
   parallel_for<size_t>(0, batch_size, [&](size_t n) {
@@ -541,16 +541,16 @@ void layernorm_fwd_impl(const T* input, T* output, const T* gamma, const T* beta
       size_t idx = base_idx + c;
       T val = input[idx];
       T normalized = (val - mean) * inv_std;
-      T g = gamma ? gamma[c] : T(1);
-      T b = beta ? beta[c] : T(0);
+      T g = gamma ? static_cast<T>(gamma[c]) : T(1);
+      T b = beta ? static_cast<T>(beta[c]) : T(0);
       output[idx] = normalized * g + b;
     }
   });
 }
 
-template <typename T>
-void layernorm_bwd_impl(const T* grad_output, const T* input, const T* gamma, T* grad_input,
-                        T* grad_gamma, T* grad_beta, size_t batch_size, size_t channels,
+template <typename T, typename ParamT>
+void layernorm_bwd_impl(const T* grad_output, const T* input, const ParamT* gamma, T* grad_input,
+                        ParamT* grad_gamma, ParamT* grad_beta, size_t batch_size, size_t channels,
                         T epsilon) {
   size_t batch_stride = channels;
   std::vector<T> means(batch_size);
@@ -583,7 +583,7 @@ void layernorm_bwd_impl(const T* grad_output, const T* input, const T* gamma, T*
       T go = grad_output[idx];
       T val = input[idx];
       T normalized = (val - mean) * inv_std;
-      T g = gamma ? gamma[c] : T(1);
+      T g = gamma ? static_cast<T>(gamma[c]) : T(1);
       T dx_hat = go * g;
       sum_grad_normalized += dx_hat * normalized;
       sum_grad_gamma_normalized += dx_hat;
@@ -593,7 +593,7 @@ void layernorm_bwd_impl(const T* grad_output, const T* input, const T* gamma, T*
       size_t idx = base_idx + c;
       T val = input[idx];
       T normalized = (val - mean) * inv_std;
-      T g = gamma ? gamma[c] : T(1);
+      T g = gamma ? static_cast<T>(gamma[c]) : T(1);
       T go = grad_output[idx];
       T dx_hat = go * g;
       grad_input[idx] = factor * (static_cast<T>(channels) * dx_hat - sum_grad_gamma_normalized -
@@ -615,8 +615,8 @@ void layernorm_bwd_impl(const T* grad_output, const T* input, const T* gamma, T*
         }
         if (grad_beta) dbeta += go;
       }
-      if (grad_gamma) grad_gamma[c] += dgamma;
-      if (grad_beta) grad_beta[c] += dbeta;
+      if (grad_gamma) grad_gamma[c] = static_cast<ParamT>(static_cast<T>(grad_gamma[c]) + dgamma);
+      if (grad_beta) grad_beta[c] = static_cast<ParamT>(static_cast<T>(grad_beta[c]) + dbeta);
     });
   }
 }
@@ -816,10 +816,10 @@ void legacy_avgpool2d_bwd_impl(const T* gradient_data, T* grad_input_data, size_
   });
 }
 
-template <typename T>
+template <typename T, typename ParamT>
 void legacy_batchnorm_inf_impl(const T* input_data, const float* running_mean_data,
-                               const float* running_var_data, const float* gamma_data,
-                               const float* beta_data, T* output_data, size_t batch_size,
+                               const float* running_var_data, const ParamT* gamma_data,
+                               const ParamT* beta_data, T* output_data, size_t batch_size,
                                size_t channels, size_t spatial_size, float epsilon, bool affine) {
   size_t channel_stride = channels * spatial_size;
 
@@ -835,8 +835,8 @@ void legacy_batchnorm_inf_impl(const T* input_data, const float* running_mean_da
     T* output_ptr = output_data + base_idx;
 
     if (affine) {
-      const float gamma_val = gamma_data[c];
-      const float beta_val = beta_data[c];
+      const float gamma_val = static_cast<float>(gamma_data[c]);
+      const float beta_val = static_cast<float>(beta_data[c]);
 
       for (size_t i = 0; i < spatial_size; ++i) {
         float normalized_val = (static_cast<float>(input_ptr[i]) - mean_val) * inv_std;
@@ -850,9 +850,9 @@ void legacy_batchnorm_inf_impl(const T* input_data, const float* running_mean_da
   });
 }
 
-template <typename T>
+template <typename T, typename ParamT>
 void legacy_batchnorm_fwd_impl(const T* input, float* mean, float* inv_std, float* running_mean,
-                               float* running_var, const float* gamma, const float* beta, T* output,
+                               float* running_var, const ParamT* gamma, const ParamT* beta, T* output,
                                float* norm_cache, size_t N, size_t C, size_t S, float momentum,
                                float epsilon, bool affine) {
   size_t total_elements = N * S;
@@ -917,7 +917,7 @@ void legacy_batchnorm_fwd_impl(const T* input, float* mean, float* inv_std, floa
       if (norm_ptr) norm_ptr[s] = norm;
 
       if (affine) {
-        output_ptr[s] = static_cast<T>(norm * gamma[c] + beta[c]);
+        output_ptr[s] = static_cast<T>(norm * static_cast<float>(gamma[c]) + static_cast<float>(beta[c]));
       } else {
         output_ptr[s] = static_cast<T>(norm);
       }
@@ -925,9 +925,9 @@ void legacy_batchnorm_fwd_impl(const T* input, float* mean, float* inv_std, floa
   });
 }
 
-template <typename T>
+template <typename T, typename ParamT>
 void legacy_batchnorm_bwd_impl(const T* grad_output, const float* norm_input, const float* inv_std,
-                               const float* gamma, float* d_gamma, float* d_beta, T* grad_input,
+                               const ParamT* gamma, ParamT* d_gamma, ParamT* d_beta, T* grad_input,
                                size_t N, size_t C, size_t S, bool affine) {
   size_t channel_stride = C * S;
   size_t M = N * S;
@@ -953,20 +953,20 @@ void legacy_batchnorm_bwd_impl(const T* grad_output, const float* norm_input, co
     }
 
     if (affine) {
-      d_gamma[c] += sum_dy_x_norm;
-      d_beta[c] += sum_dy;
+      d_gamma[c] = static_cast<ParamT>(static_cast<float>(d_gamma[c]) + sum_dy_x_norm);
+      d_beta[c] = static_cast<ParamT>(static_cast<float>(d_beta[c]) + sum_dy);
     } else {
-      d_gamma[c] = sum_dy_x_norm;
-      d_beta[c] = sum_dy;
+      d_gamma[c] = static_cast<ParamT>(sum_dy_x_norm);
+      d_beta[c] = static_cast<ParamT>(sum_dy);
     }
   });
 
   parallel_for_2d(N, C, [&](size_t n, size_t c) {
-    const float g = (affine && gamma) ? gamma[c] : 1.0f;
+    const float g = (affine && gamma) ? static_cast<float>(gamma[c]) : 1.0f;
     const float istd = inv_std[c];
 
-    const float sum_dy = d_beta[c];
-    const float sum_dy_x_norm = d_gamma[c];
+    const float sum_dy = static_cast<float>(d_beta[c]);
+    const float sum_dy_x_norm = static_cast<float>(d_gamma[c]);
 
     size_t n_offset = n * channel_stride;
     size_t c_offset = c * S;

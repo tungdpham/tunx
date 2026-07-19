@@ -1,3 +1,4 @@
+#ifdef USE_CUDA
 #include <cublas_v2.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -440,8 +441,8 @@ __global__ void batchnorm_fwd_kernel_vec(
 
     float mu = mean[c];
     float istd = inv_std[c];
-    float g = (affine && gamma) ? gamma[c] : 1.0f;
-    float b = (affine && beta) ? beta[c] : 0.0f;
+    float g = (affine && gamma) ? static_cast<float>(gamma[c]) : 1.0f;
+    float b = (affine && beta) ? static_cast<float>(beta[c]) : 0.0f;
 
     VecT x_vec = reinterpret_cast<const VecT*>(input)[idx];
     const T* x_arr = reinterpret_cast<const T*>(&x_vec);
@@ -959,8 +960,8 @@ __global__ void embedding_wgrad_kernel(const T* input, const T* grad, T* grad_we
   }
 }
 
-template <typename T>
-__global__ void layernorm_fwd_kernel(const T* input, T* output, const T* gamma, const T* beta,
+template <typename T, typename ParamT>
+__global__ void layernorm_fwd_kernel(const T* input, T* output, const ParamT* gamma, const ParamT* beta,
                                      size_t channels, T epsilon) {
   size_t n = static_cast<size_t>(blockIdx.x);
 
@@ -983,8 +984,8 @@ __global__ void layernorm_fwd_kernel(const T* input, T* output, const T* gamma, 
 
   for (size_t c = 0; c < channels; ++c) {
     const T norm = (x[c] - mean) * inv_std;
-    const T g = gamma ? gamma[c] : T(1);
-    const T b = beta ? beta[c] : T(0);
+    const T g = gamma ? static_cast<T>(gamma[c]) : T(1);
+    const T b = beta ? static_cast<T>(beta[c]) : T(0);
     y[c] = g * norm + b;
   }
 }
@@ -2270,3 +2271,4 @@ void CUDAEngine::transpose(void* backend_handle, const TransposeStats& stats, co
 }
 
 }  // namespace tunx
+#endif
