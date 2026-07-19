@@ -20,9 +20,9 @@
 namespace tunx {
 namespace internal {
 
-Conv2DImpl::Conv2DImpl(size_t in_channels, size_t out_channels, size_t kernel_h,
-                                 size_t kernel_w, size_t stride_h, size_t stride_w, size_t pad_h,
-                                 size_t pad_w, bool use_bias, const std::string &name)
+Conv2DImpl::Conv2DImpl(size_t in_channels, size_t out_channels, size_t kernel_h, size_t kernel_w,
+                       size_t stride_h, size_t stride_w, size_t pad_h, size_t pad_w, bool use_bias,
+                       const std::string &name)
     : SISOLayerImpl(name),
       in_channels_(in_channels),
       out_channels_(out_channels),
@@ -218,7 +218,7 @@ std::shared_ptr<Conv2DImpl> Conv2DImpl::create_from_config(const LayerConfig &co
   size_t pad_w = config.get<size_t>("pad_w", 0);
   bool use_bias = config.get<bool>("use_bias", true);
   return std::make_shared<Conv2DImpl>(in_channels, out_channels, kernel_h, kernel_w, stride_h,
-                                           stride_w, pad_h, pad_w, use_bias, config.name);
+                                      stride_w, pad_h, pad_w, use_bias, config.name);
 }
 
 }  // namespace internal

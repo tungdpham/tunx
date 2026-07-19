@@ -45,8 +45,8 @@ Tensor ReLUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
     engine_->relu_fwd(backend_handle_, stats, input.data_as<void>(), output.data_as<void>(),
                       mask.data_as<bool>(), ws.data_as<void>(), type_desc);
   } else {
-    engine_->relu_fwd(backend_handle_, stats, input.data_as<void>(), output.data_as<void>(),
-                      nullptr, ws.data_as<void>(), type_desc);
+    engine_->relu_inf(backend_handle_, stats, input.data_as<void>(), output.data_as<void>(),
+                      ws.data_as<void>(), type_desc);
   }
 
   return output;

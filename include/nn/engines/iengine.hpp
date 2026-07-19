@@ -35,6 +35,7 @@ enum OpType {
   DROPOUT_FWD,
   DROPOUT_BWD,
   RELU_FWD,
+  RELU_INFER,
   RELU_BWD,
   EMBEDDING_FWD,
   EMBEDDING_BWD,
@@ -458,6 +459,18 @@ public:
                         void* output, bool* mask, void* workspace, DTypeDesc type_desc) = 0;
 
   /**
+   * @brief Forward pass for a function::ReLU activation (inference mode).
+   * @param backend_handle Opaque handle to the backend context.
+   * @param stats function::ReLU layer configuration.
+   * @param input Input tensor. Shape: Total elements flattened, DType: io_dtype.
+   * @param output Output tensor. Shape: Total elements flattened, DType: io_dtype.
+   * @param workspace Workspace buffer.
+   * @param type_desc Data type descriptors.
+   */
+  virtual void relu_inf(void* backend_handle, const ReLUStats& stats, const void* input,
+                        void* output, void* workspace, DTypeDesc type_desc) = 0;
+
+  /**
    * @brief Backward pass for a function::ReLU activation.
    * @param backend_handle Opaque handle to the backend context.
    * @param stats function::ReLU layer configuration.
@@ -688,7 +701,8 @@ public:
    * @param q_data Query tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
    * @param k_data Key tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
    * @param v_data Value tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
-   * @param o_data Output tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
+   * @param o_data Output tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType:
+   * io_dtype.
    * @param stats_data Statistics tensor (e.g. softmax stats). DType: compute_dtype.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
@@ -704,12 +718,17 @@ public:
    * @param q_data Query tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
    * @param k_data Key tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
    * @param v_data Value tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
-   * @param o_data Output tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
-   * @param dO_data Gradient w.r.t output tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
+   * @param o_data Output tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType:
+   * io_dtype.
+   * @param dO_data Gradient w.r.t output tensor. Shape: [batch_size, num_heads, seq_len, head_dim],
+   * DType: io_dtype.
    * @param stats_data Statistics tensor from forward pass. DType: compute_dtype.
-   * @param dQ_data Gradient w.r.t Query tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
-   * @param dK_data Gradient w.r.t Key tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
-   * @param dV_data Gradient w.r.t Value tensor. Shape: [batch_size, num_heads, seq_len, head_dim], DType: io_dtype.
+   * @param dQ_data Gradient w.r.t Query tensor. Shape: [batch_size, num_heads, seq_len, head_dim],
+   * DType: io_dtype.
+   * @param dK_data Gradient w.r.t Key tensor. Shape: [batch_size, num_heads, seq_len, head_dim],
+   * DType: io_dtype.
+   * @param dV_data Gradient w.r.t Value tensor. Shape: [batch_size, num_heads, seq_len, head_dim],
+   * DType: io_dtype.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */

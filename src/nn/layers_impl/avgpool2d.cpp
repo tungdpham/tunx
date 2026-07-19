@@ -68,7 +68,8 @@ Tensor AvgPool2DImpl::forward_impl(const Tensor &input, Residuals &residuals) {
   WorkspaceReq ws_req = engine_->query_avgpool_graph(backend_handle_, stats, type_desc);
 
   Tensor output = get_tensor({batch_size, output_h, output_w, channels}, input.dtype());
-  Tensor ws = get_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+  size_t ws_size = is_training_ ? ws_req.fwd_workspace : ws_req.inf_workspace;
+  Tensor ws = get_tensor({ws_size}, DType_t::BYTE);
 
   engine_->avgpool_fwd(backend_handle_, stats, input.data_as<void>(), output.data_as<void>(),
                        ws.data_as<void>(), type_desc);

@@ -13,7 +13,7 @@
   "model_name": "cifar100_wrn16_8",
   "model_path": "",
   "dataset_name": "cifar-100",
-  "dataset_path": "data/cifar-100-binary",
+  "dataset_path": "../data/cifar-100-binary",
   "io_dtype": "FP32",
   "param_dtype": "FP32",
   "compute_dtype": "FP32",

@@ -14,7 +14,7 @@
   "model_name": "cifar10_resnet9", // Options: see example_models.cpp
   "model_path": "", // Path to load existing model if specified, otherwise will laod from model_name
   "dataset_name": "cifar-10", // Options: see data_loading.cpp
-  "dataset_path": "data/cifar-10-batches-bin", // Path to dataset. 
+  "dataset_path": "../data/cifar-10-batches-bin", // Path to dataset. 
   "io_dtype": "FP32", // Data type for loading and preprocessing data. Options: "FP32", "FP16", "BF16"
   "param_dtype": "FP32", // Data type for model parameters.
   "compute_dtype": "FP32", // Data type for computations. 

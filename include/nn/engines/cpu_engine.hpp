@@ -85,6 +85,9 @@ public:
   void relu_fwd(void* backend_handle, const ReLUStats& stats, const void* input, void* output,
                 bool* mask, void* workspace, DTypeDesc type_desc) override;
 
+  void relu_inf(void* backend_handle, const ReLUStats& stats, const void* input, void* output,
+                void* workspace, DTypeDesc type_desc) override;
+
   void relu_bwd(void* backend_handle, const ReLUStats& stats, const void* grad_output,
                 void* grad_input, const bool* mask, void* workspace, DTypeDesc type_desc) override;
 
@@ -149,8 +152,8 @@ public:
                 const void* stats_data, void* dQ_data, void* dK_data, void* dV_data,
                 void* workspace, DTypeDesc type_desc) override;
 
-  void transpose(void* backend_handle, const TransposeStats& stats, const void* input,
-                 void* output, void* workspace, DTypeDesc type_desc) override;
+  void transpose(void* backend_handle, const TransposeStats& stats, const void* input, void* output,
+                 void* workspace, DTypeDesc type_desc) override;
 
   // --- Legacy APIs ---
 

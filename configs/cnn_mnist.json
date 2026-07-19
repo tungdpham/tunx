@@ -13,7 +13,7 @@
   "model_name": "mnist_cnn",
   "model_path": "",
   "dataset_name": "mnist",
-  "dataset_path": "data/mnist",
+  "dataset_path": "../data/mnist",
   "io_dtype": "FP32",
   "param_dtype": "FP32",
   "compute_dtype": "FP32",

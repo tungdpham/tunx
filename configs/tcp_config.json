@@ -31,7 +31,7 @@
   "model_name": "cifar10_resnet9",
   "model_path": "",
   "dataset_name": "cifar10",
-  "dataset_path": "data/cifar-10-batches-bin",
+  "dataset_path": "../data/cifar-10-batches-bin",
   "io_dtype": "FP32",
   "param_dtype": "FP32",
   "compute_dtype": "FP32",

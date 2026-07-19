@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <random>
 #include <vector>
@@ -333,6 +334,13 @@ void relu_fwd_impl(const T* input_data, T* output_data, bool* mask_data, size_t 
     bool is_positive = input_data[i] > zero;
     output_data[i] = is_positive ? input_data[i] : zero;
     if (mask_data) mask_data[i] = is_positive;
+  });
+}
+
+template <typename T>
+void relu_inf_impl(const T* input_data, T* output_data, size_t num_elements) {
+  parallel_for<size_t>(0, num_elements, [&](size_t i) {
+    output_data[i] = input_data[i] > T(0) ? input_data[i] : T(0);
   });
 }
 
@@ -1146,8 +1154,7 @@ void CPUEngine::dense_bgrad(void*, const DenseStats& stats, const void* grad_out
 
 void CPUEngine::avgpool_fwd(void*, const AvgPool2DStats& stats, const void* input, void* output,
                             void* workspace, DTypeDesc type_desc) {
-  size_t output_h =
-      (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
+  size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1173,8 +1180,7 @@ void CPUEngine::avgpool_bwd(void*, const AvgPool2DStats& stats, const void* grad
 
 void CPUEngine::maxpool2d_fwd(void*, const MaxPool2DStats& stats, const void* input, void* output,
                               void* mask, void* workspace, DTypeDesc type_desc) {
-  size_t output_h =
-      (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
+  size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1187,8 +1193,7 @@ void CPUEngine::maxpool2d_fwd(void*, const MaxPool2DStats& stats, const void* in
 
 void CPUEngine::maxpool2d_infer(void*, const MaxPool2DStats& stats, const void* input, void* output,
                                 void* workspace, DTypeDesc type_desc) {
-  size_t output_h =
-      (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
+  size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1202,8 +1207,7 @@ void CPUEngine::maxpool2d_infer(void*, const MaxPool2DStats& stats, const void* 
 void CPUEngine::maxpool2d_bwd(void*, const MaxPool2DStats& stats, const void* grad_output,
                               void* grad_input, const void* mask, void* workspace,
                               DTypeDesc type_desc) {
-  size_t output_h =
-      (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
+  size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1262,6 +1266,15 @@ void CPUEngine::relu_fwd(void*, const ReLUStats& stats, const void* input, void*
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     relu_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output), mask,
+                     stats.batch_size * stats.spatial_size);
+  });
+}
+
+void CPUEngine::relu_inf(void*, const ReLUStats& stats, const void* input, void* output,
+                         void* workspace, DTypeDesc type_desc) {
+  CHECK_HOMOGENEOUS_DTYPE(type_desc);
+  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
+    relu_inf_impl<T>(static_cast<const T*>(input), static_cast<T*>(output),
                      stats.batch_size * stats.spatial_size);
   });
 }
@@ -1344,8 +1357,7 @@ void CPUEngine::batchnorm_bwd(void*, const BatchNormStats& stats, const void* gr
 
 void CPUEngine::conv2d_fwd(void*, const Conv2DStats& stats, const void* input, const void* weight,
                            const void* bias, void* output, void* workspace, DTypeDesc type_desc) {
-  size_t output_h =
-      (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
+  size_t output_h = (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
   size_t output_w = (stats.input_w + 2 * stats.pad_w - stats.kernel_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1360,8 +1372,7 @@ void CPUEngine::conv2d_fwd(void*, const Conv2DStats& stats, const void* input, c
 void CPUEngine::conv2d_dgrad(void*, const Conv2DStats& stats, const void* grad_output,
                              const void* weight, void* grad_input, void* workspace,
                              DTypeDesc type_desc) {
-  size_t output_h =
-      (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
+  size_t output_h = (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
   size_t output_w = (stats.input_w + 2 * stats.pad_w - stats.kernel_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1376,8 +1387,7 @@ void CPUEngine::conv2d_dgrad(void*, const Conv2DStats& stats, const void* grad_o
 void CPUEngine::conv2d_wgrad(void*, const Conv2DStats& stats, const void* grad_output,
                              const void* input, void* grad_weight, void* workspace,
                              DTypeDesc type_desc) {
-  size_t output_h =
-      (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
+  size_t output_h = (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
   size_t output_w = (stats.input_w + 2 * stats.pad_w - stats.kernel_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1391,8 +1401,7 @@ void CPUEngine::conv2d_wgrad(void*, const Conv2DStats& stats, const void* grad_o
 
 void CPUEngine::conv2d_bgrad(void*, const Conv2DStats& stats, const void* grad_output,
                              void* grad_bias, void* workspace, DTypeDesc type_desc) {
-  size_t output_h =
-      (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
+  size_t output_h = (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
   size_t output_w = (stats.input_w + 2 * stats.pad_w - stats.kernel_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {

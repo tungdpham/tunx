@@ -338,6 +338,18 @@ public:
                 bool* mask, void* workspace, DTypeDesc type_desc) override;
 
   /**
+   * @brief Forward pass for a ReLU activation (inference mode).
+   * @param backend_handle Opaque handle to the backend context.
+   * @param stats ReLU layer configuration.
+   * @param input Input tensor. Shape: Total elements flattened, DType: io_dtype.
+   * @param output Output tensor. Shape: Total elements flattened, DType: io_dtype.
+   * @param workspace Workspace buffer.
+   * @param type_desc Data type descriptors.
+   */
+  void relu_inf(void* backend_handle, const ReLUStats& stats, const void* input, void* output,
+                void* workspace, DTypeDesc type_desc) override;
+
+  /**
    * @brief Backward pass for a ReLU activation.
    * @param backend_handle Opaque handle to the backend context.
    * @param stats ReLU layer configuration.

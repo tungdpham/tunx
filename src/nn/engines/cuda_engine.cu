@@ -1881,7 +1881,33 @@ void CUDAEngine::relu_fwd(void* backend_handle, const ReLUStats& stats, const vo
         int blocks = (tail_elements + threads - 1) / threads;
         relu_fwd_tail_kernel<T><<<blocks, threads, 0, stream>>>(
             static_cast<const T*>(input), static_cast<T*>(output), reinterpret_cast<uint8_t*>(mask),
-            tail_offset, tail_elements);
+            tail_elements, tail_offset);
+      }
+    }
+  });
+}
+
+void CUDAEngine::relu_inf(void* backend_handle, const ReLUStats& stats, const void* input,
+                          void* output, void* workspace, DTypeDesc type_desc) {
+  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  size_t num_elements = stats.batch_size * stats.spatial_size;
+  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
+    if (num_elements > 0) {
+      constexpr int VecSize = VectoredTraits<T>::size;
+      constexpr int threads = 256;
+      size_t n_vectors = num_elements / VecSize;
+      if (n_vectors > 0) {
+        int blocks = (n_vectors + threads - 1) / threads;
+        relu_fwd_vec_kernel<T><<<blocks, threads, 0, stream>>>(
+            static_cast<const T*>(input), static_cast<T*>(output), nullptr, n_vectors);
+      }
+      size_t tail_offset = n_vectors * VecSize;
+      size_t tail_elements = num_elements - tail_offset;
+      if (tail_elements > 0) {
+        int blocks = (tail_elements + threads - 1) / threads;
+        relu_fwd_tail_kernel<T><<<blocks, threads, 0, stream>>>(static_cast<const T*>(input),
+                                                                static_cast<T*>(output), nullptr,
+                                                                tail_elements, tail_offset);
       }
     }
   });
@@ -2156,7 +2182,8 @@ struct CudaTransposeParams {
 };
 
 template <typename T>
-__global__ void transpose_kernel(const T* input, T* output, CudaTransposeParams p, size_t total_elements) {
+__global__ void transpose_kernel(const T* input, T* output, CudaTransposeParams p,
+                                 size_t total_elements) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= total_elements) return;
 
@@ -2168,7 +2195,7 @@ __global__ void transpose_kernel(const T* input, T* output, CudaTransposeParams 
     coords[i] = in_idx / p.strides[i];
     in_idx %= p.strides[i];
   }
-  
+
   size_t temp = coords[p.dim0];
   coords[p.dim0] = coords[p.dim1];
   coords[p.dim1] = temp;
@@ -2176,7 +2203,7 @@ __global__ void transpose_kernel(const T* input, T* output, CudaTransposeParams 
   for (size_t i = 0; i < p.ndim; ++i) {
     out_idx += coords[i] * p.out_strides[i];
   }
-  
+
   output[out_idx] = input[idx];
 }
 
@@ -2188,14 +2215,16 @@ WorkspaceReq CUDAEngine::query_sdpa_graph(void* backend_handle, const AttentionS
 void CUDAEngine::sdpa_fwd(void* backend_handle, const AttentionStats& stats, const void* q_data,
                           const void* k_data, const void* v_data, void* o_data, void* stats_data,
                           void* workspace, DTypeDesc type_desc) {
-  throw std::runtime_error("SDPA forward is not implemented for generic CUDAEngine. Use CuDNNEngine.");
+  throw std::runtime_error(
+      "SDPA forward is not implemented for generic CUDAEngine. Use CuDNNEngine.");
 }
 
 void CUDAEngine::sdpa_bwd(void* backend_handle, const AttentionStats& stats, const void* q_data,
                           const void* k_data, const void* v_data, const void* o_data,
                           const void* dO_data, const void* stats_data, void* dQ_data, void* dK_data,
                           void* dV_data, void* workspace, DTypeDesc type_desc) {
-  throw std::runtime_error("SDPA backward is not implemented for generic CUDAEngine. Use CuDNNEngine.");
+  throw std::runtime_error(
+      "SDPA backward is not implemented for generic CUDAEngine. Use CuDNNEngine.");
 }
 
 WorkspaceReq CUDAEngine::query_transpose_graph(void* backend_handle, const TransposeStats& stats,
@@ -2206,37 +2235,37 @@ WorkspaceReq CUDAEngine::query_transpose_graph(void* backend_handle, const Trans
 void CUDAEngine::transpose(void* backend_handle, const TransposeStats& stats, const void* input,
                            void* output, void* workspace, DTypeDesc type_desc) {
   cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
-  
+
   CudaTransposeParams p;
   p.ndim = stats.ndim;
   p.dim0 = stats.dim0;
   p.dim1 = stats.dim1;
-  
+
   size_t total_elements = 1;
   for (int i = static_cast<int>(p.ndim) - 1; i >= 0; --i) {
     p.shape[i] = stats.shape[i];
     p.strides[i] = total_elements;
     total_elements *= p.shape[i];
   }
-  
+
   size_t out_shape[8] = {0};
-  for(size_t i=0; i<p.ndim; ++i) out_shape[i] = p.shape[i];
+  for (size_t i = 0; i < p.ndim; ++i) out_shape[i] = p.shape[i];
   std::swap(out_shape[p.dim0], out_shape[p.dim1]);
-  
+
   size_t out_total = 1;
   for (int i = static_cast<int>(p.ndim) - 1; i >= 0; --i) {
     p.out_strides[i] = out_total;
     out_total *= out_shape[i];
   }
-  
+
   if (total_elements == 0) return;
-  
+
   size_t threads = 256;
   size_t blocks = (total_elements + threads - 1) / threads;
-  
+
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
-    transpose_kernel<T><<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(input), static_cast<T*>(output), p, total_elements);
+    transpose_kernel<T><<<blocks, threads, 0, stream>>>(static_cast<const T*>(input),
+                                                        static_cast<T*>(output), p, total_elements);
   });
 }
 

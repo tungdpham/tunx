@@ -1320,6 +1320,16 @@ __global__ void relu_fwd_kernel(const T* __restrict__ input, T* __restrict__ out
 }
 
 template <typename T>
+__global__ void relu_inf_kernel(const T* __restrict__ input, T* __restrict__ output,
+                                size_t total_elements) {
+  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= total_elements) return;
+
+  float val = (float)input[idx];
+  output[idx] = val > 0.0f ? (T)val : (T)0.0f;
+}
+
+template <typename T>
 __global__ void relu_bwd_kernel(const T* __restrict__ grad_output, T* __restrict__ grad_input,
                                 const bool* __restrict__ mask, size_t total_elements) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1674,7 +1684,7 @@ WorkspaceReq CuDNNEngine::query_dense_graph(void* backend_handle, const DenseSta
   size_t fwd_workspace = fwd_graph.workspace_size;
   size_t bwd_workspace = std::max({dgrad_graph.workspace_size, wgrad_graph.workspace_size});
   // TODO: add inf graph
-  return {fwd_workspace, bwd_workspace, 0};
+  return {fwd_workspace, bwd_workspace, fwd_workspace};
 }
 
 WorkspaceReq CuDNNEngine::query_avgpool_graph(void* backend_handle, const AvgPool2DStats& stats,
@@ -1698,7 +1708,7 @@ WorkspaceReq CuDNNEngine::query_avgpool_graph(void* backend_handle, const AvgPoo
   }
   auto& fwd_graph = std::any_cast<avgpool2d_fwd_graph&>(it_fwd->second);
 
-  return {fwd_graph.workspace_size, 0, 0};
+  return {fwd_graph.workspace_size, 0, fwd_graph.workspace_size};
 }
 
 WorkspaceReq CuDNNEngine::query_maxpool2d_graph(void* backend_handle, const MaxPool2DStats& stats,
@@ -1909,7 +1919,7 @@ WorkspaceReq CuDNNEngine::query_conv2d_graph(void* backend_handle, const Conv2DS
     bwd_ws = std::max(bwd_ws, bgrad_graph.workspace_size + bgrad_temp_size);
   }
 
-  return {fwd_ws, bwd_ws, 0};
+  return {fwd_ws, bwd_ws, fwd_ws};
 }
 
 WorkspaceReq CuDNNEngine::query_sdpa_graph(void* backend_handle, const AttentionStats& stats,
@@ -1947,7 +1957,8 @@ WorkspaceReq CuDNNEngine::query_sdpa_graph(void* backend_handle, const Attention
   ensure_ok(bwd_graph.graph->get_workspace_size(bwd_workspace_size), "sdpa bwd workspace");
 
   return WorkspaceReq{static_cast<size_t>(fwd_workspace_size),
-                      static_cast<size_t>(bwd_workspace_size), 0};
+                      static_cast<size_t>(bwd_workspace_size),
+                      static_cast<size_t>(fwd_workspace_size)};
 }
 
 void CuDNNEngine::sdpa_fwd(void* backend_handle, const AttentionStats& stats, const void* q_data,
@@ -2378,6 +2389,22 @@ void CuDNNEngine::relu_fwd(void* backend_handle, const ReLUStats& stats, const v
   DISPATCH_DTYPE(type_desc.io_dtype, T, {
     relu_fwd_kernel<T><<<blocks, threads, 0, stream>>>(
         static_cast<const T*>(input), static_cast<T*>(output), mask, total_elements);
+  });
+}
+
+void CuDNNEngine::relu_inf(void* backend_handle, const ReLUStats& stats, const void* input,
+                           void* output, void* workspace, DTypeDesc type_desc) {
+  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudaStream_t stream;
+  cudnnGetStream(handle, &stream);
+
+  size_t total_elements = stats.batch_size * stats.spatial_size;
+  int threads = 256;
+  int blocks = (total_elements + threads - 1) / threads;
+
+  DISPATCH_DTYPE(type_desc.io_dtype, T, {
+    relu_inf_kernel<T><<<blocks, threads, 0, stream>>>(static_cast<const T*>(input),
+                                                       static_cast<T*>(output), total_elements);
   });
 }
 

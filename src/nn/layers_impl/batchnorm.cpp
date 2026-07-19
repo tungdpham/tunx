@@ -21,8 +21,8 @@
 namespace tunx {
 namespace internal {
 
-BatchNormImpl::BatchNormImpl(size_t num_features, float epsilon, float momentum,
-                                       bool affine, bool use_relu, const std::string &name)
+BatchNormImpl::BatchNormImpl(size_t num_features, float epsilon, float momentum, bool affine,
+                             bool use_relu, const std::string &name)
     : SISOLayerImpl(name),
       num_features_(num_features),
       epsilon_(epsilon),
@@ -184,8 +184,7 @@ Vec<size_t> BatchNormImpl::compute_output_shape(const Vec<size_t> &input_shape) 
   return input_shape;
 }
 
-std::shared_ptr<BatchNormImpl> BatchNormImpl::create_from_config(
-    const LayerConfig &config) {
+std::shared_ptr<BatchNormImpl> BatchNormImpl::create_from_config(const LayerConfig &config) {
   size_t num_features = config.get<size_t>("num_features");
   float epsilon = config.get<float>("epsilon");
   float momentum = config.get<float>("momentum");
@@ -193,7 +192,7 @@ std::shared_ptr<BatchNormImpl> BatchNormImpl::create_from_config(
   bool use_relu = config.get<bool>("use_relu", false);
 
   return std::make_shared<BatchNormImpl>(num_features, epsilon, momentum, affine, use_relu,
-                                              config.name);
+                                         config.name);
 }
 
 }  // namespace internal
