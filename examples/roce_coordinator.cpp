@@ -59,9 +59,7 @@ int main(int argc, char *argv[]) {
   RoCEConfig roce_config;
   roce_config.load_from_json(config_path);
 
-  // Prioritize loading existing model, else create from available ones
-  DeviceType device_type = train_config.device_type;
-  const auto &device = DeviceManager::getInstance().getDevice(device_type);
+  const auto &device = DeviceManager::instance().get(train_config.device_id);
   auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
 
   Graph graph = load_or_create_graph(train_config.model_name, train_config.model_path, allocator);
@@ -88,8 +86,7 @@ int main(int argc, char *argv[]) {
 
   Endpoint local_worker_endpoint = Endpoint::roce(roce_config.host, roce_config.port,
                                                   roce_config.device_name, roce_config.gid_index);
-  auto local_worker =
-      std::make_unique<RoCEWorker>(local_worker_endpoint, device_type == DeviceType::CUDA);
+  auto local_worker = std::make_unique<RoCEWorker>(local_worker_endpoint, train_config.device_id);
   roce_config.worker_endpoints.push_back(local_worker_endpoint);
 
   auto partitioner = std::make_unique<GraphPartitioner>(roce_config.partition_ratios);

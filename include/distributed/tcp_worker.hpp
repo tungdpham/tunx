@@ -34,10 +34,10 @@ public:
    * @param max_ecore_threads Maximum number of E-cores to use (-1 for all available)
    * @param io_threads Number of IO threads for the TCP communicator (default: 1)
    */
-  explicit TCPWorker(Endpoint endpoint, bool use_gpu,
+  explicit TCPWorker(Endpoint endpoint, DeviceID device_id,
                      TCPCommunicator::Config config = TCPCommunicator::Config())
-      : Worker(use_gpu) {
-    const auto &device = use_gpu ? getGPU() : getHost();
+      : Worker(device_id) {
+    const auto &device = DeviceManager::instance().get(device_id);
     auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
     auto communicator = std::make_unique<TCPCommunicator>(endpoint, allocator, config);
 

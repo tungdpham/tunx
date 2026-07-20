@@ -33,7 +33,7 @@ signed main() {
   for (int i = 0; i < 10; ++i) {
     auto flash_start = std::chrono::high_resolution_clock::now();
     flash_attn_output = flash_block.forward({input_data}, legacy_residuals)[0];
-    flash_block.device().getFlow(defaultFlowHandle)->synchronize();
+    flash_block.device().get_flow(defaultFlowHandle)->synchronize();
     auto flash_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> flash_duration = flash_end - flash_start;
     printf("Flash Attention Forward Pass Time: %.3f ms\n", flash_duration.count());

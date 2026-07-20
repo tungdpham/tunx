@@ -79,7 +79,7 @@ public:
       if (using_host_memory_) {
         free(slab_ptr_);
       } else {
-        device_.deallocateAlignedMemory(slab_ptr_);
+        device_.deallocate_aligned_memory(slab_ptr_);
       }
       slab_ptr_ = nullptr;
     }

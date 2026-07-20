@@ -43,8 +43,7 @@ signed main(int argc, char *argv[]) {
   train_config.load_from_json(config_path);
   train_config.print_config();
 
-  // Prioritize loading existing model, else create from available ones
-  const auto &device = train_config.device_type == DeviceType::CUDA ? getGPU(0) : getHost();
+  auto &device = DeviceManager::instance().get(train_config.device_id);
   auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
 
   auto [train_dataset, val_dataset] =

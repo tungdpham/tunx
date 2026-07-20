@@ -54,8 +54,8 @@ public:
   virtual ~Worker() { stop(); }
 
 protected:
-  Worker(bool use_gpu)
-      : use_gpu_(use_gpu),
+  Worker(DeviceID device_id)
+      : device_id_(device_id),
         should_stop_(true),
         is_configured_(false) {}
 
@@ -95,7 +95,7 @@ public:
   bool is_configured() const { return is_configured_; }
 
   void set_config(const StageConfig &config) {
-    auto &device = use_gpu_ ? getGPU() : getHost();
+    auto &device = DeviceManager::instance().get(device_id_);
     auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
     std::istringstream graph_stream(config.graph_state, std::ios::binary);
     graph_ = std::make_unique<Graph>(Graph::load_state(graph_stream, allocator));
@@ -174,7 +174,7 @@ protected:
         }
         this->optimizer_->update();
         this->optimizer_->zero_grads();
-        this->graph_->device().getFlow(defaultFlowHandle)->synchronize();
+        this->graph_->device().get_flow(defaultFlowHandle)->synchronize();
 
         Message response(CommandType::PARAMETERS_UPDATED, std::monostate{});
         communicator_->send_message(std::move(response), coordinator_endpoint_);
@@ -319,7 +319,7 @@ protected:
     }
   }
 
-  bool use_gpu_;
+  DeviceID device_id_;
   std::unique_ptr<Graph> graph_;
   std::unique_ptr<Optimizer> optimizer_;
   std::unique_ptr<Scheduler> scheduler_;

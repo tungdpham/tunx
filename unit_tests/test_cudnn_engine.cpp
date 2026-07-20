@@ -28,12 +28,12 @@ class CuDNNEngineTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
     initializeDefaultDevices();
-    DeviceManager& manager = DeviceManager::getInstance();
-    Vec<std::string> device_ids = manager.getAvailableDeviceIDs();
+    DeviceManager& manager = DeviceManager::instance();
+    Vec<DeviceID> device_ids = manager.get_all();
 
     has_gpu_ = false;
-    for (const std::string& id : device_ids) {
-      const Device& device = manager.getDevice(id);
+    for (const DeviceID& id : device_ids) {
+      const Device& device = manager.get(id);
       if (device.device_type() == DeviceType::CUDA) {
         has_gpu_ = true;
         break;
@@ -43,7 +43,7 @@ protected:
     if (!has_gpu_) {
       GTEST_SKIP() << "No CUDA device available, skipping CuDNN engine tests";
     }
-    Flow* def_handle = getGPU().getFlow(defaultFlowHandle);
+    Flow* def_handle = getGPU().get_flow(defaultFlowHandle);
     CUDAFlow* cuda_handle = dynamic_cast<CUDAFlow*>(def_handle);
     if (cuda_handle == nullptr) {
       throw std::runtime_error("Failed to get CUDA flow");

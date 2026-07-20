@@ -1,12 +1,10 @@
-#include "device/cpu/cpu_context.hpp"
+#include "device/cpu_device.hpp"
 
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <sstream>
-
-#include "device/flow.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -21,12 +19,31 @@
 #endif
 
 namespace tunx {
-CPUContext::CPUContext()
-    : Context() {
-  createFlow(defaultFlowHandle);
+
+CPUDevice::CPUDevice(int id)
+    : Device(id) {
+  create_flow(defaultFlowHandle);
 }
 
-size_t CPUContext::getTotalMemory() const {
+CPUDevice::~CPUDevice() {}
+
+CPUDevice::CPUDevice(CPUDevice &&other) noexcept
+    : Device(std::move(other)),
+      flows_(std::move(other.flows_)) {}
+
+CPUDevice &CPUDevice::operator=(CPUDevice &&other) noexcept {
+  if (this != &other) {
+    Device::operator=(std::move(other));
+    flows_ = std::move(other.flows_);
+  }
+  return *this;
+}
+
+DeviceType CPUDevice::device_type() const { return DeviceType::CPU; }
+
+std::string CPUDevice::get_name() const { return "CPU Device " + std::to_string(id_); }
+
+size_t CPUDevice::get_total_memory() const {
 #ifdef __linux__
   std::ifstream meminfo("/proc/meminfo");
   if (!meminfo.is_open()) {
@@ -58,7 +75,7 @@ size_t CPUContext::getTotalMemory() const {
   return 0;
 #elif defined(__APPLE__)
   // macOS implementation
-  int64 physical_memory;
+  int64_t physical_memory;
   size_t length = sizeof(physical_memory);
   if (sysctlbyname("hw.memsize", &physical_memory, &length, nullptr, 0) == 0) {
     return static_cast<size_t>(physical_memory);
@@ -70,7 +87,7 @@ size_t CPUContext::getTotalMemory() const {
 #endif
 }
 
-size_t CPUContext::getAvailableMemory() const {
+size_t CPUDevice::get_available_memory() const {
 #ifdef __linux__
   std::ifstream meminfo("/proc/meminfo");
   if (!meminfo.is_open()) {
@@ -118,19 +135,11 @@ size_t CPUContext::getAvailableMemory() const {
 #endif
 }
 
-void *CPUContext::allocateMemory(size_t size) { return std::malloc(size); }
+void *CPUDevice::allocate_memory(size_t size) const { return std::malloc(size); }
 
-void CPUContext::deallocateMemory(void *ptr) { std::free(ptr); }
+void CPUDevice::deallocate_memory(void *ptr) const { std::free(ptr); }
 
-void CPUContext::copyToDevice(void *dest, const void *src, size_t size) {
-  std::memcpy(dest, src, size);
-}
-
-void CPUContext::copyToHost(void *dest, const void *src, size_t size) {
-  std::memcpy(dest, src, size);
-}
-
-void *CPUContext::allocateAlignedMemory(size_t size, size_t alignment) {
+void *CPUDevice::allocate_aligned_memory(size_t size, size_t alignment) const {
 #ifdef _WIN32
   return _aligned_malloc(size, alignment);
 #else
@@ -151,7 +160,7 @@ void *CPUContext::allocateAlignedMemory(size_t size, size_t alignment) {
 #endif
 }
 
-void CPUContext::deallocateAlignedMemory(void *ptr) {
+void CPUDevice::deallocate_aligned_memory(void *ptr) const {
 #ifdef _WIN32
   _aligned_free(ptr);
 #else
@@ -167,27 +176,25 @@ void CPUContext::deallocateAlignedMemory(void *ptr) {
 #endif
 }
 
-EngineType CPUContext::get_engine() const { return EngineType::CPU; }
+Endianness CPUDevice::get_endianness() const {
+  uint16_t num = 0x1;
+  char *numPtr = reinterpret_cast<char *>(&num);
+  return (numPtr[0] == 1) ? Endianness::LITTLE : Endianness::BIG;
+}
 
-void CPUContext::createFlow(flowHandle_t handle) {
+void CPUDevice::create_flow(flowHandle_t handle) const {
   if (flows_.find(handle) == flows_.end()) {
     flows_[handle] = std::make_unique<CPUFlow>();
   }
 }
 
-Flow *CPUContext::getFlow(flowHandle_t handle) {
+Flow *CPUDevice::get_flow(flowHandle_t handle) const {
   if (flows_.find(handle) == flows_.end()) {
     std::cerr << "WARN: Creating new CPUFlow with ID: " << handle
               << ". Are we using the right flow?" << std::endl;
     flows_[handle] = std::make_unique<CPUFlow>();
   }
   return flows_[handle].get();
-}
-
-Endianness CPUContext::get_endianness() const {
-  uint16_t num = 0x1;
-  char *numPtr = reinterpret_cast<char *>(&num);
-  return (numPtr[0] == 1) ? Endianness::LITTLE : Endianness::BIG;
 }
 
 }  // namespace tunx

@@ -25,12 +25,12 @@ protected:
   static void SetUpTestSuite() { initializeDefaultDevices(); }
 
   void SetUp() override {
-    DeviceManager &manager = DeviceManager::getInstance();
-    Vec<std::string> device_ids = manager.getAvailableDeviceIDs();
+    DeviceManager &manager = DeviceManager::instance();
+    Vec<DeviceID> device_ids = manager.get_all();
 
     has_gpu_ = false;
-    for (const std::string &id : device_ids) {
-      const Device &device = manager.getDevice(id);
+    for (DeviceID &id : device_ids) {
+      const Device &device = manager.get(id);
       if (device.device_type() == DeviceType::CUDA) {
         has_gpu_ = true;
         break;
@@ -354,14 +354,12 @@ TEST_F(GPUopsTest, Im2colBasicKernel3x3) {
   Tensor gpu_col_data = Tensor({col_size}, DType_t::FP32, getGPU());
   im2col(gpu_input, gpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Vec<float> cpu_col_cpu(col_size);
-  Vec<float> gpu_col_cpu(col_size);
-  std::copy(cpu_col_data.data_as<float>(), cpu_col_data.data_as<float>() + col_size,
-            cpu_col_cpu.data());
-  getGPU().copyToHost(gpu_col_cpu.data(), gpu_col_data.data_as<float>(), col_size * sizeof(float));
+  Tensor cpu_col_cpu = cpu_col_data.to_host();
+  Tensor gpu_col_cpu = gpu_col_data.to_host();
 
   for (size_t i = 0; i < col_size; ++i) {
-    EXPECT_NEAR(cpu_col_cpu[i], gpu_col_cpu[i], 1e-5f) << "Mismatch at index " << i;
+    EXPECT_NEAR(cpu_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
+        << "Mismatch at index " << i;
   }
 }
 
@@ -387,14 +385,12 @@ TEST_F(GPUopsTest, Im2colWithPadding) {
   Tensor gpu_col_data = Tensor({col_size}, DType_t::FP32, getGPU());
   im2col(gpu_input, gpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Vec<float> cpu_col_cpu(col_size);
-  Vec<float> gpu_col_cpu(col_size);
-  std::copy(cpu_col_data.data_as<float>(), cpu_col_data.data_as<float>() + col_size,
-            cpu_col_cpu.data());
-  getGPU().copyToHost(gpu_col_cpu.data(), gpu_col_data.data_as<float>(), col_size * sizeof(float));
+  Tensor cpu_col_cpu = cpu_col_data.to_host();
+  Tensor gpu_col_cpu = gpu_col_data.to_host();
 
   for (size_t i = 0; i < col_size; ++i) {
-    EXPECT_NEAR(cpu_col_cpu[i], gpu_col_cpu[i], 1e-5f) << "Mismatch at index " << i;
+    EXPECT_NEAR(cpu_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
+        << "Mismatch at index " << i;
   }
 }
 
@@ -418,13 +414,12 @@ TEST_F(GPUopsTest, Im2colWithStride) {
   Tensor gpu_col_data = Tensor({col_size}, DType_t::FP32, getGPU());
   im2col(gpu_input, gpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Vec<float> cpu_col_cpu(col_size);
-  Vec<float> gpu_col_cpu(col_size);
-  std::copy(cpu_col.data_as<float>(), cpu_col.data_as<float>() + col_size, cpu_col_cpu.data());
-  getGPU().copyToHost(gpu_col_cpu.data(), gpu_col_data.data_as<float>(), col_size * sizeof(float));
+  Tensor cpu_col_cpu = cpu_col.to_host();
+  Tensor gpu_col_cpu = gpu_col_data.to_host();
 
   for (size_t i = 0; i < col_size; ++i) {
-    EXPECT_NEAR(cpu_col_cpu[i], gpu_col_cpu[i], 1e-5f) << "Mismatch at index " << i;
+    EXPECT_NEAR(cpu_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
+        << "Mismatch at index " << i;
   }
 }
 
@@ -450,13 +445,12 @@ TEST_F(GPUopsTest, Im2colMultiBatch) {
   Tensor gpu_col_data = Tensor({col_size}, DType_t::FP32, getGPU());
   im2col(gpu_input, gpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Vec<float> cpu_col_cpu(col_size);
-  Vec<float> gpu_col_cpu(col_size);
-  std::copy(cpu_col.data_as<float>(), cpu_col.data_as<float>() + col_size, cpu_col_cpu.data());
-  getGPU().copyToHost(gpu_col_cpu.data(), gpu_col_data.data_as<float>(), col_size * sizeof(float));
+  Tensor cpu_col_cpu = cpu_col.to_host();
+  Tensor gpu_col_cpu = gpu_col_data.to_host();
 
   for (size_t i = 0; i < col_size; ++i) {
-    EXPECT_NEAR(cpu_col_cpu[i], gpu_col_cpu[i], 1e-5f) << "Mismatch at index " << i;
+    EXPECT_NEAR(cpu_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
+        << "Mismatch at index " << i;
   }
 }
 
@@ -489,15 +483,12 @@ TEST_F(GPUopsTest, Col2imBasic) {
   col2im(gpu_col_data, gpu_result, batch_size, channels, height, width, kernel_h, kernel_w,
          stride_h, stride_w, pad_h, pad_w);
 
-  Vec<float> cpu_result_cpu(batch_size * channels * height * width);
-  Vec<float> gpu_result_cpu(batch_size * channels * height * width);
-  std::copy(cpu_result.data_as<float>(), cpu_result.data_as<float>() + cpu_result_cpu.size(),
-            cpu_result_cpu.data());
-  getGPU().copyToHost(gpu_result_cpu.data(), gpu_result.data_as<float>(),
-                      batch_size * channels * height * width * sizeof(float));
+  Tensor cpu_result_cpu = cpu_result.to_host();
+  Tensor gpu_result_cpu = gpu_result.to_host();
 
   for (size_t i = 0; i < cpu_result_cpu.size(); ++i) {
-    EXPECT_NEAR(cpu_result_cpu[i], gpu_result_cpu[i], 1e-4f) << "Mismatch at index " << i;
+    EXPECT_NEAR(cpu_result_cpu.data_as<float>()[i], gpu_result_cpu.data_as<float>()[i], 1e-4f)
+        << "Mismatch at index " << i;
   }
 }
 
@@ -532,15 +523,12 @@ TEST_F(GPUopsTest, Col2imWithPadding) {
   col2im(gpu_col_data, gpu_result, batch_size, channels, height, width, kernel_h, kernel_w,
          stride_h, stride_w, pad_h, pad_w);
 
-  Vec<float> cpu_result_cpu(batch_size * channels * height * width);
-  Vec<float> gpu_result_cpu(batch_size * channels * height * width);
-  std::copy(cpu_result.data_as<float>(), cpu_result.data_as<float>() + cpu_result_cpu.size(),
-            cpu_result_cpu.data());
-  getGPU().copyToHost(gpu_result_cpu.data(), gpu_result.data_as<float>(),
-                      batch_size * channels * height * width * sizeof(float));
+  Tensor cpu_result_cpu = cpu_result.to_host();
+  Tensor gpu_result_cpu = gpu_result.to_host();
 
   for (size_t i = 0; i < cpu_result_cpu.size(); ++i) {
-    EXPECT_NEAR(cpu_result_cpu[i], gpu_result_cpu[i], 1e-4f) << "Mismatch at index " << i;
+    EXPECT_NEAR(cpu_result_cpu.data_as<float>()[i], gpu_result_cpu.data_as<float>()[i], 1e-4f)
+        << "Mismatch at index " << i;
   }
 }
 

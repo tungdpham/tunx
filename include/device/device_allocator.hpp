@@ -31,11 +31,11 @@ public:
   }
 
   dptr allocate(size_t size) override {
-    void* ptr = device_->allocateAlignedMemory(size, DEFAULT_ALIGNMENT);
+    void *ptr = device_->allocate_aligned_memory(size, DEFAULT_ALIGNMENT);
     device_storage* storage_ptr = new device_storage(*device_, ptr, size, DEFAULT_ALIGNMENT);
     auto storage = std::shared_ptr<device_storage>(storage_ptr, [this](device_storage* storage) {
       if (storage) {
-        device_->deallocateAlignedMemory(storage->data());
+        device_->deallocate_aligned_memory(storage->data());
         delete storage;
       }
     });

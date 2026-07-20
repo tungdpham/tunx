@@ -57,7 +57,7 @@ struct TrainingConfig {
   std::string model_path = "";    // If set, will try to load model from this path before training
   std::string dataset_name = "";  // e.g., "cifar10", "mnist", "open-web-text", etc.
   std::string dataset_path = "data";
-  DeviceType device_type = DeviceType::CPU;
+  DeviceID device_id;
   DType_t io_dtype = DType_t::FP32;
   DType_t param_dtype = DType_t::FP32;
   DType_t compute_dtype = DType_t::FP32;

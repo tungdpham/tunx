@@ -8,6 +8,7 @@
 #include <iostream>
 #include <string>
 
+#include "device/device_manager.hpp"
 #include "threading/thread_wrapper.hpp"
 
 using namespace tunx;
@@ -16,7 +17,7 @@ using namespace std;
 
 struct Config {
   int listen_port = 0;
-  bool use_gpu = false;
+  std::string device = "CPU:0";
   uint32_t io_threads = 2;
   size_t num_threads = 8;
 };
@@ -40,7 +41,7 @@ bool parse_arguments(int argc, char *argv[], Config &cfg) {
   int c;
 
   static struct option long_options[] = {{"ecore", no_argument, 0, 'e'},
-                                         {"gpu", no_argument, 0, 'g'},
+                                         {"gpu", required_argument, 0, 'g'},
                                          {"io-threads", required_argument, 0, 'i'},
                                          {"num-threads", required_argument, 0, 'n'},
                                          {"help", no_argument, 0, 'h'},
@@ -51,7 +52,7 @@ bool parse_arguments(int argc, char *argv[], Config &cfg) {
   while ((c = getopt_long(argc, argv, "h", long_options, nullptr)) != -1) {
     switch (c) {
       case 'g':
-        cfg.use_gpu = true;
+        cfg.device = "GPU:" + std::string(optarg);
         break;
       case 'i':
         try {
@@ -127,14 +128,15 @@ int main(int argc, char *argv[]) {
 
   cout << "Network Stage Worker Configuration" << endl;
   cout << "Listen port: " << cfg.listen_port << endl;
-  cout << "CUDA offloading: " << (cfg.use_gpu ? "Enabled" : "Disabled") << endl;
+  cout << "Compute Device: " << cfg.device << endl;
   cout << "IO threads: " << cfg.io_threads << endl;
   cout << "Worker threads: " << cfg.num_threads << endl;
 
   ThreadWrapper thread_wrapper({static_cast<unsigned int>(cfg.num_threads)});
 
+  DeviceID device_id = DeviceID::from_string(cfg.device);
   thread_wrapper.execute([&]() {
-    TCPWorker worker(Endpoint::tcp("0.0.0.0", cfg.listen_port), cfg.use_gpu, {cfg.io_threads});
+    TCPWorker worker(Endpoint::tcp("0.0.0.0", cfg.listen_port), device_id, {cfg.io_threads});
     worker.start();
   });
 

@@ -14,12 +14,12 @@ protected:
   static void SetUpTestSuite() { initializeDefaultDevices(); }
 
   void SetUp() override {
-    DeviceManager &manager = DeviceManager::getInstance();
-    Vec<std::string> device_ids = manager.getAvailableDeviceIDs();
+    DeviceManager &manager = DeviceManager::instance();
+    Vec<DeviceID> device_ids = manager.get_all();
 
     has_gpu_ = false;
-    for (const std::string &id : device_ids) {
-      const Device &device = manager.getDevice(id);
+    for (const DeviceID &id : device_ids) {
+      const Device &device = manager.get(id);
       if (device.device_type() == DeviceType::CUDA) {
         has_gpu_ = true;
         break;
@@ -495,19 +495,19 @@ class GPUTensorSizeTest
     : public ::testing::TestWithParam<std::tuple<size_t, size_t, size_t, size_t>> {
 protected:
   static void SetUpTestSuite() {
-    DeviceManager &manager = DeviceManager::getInstance();
-    if (manager.getAvailableDeviceIDs().empty()) {
+    DeviceManager &manager = DeviceManager::instance();
+    if (manager.get_all().empty()) {
       initializeDefaultDevices();
     }
   }
 
   void SetUp() override {
-    DeviceManager &manager = DeviceManager::getInstance();
-    Vec<std::string> device_ids = manager.getAvailableDeviceIDs();
+    DeviceManager &manager = DeviceManager::instance();
+    Vec<DeviceID> device_ids = manager.get_all();
 
     has_gpu_ = false;
-    for (const std::string &id : device_ids) {
-      const Device &device = manager.getDevice(id);
+    for (const DeviceID &id : device_ids) {
+      const Device &device = manager.get(id);
       if (device.device_type() == DeviceType::CUDA) {
         has_gpu_ = true;
         break;
@@ -564,8 +564,8 @@ TEST_F(GPUTensorTest, LargeTensorOperations) {
 TEST(GPUTensorFloatingPointTest, FloatingPointComparisons) {
   initializeDefaultDevices();
 
-  DeviceManager &manager = DeviceManager::getInstance();
-  Vec<std::string> device_ids = manager.getAvailableDeviceIDs();
+  DeviceManager &manager = DeviceManager::instance();
+  Vec<DeviceID> device_ids = manager.get_all();
 
   bool has_gpu = false;
   csref<Device> gpu_device = getGPU();

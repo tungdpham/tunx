@@ -8,6 +8,7 @@
 
 #include <memory>
 
+#include "device/device_manager.hpp"
 #include "roce_communicator.hpp"
 #include "worker.hpp"
 
@@ -29,8 +30,8 @@ public:
    * @param gid_index GID index for RoCE
    * @param use_gpu Whether to use CUDA for processing
    */
-  explicit RoCEWorker(Endpoint worker_endpoint, bool use_gpu)
-      : Worker(use_gpu) {
+  explicit RoCEWorker(Endpoint worker_endpoint, DeviceID device_id)
+      : Worker(device_id) {
     auto communicator = RoCECommunicator::create(worker_endpoint, RoCECommunicator::Config{});
 
     communicator->start_server();

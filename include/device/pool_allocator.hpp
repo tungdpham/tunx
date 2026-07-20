@@ -54,7 +54,7 @@ public:
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto &[size, storage] : free_blocks_) {
       if (storage) {
-        device_.deallocateAlignedMemory(storage->data());
+        device_.deallocate_aligned_memory(storage->data());
         delete storage;
       }
     }
@@ -101,7 +101,7 @@ private:
       free_blocks_.erase(it);
       return block;
     }
-    void *ptr = device_.allocateAlignedMemory(size, DEFAULT_ALIGNMENT);
+    void *ptr = device_.allocate_aligned_memory(size, DEFAULT_ALIGNMENT);
     return new device_storage(device_, ptr, size, DEFAULT_ALIGNMENT);
   }
 

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <istream>
+#include <ostream>
 
 #include "cpu/tensor_ops.hpp"
 #include "device/flow.hpp"
@@ -31,10 +33,8 @@ inline void save(const Tensor &tensor, std::ostream &out) {
     out.write(reinterpret_cast<const char *>(tensor.data_as<uchar>()),
               tensor.size() * get_dtype_size(dtype));
   } else {
-    Vec<uchar> host_buffer(tensor.size() * get_dtype_size(dtype));
-    tensor.device().copyToHost(host_buffer.data(), tensor.data_as<uchar>(),
-                               tensor.size() * get_dtype_size(dtype));
-    out.write(reinterpret_cast<const char *>(host_buffer.data()),
+    auto host_tensor = tensor.to_host();
+    out.write(reinterpret_cast<const char *>(host_tensor.data_as<uchar>()),
               tensor.size() * get_dtype_size(dtype));
   }
 }

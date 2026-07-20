@@ -30,13 +30,13 @@ protected:
   static void SetUpTestSuite() { initializeDefaultDevices(); }
 
   void SetUp() override {
-    DeviceManager &manager = DeviceManager::getInstance();
-    Vec<std::string> device_ids = manager.getAvailableDeviceIDs();
+    DeviceManager &manager = DeviceManager::instance();
+    Vec<DeviceID> device_ids = manager.get_all();
 
     has_cpu_ = false;
 
-    for (const std::string &id : device_ids) {
-      const Device &device = manager.getDevice(id);
+    for (const DeviceID &id : device_ids) {
+      const Device &device = manager.get(id);
       if (device.device_type() == DeviceType::CPU) {
         has_cpu_ = true;
         break;

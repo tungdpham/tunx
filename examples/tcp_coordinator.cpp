@@ -61,7 +61,7 @@ int main(int argc, char *argv[]) {
   TCPConfig tcp_config;
   tcp_config.load_from_json(config_path);
 
-  const auto &device = DeviceManager::getInstance().getDevice(train_config.device_type);
+  const auto &device = DeviceManager::instance().get(train_config.device_id);
   auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
 
   Graph graph = load_or_create_graph(train_config.model_name, train_config.model_path, allocator);
@@ -98,8 +98,7 @@ int main(int argc, char *argv[]) {
   cout << "Local worker endpoint: " << local_worker_endpoint.to_json().dump(4) << endl;
 
   // hard-coded for now
-  auto worker = std::make_unique<TCPWorker>(local_worker_endpoint,
-                                            train_config.device_type == DeviceType::CUDA);
+  auto worker = std::make_unique<TCPWorker>(local_worker_endpoint, train_config.device_id);
 
   auto partitioner = make_unique<GraphPartitioner>(tcp_config.partition_ratios);
 

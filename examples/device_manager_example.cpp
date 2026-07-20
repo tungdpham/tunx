@@ -1,8 +1,8 @@
 #include <iostream>
-#include <string>
 #include <vector>
 
 #include "device/device_manager.hpp"
+#include "device/device_type.hpp"
 
 using namespace tunx;
 using namespace std;
@@ -14,29 +14,28 @@ int main() {
     cout << "Initializing devices..." << endl;
     initializeDefaultDevices();
 
-    DeviceManager &manager = DeviceManager::getInstance();
+    DeviceManager &manager = DeviceManager::instance();
 
-    vector<string> device_ids = manager.getAvailableDeviceIDs();
+    vector<DeviceID> device_ids = manager.get_all();
     cout << "Found " << device_ids.size() << " device(s):" << endl;
 
-    for (const string &device_id : device_ids) {
-      const Device &device = manager.getDevice(device_id);
-      cout << "  Device " << device_id << ": " << device.getName()
-           << " (Type: " << (device.device_type() == DeviceType::CPU ? "CPU" : "CUDA") << ")"
-           << endl;
+    for (DeviceID device_id : device_ids) {
+      const Device &device = manager.get(device_id);
+      cout << "  Device " << device_id << ": " << device.get_name()
+           << " (Type: " << device_type_to_string(device.device_type()) << ")" << endl;
 
-      size_t total_mem = device.getTotalMemory();
-      size_t avail_mem = device.getAvailableMemory();
+      size_t total_mem = device.get_total_memory();
+      size_t avail_mem = device.get_available_memory();
       cout << "    Memory - Total: " << total_mem / (1024 * 1024) << " MB, "
            << "Available: " << avail_mem / (1024 * 1024) << " MB" << endl;
     }
 
-    if (manager.hasDevice(0)) {
+    if (manager.has(DeviceType::CPU, 0)) {
       cout << "Testing allocation on CPU device..." << endl;
-      const Device &cpu_device = manager.getDevice(0);
+      const Device &cpu_device = manager.get({DeviceType::CPU, 0});
 
       size_t test_size = 1024 * 1024;
-      void *ptr = cpu_device.allocateMemory(test_size);
+      void *ptr = cpu_device.allocate_memory(test_size);
 
       if (ptr != nullptr) {
         cout << "  Successfully allocated " << test_size << " bytes" << endl;
@@ -49,7 +48,7 @@ int main() {
           cout << "  Memory access test failed" << endl;
         }
 
-        cpu_device.deallocateMemory(ptr);
+        cpu_device.deallocate_memory(ptr);
         cout << "  Successfully deallocated memory" << endl;
       } else {
         cout << "  Failed to allocate memory" << endl;
@@ -57,32 +56,27 @@ int main() {
     }
 
     bool found_gpu = false;
-    for (const string &device_id : device_ids) {
-      if (device_id > "0") {
-        const Device &device = manager.getDevice(device_id);
-        if (device.device_type() == DeviceType::CUDA) {
-          cout << "Testing allocation on CUDA device " << device_id << "..." << endl;
+    if (manager.has({DeviceType::CUDA, 0})) {
+      cout << "Testing allocation on CUDA device " << 0 << "..." << endl;
 
-          size_t test_size = 1024 * 1024 * 1024;
-          void *ptr = device.allocateMemory(test_size);
+      auto &device = manager.get({DeviceType::CUDA, 0});
 
-          if (ptr != nullptr) {
-            cout << "  Successfully allocated " << test_size << " bytes on CUDA" << endl;
-            device.deallocateMemory(ptr);
-            cout << "  Successfully deallocated CUDA memory" << endl;
-          } else {
-            cout << "  Failed to allocate CUDA memory" << endl;
-          }
-          found_gpu = true;
-          break;
-        }
+      size_t test_size = 1024 * 1024 * 1024;
+      void *ptr = device.allocate_memory(test_size);
+
+      if (ptr != nullptr) {
+        cout << "  Successfully allocated " << test_size << " bytes on CUDA" << endl;
+        device.deallocate_memory(ptr);
+        cout << "  Successfully deallocated CUDA memory" << endl;
+      } else {
+        cout << "  Failed to allocate CUDA memory" << endl;
       }
+      found_gpu = true;
     }
 
     if (!found_gpu) {
       cout << "No CUDA devices available for testing" << endl;
     }
-
   } catch (const exception &e) {
     cerr << "Error: " << e.what() << endl;
     return 1;

@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 
 #include "common/blob.hpp"
 #include "device/device.hpp"
@@ -76,7 +77,7 @@ public:
 
   DeviceType device_type() const {
     if (!storage_) {
-      return DeviceType::NULL_DEVICE;
+      return DeviceType::UNKNOWN;
     }
     return storage_->device()->device_type();
   }
@@ -128,28 +129,6 @@ public:
     }
     return dptr(storage_, offset_ + offset, capacity_ - offset);
   }
-
-  void copy_to_host(void *host_ptr, size_t byte_size) const {
-    if (!storage_) {
-      throw std::runtime_error("Invalid device storage or device in dptr::copy_to_host");
-    }
-    if (byte_size > capacity_) {
-      throw std::out_of_range("dptr copy_to_host out of range");
-    }
-    storage_->device()->copyToHost(host_ptr, static_cast<uint8_t *>(storage_->data()) + offset_,
-                                   byte_size);
-  }
-
-  void copy_from_host(const void *host_ptr, size_t byte_size) {
-    if (!storage_) {
-      throw std::runtime_error("Invalid device storage or device in dptr::copy_from_host");
-    }
-    if (byte_size > capacity_) {
-      throw std::out_of_range("dptr copy_from_host out of range");
-    }
-    storage_->device()->copyToDevice(static_cast<uint8_t *>(storage_->data()) + offset_, host_ptr,
-                                     byte_size);
-  }
 };
 
 template <typename Archiver>
@@ -163,13 +142,13 @@ inline dptr make_dptr(csref<Device> device, size_t byte_size,
   if (byte_size == 0) {
     return dptr(nullptr);
   }
-  void *ptr = device->allocateAlignedMemory(byte_size, alignment);
+  void *ptr = device->allocate_aligned_memory(byte_size, alignment);
   if (!ptr) {
     throw std::runtime_error("Bad Alloc");
   }
   auto storage = std::shared_ptr<device_storage>(
       new device_storage(device, ptr, byte_size, alignment), [device](device_storage *s) {
-        device->deallocateAlignedMemory(s->data());
+        device->deallocate_aligned_memory(s->data());
         delete s;
       });
   return dptr(storage, 0, byte_size);

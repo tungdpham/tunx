@@ -5,6 +5,7 @@
 #include <iostream>
 #include <string>
 
+#include "device/device_manager.hpp"
 #include "distributed/endpoint.hpp"
 
 using namespace tunx;
@@ -15,7 +16,7 @@ struct Config {
   int port = 0;
   std::string device_name;
   int gid_index = -1;
-  bool use_gpu = false;
+  std::string device_str = "CPU:0";
 };
 
 void print_usage(const char *program_name) {
@@ -37,7 +38,7 @@ bool parse_arguments(int argc, char *argv[], Config &cfg) {
                                          {"port", required_argument, 0, 'p'},
                                          {"device", required_argument, 0, 'd'},
                                          {"gid-index", required_argument, 0, 'g'},
-                                         {"gpu", no_argument, 0, 'G'},
+                                         {"gpu", required_argument, 0, 'G'},
                                          {"help", no_argument, 0, 'h'},
                                          {0, 0, 0, 0}};
 
@@ -66,7 +67,7 @@ bool parse_arguments(int argc, char *argv[], Config &cfg) {
         }
         break;
       case 'G':
-        cfg.use_gpu = true;
+        cfg.device_str = "GPU:" + std::string(optarg);
         break;
       case 'h':
         print_usage(argv[0]);
@@ -109,7 +110,8 @@ int main(int argc, char *argv[]) {
 
   try {
     Endpoint worker_endpoint = Endpoint::roce(cfg.host, cfg.port, cfg.device_name, cfg.gid_index);
-    RoCEWorker worker(worker_endpoint, cfg.use_gpu);
+    DeviceID device_id = DeviceID::from_string(cfg.device_str);
+    RoCEWorker worker(worker_endpoint, device_id);
     worker.start();
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;

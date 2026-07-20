@@ -22,7 +22,7 @@ signed main() {
     for (auto &param : params) {
       fill(param.grad(), 0.0f);
     }
-    auto flow = getGPU().getFlow(defaultFlowHandle);
+    auto flow = getGPU().get_flow(defaultFlowHandle);
     flow->synchronize();
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =
@@ -39,7 +39,7 @@ signed main() {
   for (int i = 0; i < passes; ++i) {
     auto pass_start = std::chrono::high_resolution_clock::now();
     graph.zero_grads();
-    Flow *flow = getGPU().getFlow(defaultFlowHandle);
+    Flow *flow = getGPU().get_flow(defaultFlowHandle);
     flow->synchronize();
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =

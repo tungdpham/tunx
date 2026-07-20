@@ -100,7 +100,7 @@ public:
   ~DELAllocatorV2() {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto &slab : slabs_) {
-      device_.deallocateAlignedMemory(slab.ptr);
+      device_.deallocate_aligned_memory(slab.ptr);
     }
     slabs_.clear();
     free_by_size_.clear();
@@ -211,7 +211,7 @@ public:
       if (slab.active_allocations > 0) {
         throw std::runtime_error("DELAllocatorV2: Cannot clear with active allocations");
       }
-      device_.deallocateAlignedMemory(slab.ptr);
+      device_.deallocate_aligned_memory(slab.ptr);
     }
     slabs_.clear();
     free_by_size_.clear();
@@ -370,7 +370,7 @@ private:
         for (const auto &[block_offset, block_size] : it->free_by_offset) {
           remove_from_free_map(block_size, {&*it, block_offset, block_size});
         }
-        device_.deallocateAlignedMemory(it->ptr);
+        device_.deallocate_aligned_memory(it->ptr);
         it = slabs_.erase(it);
       } else {
         ++it;
@@ -386,7 +386,7 @@ private:
     for (auto it = slabs_.begin(); it != slabs_.end();) {
       if (it->active_allocations == 0) {
         assert(it->free_by_offset.empty() && "Empty slab should have no free blocks");
-        device_.deallocateAlignedMemory(it->ptr);
+        device_.deallocate_aligned_memory(it->ptr);
         freed_bytes += it->size;
         it = slabs_.erase(it);
       } else {
@@ -395,7 +395,7 @@ private:
     }
     slab_size = std::max(slab_size, freed_bytes);
     slab_size = align_up(slab_size, DEFAULT_ALIGNMENT);
-    void *slab_ptr = device_.allocateAlignedMemory(slab_size, DEFAULT_ALIGNMENT);
+    void *slab_ptr = device_.allocate_aligned_memory(slab_size, DEFAULT_ALIGNMENT);
     if (!slab_ptr) {
       throw std::runtime_error("DELAllocatorV2: Failed to allocate slab");
     }
@@ -408,7 +408,7 @@ private:
     if (slab->active_allocations > 0) {
       throw std::runtime_error("Cannot free slab with active allocations");
     }
-    device_.deallocateAlignedMemory(slab->ptr);
+    device_.deallocate_aligned_memory(slab->ptr);
     slabs_.remove_if([slab](const Slab &s) { return &s == slab; });
   }
 

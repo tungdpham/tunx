@@ -23,12 +23,12 @@ protected:
   static void SetUpTestSuite() { initializeDefaultDevices(); }
 
   void SetUp() override {
-    DeviceManager &manager = DeviceManager::getInstance();
-    Vec<std::string> device_ids = manager.getAvailableDeviceIDs();
+    DeviceManager &manager = DeviceManager::instance();
+    Vec<DeviceID> device_ids = manager.get_all();
 
     has_gpu_ = false;
-    for (const std::string &id : device_ids) {
-      const Device &device = manager.getDevice(id);
+    for (const DeviceID &id : device_ids) {
+      const Device &device = manager.get(id);
       if (device.device_type() == DeviceType::CUDA) {
         has_gpu_ = true;
         break;
@@ -89,9 +89,10 @@ TEST_F(CUDALossOpsTest, CrossEntropyLossBasic) {
   dptr gpu_predictions = make_dptr_t<float>(getGPU(), predictions.size());
   dptr gpu_labels = make_dptr_t<int>(getGPU(), labels.size());
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_labels.get<int>(), labels.data(), labels.size() * sizeof(int));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_labels.get<int>(), labels.data(), labels.size() * sizeof(int),
+             cudaMemcpyHostToDevice);
 
   auto gpu_loss_task =
       create_cuda_task(defaultFlowHandle, cuda::loss::compute_crossentropy_loss_probs<float>,
@@ -133,17 +134,18 @@ TEST_F(CUDALossOpsTest, CrossEntropyGradientBasic) {
   dptr gpu_labels = make_dptr_t<int>(getGPU(), labels.size());
   dptr gpu_gradient = make_dptr_t<float>(getGPU(), batch_size * num_classes);
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_labels.get<int>(), labels.data(), labels.size() * sizeof(int));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_labels.get<int>(), labels.data(), labels.size() * sizeof(int),
+             cudaMemcpyHostToDevice);
 
   create_cuda_task(defaultFlowHandle, cuda::loss::compute_crossentropy_gradient_probs<float>,
                    gpu_predictions.get<float>(), gpu_labels.get<int>(), gpu_gradient.get<float>(),
                    batch_size, num_classes, epsilon);
 
   Vec<float> gpu_gradient_cpu(batch_size * num_classes);
-  getGPU().copyToHost(gpu_gradient_cpu.data(), gpu_gradient.get<float>(),
-                      (batch_size * num_classes) * sizeof(float));
+  cudaMemcpy(gpu_gradient_cpu.data(), gpu_gradient.get<float>(),
+             (batch_size * num_classes) * sizeof(float), cudaMemcpyDeviceToHost);
 
   compareArrays(cpu_gradient, gpu_gradient_cpu);
 }
@@ -178,9 +180,10 @@ TEST_F(CUDALossOpsTest, CrossEntropyLargeBatch) {
   dptr gpu_predictions = make_dptr_t<float>(getGPU(), predictions.size());
   dptr gpu_labels = make_dptr_t<int>(getGPU(), labels.size());
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_labels.get<int>(), labels.data(), labels.size() * sizeof(int));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_labels.get<int>(), labels.data(), labels.size() * sizeof(int),
+             cudaMemcpyHostToDevice);
 
   create_cuda_task(defaultFlowHandle, cuda::loss::compute_crossentropy_loss_probs<float>,
                    gpu_predictions.get<float>(), gpu_labels.get<int>(), gpu_loss, batch_size,
@@ -209,9 +212,10 @@ TEST_F(CUDALossOpsTest, MSELossBasic) {
   dptr gpu_predictions = make_dptr_t<float>(getGPU(), predictions.size());
   dptr gpu_targets = make_dptr_t<float>(getGPU(), targets.size());
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
 
   create_cuda_task(defaultFlowHandle, cuda::loss::compute_mse_loss<float>,
                    gpu_predictions.get<float>(), gpu_targets.get<float>(), gpu_loss, batch_size,
@@ -240,17 +244,18 @@ TEST_F(CUDALossOpsTest, MSEGradientBasic) {
   dptr gpu_targets = make_dptr_t<float>(getGPU(), targets.size());
   dptr gpu_gradient = make_dptr_t<float>(getGPU(), batch_size * output_size);
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
 
   create_cuda_task(defaultFlowHandle, cuda::loss::compute_mse_gradient<float>,
                    gpu_predictions.get<float>(), gpu_targets.get<float>(),
                    gpu_gradient.get<float>(), batch_size, output_size);
 
   Vec<float> gpu_gradient_cpu(batch_size * output_size);
-  getGPU().copyToHost(gpu_gradient_cpu.data(), gpu_gradient.get<float>(),
-                      (batch_size * output_size) * sizeof(float));
+  cudaMemcpy(gpu_gradient_cpu.data(), gpu_gradient.get<float>(),
+             (batch_size * output_size) * sizeof(float), cudaMemcpyDeviceToHost);
 
   compareArrays(cpu_gradient, gpu_gradient_cpu);
 }
@@ -275,9 +280,10 @@ TEST_F(CUDALossOpsTest, MSELargeBatch) {
   dptr gpu_predictions = make_dptr_t<float>(getGPU(), predictions.size());
   dptr gpu_targets = make_dptr_t<float>(getGPU(), targets.size());
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
 
   create_cuda_task(defaultFlowHandle, cuda::loss::compute_mse_loss<float>,
                    gpu_predictions.get<float>(), gpu_targets.get<float>(), gpu_loss, batch_size,
@@ -306,9 +312,10 @@ TEST_F(CUDALossOpsTest, MAELossBasic) {
   dptr gpu_predictions = make_dptr_t<float>(getGPU(), predictions.size());
   dptr gpu_targets = make_dptr_t<float>(getGPU(), targets.size());
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
 
   create_cuda_task(defaultFlowHandle, cuda::loss::compute_mae_loss<float>,
                    gpu_predictions.get<float>(), gpu_targets.get<float>(), gpu_loss, batch_size,
@@ -337,17 +344,18 @@ TEST_F(CUDALossOpsTest, MAEGradientBasic) {
   dptr gpu_targets = make_dptr_t<float>(getGPU(), targets.size());
   dptr gpu_gradient = make_dptr_t<float>(getGPU(), batch_size * output_size);
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
 
   create_cuda_task(defaultFlowHandle, cuda::loss::compute_mae_gradient<float>,
                    gpu_predictions.get<float>(), gpu_targets.get<float>(),
                    gpu_gradient.get<float>(), batch_size, output_size);
 
   Vec<float> gpu_gradient_cpu(batch_size * output_size);
-  getGPU().copyToHost(gpu_gradient_cpu.data(), gpu_gradient.get<float>(),
-                      (batch_size * output_size) * sizeof(float));
+  cudaMemcpy(gpu_gradient_cpu.data(), gpu_gradient.get<float>(),
+             (batch_size * output_size) * sizeof(float), cudaMemcpyDeviceToHost);
 
   compareArrays(cpu_gradient, gpu_gradient_cpu);
 }
@@ -372,9 +380,10 @@ TEST_F(CUDALossOpsTest, MAELargeBatch) {
   dptr gpu_predictions = make_dptr_t<float>(getGPU(), predictions.size());
   dptr gpu_targets = make_dptr_t<float>(getGPU(), targets.size());
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
 
   create_cuda_task(defaultFlowHandle, cuda::loss::compute_mae_loss<float>,
                    gpu_predictions.get<float>(), gpu_targets.get<float>(), gpu_loss, batch_size,
@@ -404,9 +413,10 @@ TEST_F(CUDALossOpsTest, HuberLossBasic) {
   dptr gpu_predictions = make_dptr_t<float>(getGPU(), predictions.size());
   dptr gpu_targets = make_dptr_t<float>(getGPU(), targets.size());
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
 
   create_cuda_task(defaultFlowHandle, cuda::loss::compute_huber_loss<float>,
                    gpu_predictions.get<float>(), gpu_targets.get<float>(), gpu_loss, batch_size,
@@ -436,17 +446,18 @@ TEST_F(CUDALossOpsTest, HuberGradientBasic) {
   dptr gpu_targets = make_dptr_t<float>(getGPU(), targets.size());
   dptr gpu_gradient = make_dptr_t<float>(getGPU(), batch_size * output_size);
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
 
   create_cuda_task(defaultFlowHandle, cuda::loss::compute_huber_gradient<float>,
                    gpu_predictions.get<float>(), gpu_targets.get<float>(),
                    gpu_gradient.get<float>(), batch_size, output_size, delta);
 
   Vec<float> gpu_gradient_cpu(batch_size * output_size);
-  getGPU().copyToHost(gpu_gradient_cpu.data(), gpu_gradient.get<float>(),
-                      (batch_size * output_size) * sizeof(float));
+  cudaMemcpy(gpu_gradient_cpu.data(), gpu_gradient.get<float>(),
+             (batch_size * output_size) * sizeof(float), cudaMemcpyDeviceToHost);
 
   compareArrays(cpu_gradient, gpu_gradient_cpu);
 }
@@ -473,9 +484,9 @@ TEST_F(CUDALossOpsTest, HuberLossVaryingDelta) {
     dptr gpu_predictions = make_dptr_t<float>(getGPU(), predictions.size());
     dptr gpu_targets = make_dptr_t<float>(getGPU(), targets.size());
 
-    getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                          predictions.size() * sizeof(float));
-    getGPU().copyToDevice(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float));
+    cudaMemcpy(gpu_predictions.get<float>(), predictions.data(),
+                          predictions.size() * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float), cudaMemcpyHostToDevice);
 
     create_cuda_task(defaultFlowHandle, cuda::loss::compute_huber_loss<float>,
                      gpu_predictions.get<float>(), gpu_targets.get<float>(), gpu_loss, batch_size,
@@ -506,9 +517,10 @@ TEST_F(CUDALossOpsTest, HuberLargeBatch) {
   dptr gpu_predictions = make_dptr_t<float>(getGPU(), predictions.size());
   dptr gpu_targets = make_dptr_t<float>(getGPU(), targets.size());
 
-  getGPU().copyToDevice(gpu_predictions.get<float>(), predictions.data(),
-                        predictions.size() * sizeof(float));
-  getGPU().copyToDevice(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float));
+  cudaMemcpy(gpu_predictions.get<float>(), predictions.data(), predictions.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
+  cudaMemcpy(gpu_targets.get<float>(), targets.data(), targets.size() * sizeof(float),
+             cudaMemcpyHostToDevice);
 
   create_cuda_task(defaultFlowHandle, cuda::loss::compute_huber_loss<float>,
                    gpu_predictions.get<float>(), gpu_targets.get<float>(), gpu_loss, batch_size,

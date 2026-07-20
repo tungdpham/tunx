@@ -50,7 +50,7 @@ public:
   ~DELAllocator() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (slab_ptr_) {
-      device_.deallocateAlignedMemory(slab_ptr_);
+      device_.deallocate_aligned_memory(slab_ptr_);
       slab_ptr_ = nullptr;
     }
   }
@@ -143,10 +143,10 @@ public:
     capacity_ = align_up(size, DEFAULT_ALIGNMENT);
 
     if (slab_ptr_) {
-      device_.deallocateAlignedMemory(slab_ptr_);
+      device_.deallocate_aligned_memory(slab_ptr_);
     }
 
-    slab_ptr_ = device_.allocateAlignedMemory(capacity_, DEFAULT_ALIGNMENT);
+    slab_ptr_ = device_.allocate_aligned_memory(capacity_, DEFAULT_ALIGNMENT);
     if (!slab_ptr_) {
       throw std::runtime_error("DELAllocator: Failed to allocate master slab of size " +
                                std::to_string(capacity_) + " bytes");

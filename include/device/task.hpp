@@ -7,7 +7,7 @@
 #pragma once
 
 #include <atomic>
-#include <iostream>
+#include <memory>
 #include <system_error>
 #include <tuple>
 #include <utility>
@@ -77,7 +77,6 @@ inline tunx::ErrorStatus cuda_error_to_status(cudaError_t err) {
   if (err == cudaSuccess) {
     return tunx::ErrorStatus{};
   }
-  std::cerr << "CUDA Error: " << cudaGetErrorString(err) << std::endl;
   return std::make_error_code(std::errc::resource_unavailable_try_again);
 }
 
@@ -124,7 +123,7 @@ public:
 template <typename Func, typename... Args>
 std::unique_ptr<Task> create_cpu_task(flowHandle_t handle, Func &&func, Args &&...args) {
   auto &CPUDevice = getHost();
-  CPUFlow *flow = dynamic_cast<CPUFlow *>(CPUDevice.getFlow(handle));
+  CPUFlow *flow = dynamic_cast<CPUFlow *>(CPUDevice.get_flow(handle));
   if (!flow) {
     throw std::runtime_error("Failed to get CPU flow with ID: " + std::to_string(handle.id));
   }
@@ -136,7 +135,7 @@ std::unique_ptr<Task> create_cpu_task(flowHandle_t handle, Func &&func, Args &&.
 template <typename Func, typename... Args>
 std::unique_ptr<Task> create_cuda_task(flowHandle_t handle, Func &&func, Args &&...args) {
   auto &GPUDevice = getGPU();
-  CUDAFlow *flow = dynamic_cast<CUDAFlow *>(GPUDevice.getFlow(handle));
+  CUDAFlow *flow = dynamic_cast<CUDAFlow *>(GPUDevice.get_flow(handle));
   if (!flow) {
     throw std::runtime_error("Failed to get CUDA flow with ID: " + std::to_string(handle.id));
   }

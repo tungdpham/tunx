@@ -52,7 +52,7 @@ signed main(int argc, char *argv[]) {
   train_config.print_config();
 
   // Prioritize loading existing model, else create from available ones
-  const auto &device = DeviceManager::getInstance().getDevice(train_config.device_type);
+  const auto &device = DeviceManager::instance().get(train_config.device_id);
   auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
 
   if (train_config.dataset_name.empty()) {

@@ -42,7 +42,7 @@ Vec<Tensor> LayerImpl::forward(const Vec<Tensor> &inputs, Residuals &residuals) 
   }
   Vec<Tensor> outputs = forward_impl(current_inputs, residuals);
 #ifndef NDEBUG
-  this->device().getFlow(flow_handle_)->synchronize();
+  this->device().get_flow(flow_handle_)->synchronize();
 #endif
   return outputs;
 }
@@ -60,7 +60,7 @@ Vec<Tensor> LayerImpl::backward(const Vec<Tensor> &grad_outputs, Residuals &resi
   }
   auto grad_inputs = backward_impl(current_grad_outputs, residuals);
 #ifndef NDEBUG
-  this->device().getFlow(flow_handle_)->synchronize();
+  this->device().get_flow(flow_handle_)->synchronize();
 #endif
   return grad_inputs;
 }

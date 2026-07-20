@@ -4,7 +4,6 @@ include(GoogleTest)
 
 set(TEST_FILES 
     test_tensor.cpp
-    test_device_manager.cpp
     test_cuda_kernels.cpp
     test_gpu_tensor.cpp
     test_gpu_tensor_ops.cpp

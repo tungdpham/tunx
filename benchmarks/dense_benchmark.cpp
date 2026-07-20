@@ -47,7 +47,7 @@ signed main() {
   for (int i = 0; i < passes; ++i) {
     auto pass_start = std::chrono::high_resolution_clock::now();
     current_output = dense_layer.forward({input_data}, residuals)[0];
-    Flow *flow = getGPU().getFlow(defaultFlowHandle);
+    Flow *flow = getGPU().get_flow(defaultFlowHandle);
     flow->synchronize();
 
     auto pass_end = std::chrono::high_resolution_clock::now();
@@ -68,7 +68,7 @@ signed main() {
   for (int i = 0; i < passes; ++i) {
     auto pass_start = std::chrono::high_resolution_clock::now();
     legacy_output = legacy_layer.forward({input_data}, legacy_residuals)[0];
-    Flow *flow = getGPU().getFlow(defaultFlowHandle);
+    Flow *flow = getGPU().get_flow(defaultFlowHandle);
     flow->synchronize();
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =
@@ -116,7 +116,7 @@ signed main() {
     dense_layer.forward({input_data}, residuals);
     auto pass_start = std::chrono::high_resolution_clock::now();
     grad_input_current = dense_layer.backward({grad}, residuals)[0];
-    Flow *flow = getGPU().getFlow(defaultFlowHandle);
+    Flow *flow = getGPU().get_flow(defaultFlowHandle);
     flow->synchronize();
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =
@@ -130,7 +130,7 @@ signed main() {
     legacy_layer.forward({input_data}, legacy_residuals);
     auto pass_start = std::chrono::high_resolution_clock::now();
     grad_input_legacy = legacy_layer.backward({grad}, legacy_residuals)[0];
-    Flow *flow = getGPU().getFlow(defaultFlowHandle);
+    Flow *flow = getGPU().get_flow(defaultFlowHandle);
     flow->synchronize();
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =

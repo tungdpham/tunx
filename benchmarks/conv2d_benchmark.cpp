@@ -36,7 +36,7 @@ signed main() {
   for (int i = 0; i < passes; ++i) {
     auto pass_start = std::chrono::high_resolution_clock::now();
     output = conv_layer.forward({input_data}, residuals)[0];
-    Flow *flow = getGPU().getFlow(defaultFlowHandle);
+    Flow *flow = getGPU().get_flow(defaultFlowHandle);
     flow->synchronize();
 
     auto pass_end = std::chrono::high_resolution_clock::now();
@@ -61,7 +61,7 @@ signed main() {
   for (int i = 0; i < passes; ++i) {
     auto pass_start = std::chrono::high_resolution_clock::now();
     nchw_output = legacy_layer.forward({nchw_input}, legacy_residuals)[0];
-    Flow *flow = getGPU().getFlow(defaultFlowHandle);
+    Flow *flow = getGPU().get_flow(defaultFlowHandle);
     flow->synchronize();
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =

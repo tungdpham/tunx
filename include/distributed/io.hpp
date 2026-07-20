@@ -6,6 +6,9 @@
  */
 #pragma once
 
+#include <fmt/core.h>
+
+#include <stdexcept>
 #include <type_traits>
 
 #include "common/archiver.hpp"
@@ -46,8 +49,8 @@ public:
   void archive_impl(const T* data, size_t count, const Device& device) {
     static_assert(std::is_trivially_copyable<T>::value, "...");
     if (offset_ + sizeof(T) * count > buffer_.capacity()) {
-      std::cerr << "Writer: Offset " << offset_ << " + Size " << sizeof(T) * count << " > Capacity "
-                << buffer_.capacity() << std::endl;
+      throw std::runtime_error(fmt::format("Writer overflow: Offset {}, Size: {}, Capacity: {}",
+                                           offset_, sizeof(T) * count, buffer_.capacity()));
     }
     const dptr src(const_cast<T*>(data), sizeof(T) * count, device);
     std::unique_ptr<Task> task =

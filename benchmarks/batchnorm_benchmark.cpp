@@ -55,7 +55,7 @@ signed main() {
   for (int i = 0; i < passes; ++i) {
     auto pass_start = std::chrono::high_resolution_clock::now();
     output = bn_layer.forward({input_data}, residuals)[0];
-    Flow *flow = getGPU().getFlow(defaultFlowHandle);
+    Flow *flow = getGPU().get_flow(defaultFlowHandle);
     flow->synchronize();
 
     auto pass_end = std::chrono::high_resolution_clock::now();
@@ -76,7 +76,7 @@ signed main() {
     auto pass_start = std::chrono::high_resolution_clock::now();
     legacy_output = legacy_batchnorm_layer.forward({input_data}, legacy_residuals)[0];
     legacy_relu_output = relu_layer.forward({legacy_output}, relu_residuals)[0];
-    Flow *flow = getGPU().getFlow(defaultFlowHandle);
+    Flow *flow = getGPU().get_flow(defaultFlowHandle);
     flow->synchronize();
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =

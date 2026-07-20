@@ -1,33 +1,31 @@
 #include "device/device_manager.hpp"
 
 #include <iostream>
+#include <memory>
 #include <stdexcept>
-#include <string>
+
+#include "device/cpu_device.hpp"
+#include "device/cuda_device.hpp"
+#include "device/device_type.hpp"
 #ifdef TUNX_USE_CUDA
 #include <cuda_runtime.h>
-#endif
-
-#include "device/cpu/cpu_context.hpp"
-#ifdef TUNX_USE_CUDA
-#include "device/cuda/cuda_context.hpp"
 #endif
 
 namespace tunx {
 DeviceManager DeviceManager::instance_;
 
-DeviceManager &DeviceManager::getInstance() { return instance_; }
+DeviceManager::DeviceManager() { discover(); }
 
-DeviceManager::DeviceManager() { discoverDevices(); }
+DeviceManager::~DeviceManager() = default;
 
-void DeviceManager::discoverDevices() {
-  clearDevices();
+DeviceManager &DeviceManager::instance() { return instance_; }
 
-  size_t device_index = 0;
-  // Always add CPU device with ID 0
+void DeviceManager::discover() {
+  clear();
+
   try {
-    std::cout << "Discovered CPU device with ID: " << device_index << std::endl;
-    Device cpu_device(DeviceType::CPU, device_index++, std::make_unique<CPUContext>());
-    addDevice(std::move(cpu_device));
+    auto cpu_device = std::make_unique<CPUDevice>(0);
+    add(std::move(cpu_device));
   } catch (const std::exception &e) {
     std::cerr << "Failed to create CPU device: " << e.what() << std::endl;
   }
@@ -43,10 +41,10 @@ void DeviceManager::discoverDevices() {
         // Get device properties for logging
         cudaDeviceProp prop;
         cudaGetDeviceProperties(&prop, i);
+        auto cuda_device = std::make_unique<CUDADevice>(i);
+        add(std::move(cuda_device));
         std::cout << "Discovered CUDA device with ID: " << i << " (CUDA Device " << i << ": "
                   << prop.name << ")" << std::endl;
-        Device gpu_device(DeviceType::CUDA, i, std::make_unique<CUDAContext>(i));
-        addDevice(std::move(gpu_device));
       } catch (const std::exception &e) {
         std::cerr << "Failed to create CUDA device " << i << ": " << e.what() << std::endl;
       }
@@ -61,37 +59,35 @@ void DeviceManager::discoverDevices() {
   std::cout << "Default devices initialized" << std::endl;
 }
 
-DeviceManager::~DeviceManager() = default;
-
-void DeviceManager::addDevice(Device &&device) {
-  std::string device_type = (device.device_type() == DeviceType::CPU) ? "CPU" : "CUDA";
-  int id = device.getID();
-  devices_.emplace(device_type + ":" + std::to_string(id), std::move(device));
+void DeviceManager::add(std::unique_ptr<Device> device) {
+  DeviceID device_id = {device->device_type(), device->get_id()};
+  devices_.emplace(device_id, std::move(device));
 }
 
-void DeviceManager::removeDevice(std::string id) { devices_.erase(id); }
+void DeviceManager::remove(DeviceType type, int id) { devices_.erase({type, id}); }
 
-void DeviceManager::clearDevices() { devices_.clear(); }
+void DeviceManager::remove(DeviceID device_id) { devices_.erase(device_id); }
 
-const Device &DeviceManager::getDevice(std::string id) const {
-  auto it = devices_.find(id);
+void DeviceManager::clear() { devices_.clear(); }
+
+const Device &DeviceManager::get(DeviceType type, int id) const {
+  auto it = devices_.find(DeviceID{type, id});
   if (it != devices_.end()) {
-    return it->second;
+    return *(it->second);
   }
   throw std::runtime_error("Device with the given ID not found");
 }
 
-const Device &DeviceManager::getDevice(DeviceType type) const {
-  for (const auto &pair : devices_) {
-    if (pair.second.device_type() == type) {
-      return pair.second;
-    }
+const Device &DeviceManager::get(DeviceID device_id) const {
+  auto it = devices_.find(device_id);
+  if (it != devices_.end()) {
+    return *(it->second);
   }
-  throw std::runtime_error("No device of the specified type found");
+  throw std::runtime_error("Device with the given ID not found");
 }
 
-Vec<std::string> DeviceManager::getAvailableDeviceIDs() const {
-  Vec<std::string> ids;
+Vec<DeviceID> DeviceManager::get_all() const {
+  Vec<DeviceID> ids;
   ids.reserve(devices_.size());
   for (const auto &pair : devices_) {
     ids.push_back(pair.first);
@@ -99,56 +95,28 @@ Vec<std::string> DeviceManager::getAvailableDeviceIDs() const {
   return ids;
 }
 
-bool DeviceManager::hasDevice(std::string id) const { return devices_.find(id) != devices_.end(); }
-
-void DeviceManager::setDefaultDevice(std::string id) {
-  if (hasDevice(id)) {
-    default_device_id_ = id;
-  } else {
-    throw std::runtime_error("Device with the given ID not found");
-  }
+bool DeviceManager::has(DeviceType type, int id) const {
+  return devices_.find({type, id}) != devices_.end();
 }
 
-void DeviceManager::setDefaultDevice(const DeviceType &type) {
-  for (const auto &pair : devices_) {
-    if (pair.second.device_type() == type) {
-      default_device_id_ = pair.first;
-      return;
-    }
-  }
-  throw std::runtime_error("No device of the specified type found");
+bool DeviceManager::has(DeviceID device_id) const {
+  return devices_.find(device_id) != devices_.end();
 }
 
 void initializeDefaultDevices() {
-  DeviceManager &manager = DeviceManager::getInstance();
-
-  manager.discoverDevices();
+  DeviceManager &manager = DeviceManager::instance();
+  manager.discover();
 }
 
-const Device &getGPU(size_t gpu_index) {
-  DeviceManager &manager = DeviceManager::getInstance();
-  size_t current_gpu = 0;
-  for (std::string id : manager.getAvailableDeviceIDs()) {
-    const Device &device = manager.getDevice(id);
-    if (device.device_type() == DeviceType::CUDA) {
-      if (current_gpu == gpu_index) {
-        return device;
-      }
-      current_gpu++;
-    }
-  }
+const Device &getGPU(size_t id) {
+  DeviceManager &manager = DeviceManager::instance();
+  return manager.get(DeviceType::CUDA, id);
   throw std::runtime_error("Requested CUDA index not found");
 }
 
 const Device &getHost() {
-  DeviceManager &manager = DeviceManager::getInstance();
-  for (std::string id : manager.getAvailableDeviceIDs()) {
-    const Device &device = manager.getDevice(id);
-    if (device.device_type() == DeviceType::CPU) {
-      return device;
-    }
-  }
-  throw std::runtime_error("CPU device not found");
+  DeviceManager &manager = DeviceManager::instance();
+  return manager.get(DeviceType::CPU, 0);
 }
 
 }  // namespace tunx

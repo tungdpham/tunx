@@ -19,8 +19,10 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <string_view>
 
 #include "data_loading/batch_prefetcher.hpp"
+#include "device/device_type.hpp"
 #include "device/flow.hpp"
 #include "device/pool_allocator.hpp"
 #include "nn/csv_logger.hpp"
@@ -118,7 +120,8 @@ void TrainingConfig::print_config() const {
   cout << "  Print LayerImpl Profiling Info: " << (print_layer_profiling ? "Yes" : "No") << endl;
   cout << "  Print LayerImpl Memory Usage: " << (print_layer_memory_usage ? "Yes" : "No") << endl;
   cout << "  Number of Microbatches: " << num_microbatches << endl;
-  cout << "  Device Type: " << (device_type == DeviceType::CPU ? "CPU" : "CUDA") << endl;
+  cout << "  Device ID: " << device_type_to_string(device_id.type) + std::to_string(device_id.id)
+       << endl;
   cout << "  Data Prefetch: " << (prefetch_data ? "Yes" : "No") << endl;
   cout << "  Prefetch Depth: " << prefetch_depth << endl;
   cout << "  Async Pipeline Flag: " << (async_pipeline ? "Yes" : "No") << endl;
@@ -158,9 +161,9 @@ void TrainingConfig::load_from_json(const string &config_path) {
   print_layer_profiling = config.value("print_layer_profiling", print_layer_profiling);
   print_layer_memory_usage = config.value("print_layer_memory_usage", print_layer_memory_usage);
   num_microbatches = config.value("num_microbatches", num_microbatches);
-  if (config.contains("device_type")) {
-    string device_str = config["device_type"];
-    device_type = (device_str == "CPU") ? DeviceType::CPU : DeviceType::CUDA;
+  if (config.contains("device")) {
+    string device_str = config["device"];
+    device_id = DeviceID::from_string(device_str);
   }
   model_name = config.value("model_name", model_name);
   model_path = config.value("model_path", model_path);
@@ -299,7 +302,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
         scheduler->step();
       }
     }
-    model_device.getFlow(defaultFlowHandle)->synchronize();
+    model_device.get_flow(defaultFlowHandle)->synchronize();
 
     // Log batch metrics
     {
@@ -568,10 +571,9 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
   });
 }
 
-void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset,
-                 unique_ptr<Dataset> &val_dataset, unique_ptr<Optimizer> &optimizer,
-                 const unique_ptr<Loss> &criterion, unique_ptr<Scheduler> &scheduler,
-                 const TrainingConfig &config) {
+void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Dataset> &val_dataset,
+                 unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
+                 unique_ptr<Scheduler> &scheduler, const TrainingConfig &config) {
   optimizer->attach(graph);
 
   cout << "Training batches: " << train_dataset->size() / config.batch_size << endl;
