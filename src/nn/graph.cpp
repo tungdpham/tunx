@@ -16,7 +16,7 @@
 
 #include "device/device_type.hpp"
 #include "nn/engines/cpu_engine.hpp"
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "nn/engines/cuda_engine.hpp"
 #include "nn/engines/cudnn_engine.hpp"
 #endif
@@ -30,9 +30,9 @@ static Engine get_default_engine(const Device &device) {
   switch (device.device_type()) {
     case tunx::DeviceType::CPU:
       return make_engine<CPUEngine>();
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     case tunx::DeviceType::CUDA:
-#ifdef USE_CUDNN
+#ifdef TUNX_USE_CUDNN
       return make_engine<CuDNNEngine>();
 #endif
       return make_engine<CUDAEngine>();

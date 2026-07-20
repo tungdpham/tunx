@@ -6,7 +6,7 @@
  */
 #pragma once
 
-#ifdef USE_MKL
+#ifdef TUNX_USE_MKL
 
 #include <mkl.h>
 
@@ -70,4 +70,4 @@ inline void gemm(const char transa, const char transb, const MKL_INT m, const MK
 }  // namespace mkl
 }  // namespace tunx
 
-#endif  // USE_MKL
+#endif  // TUNX_USE_MKL

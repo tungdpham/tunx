@@ -5,7 +5,7 @@ function(create_executable source_file)
     
     cmake_parse_arguments(
         ARG
-        "USE_CUDA"                   
+        "TUNX_USE_CUDA"                   
         "LINK_MODE"
         "LIBS"
         ${ARGN}

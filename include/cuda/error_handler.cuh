@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include <cuda_runtime.h>
 
 #include <iostream>
@@ -9,7 +9,7 @@
 
 namespace tunx {
 namespace cuda {
-inline void checkCudaError(cudaError_t result, const char *func, const char *file, int line) {
+inline void checkCudaError(cudaError_t result, const char* func, const char* file, int line) {
   if (result != cudaSuccess) {
     std::string errorMessage = "CUDA Error: " + std::string(cudaGetErrorString(result)) + " at " +
                                std::string(file) + ":" + std::to_string(line) + " in function " +
@@ -34,4 +34,4 @@ inline void checkCudaError(cudaError_t result, const char *func, const char *fil
 
 }  // namespace tunx
 
-#endif  // USE_CUDA
+#endif  // TUNX_USE_CUDA

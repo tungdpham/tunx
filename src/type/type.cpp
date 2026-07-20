@@ -1,6 +1,6 @@
 #include "type/type.hpp"
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include <cuda_bf16.h>
 #endif
 

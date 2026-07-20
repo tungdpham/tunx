@@ -10,7 +10,7 @@
 #include "device/task.hpp"
 #include "loss_impl/cpu/loss_ops.hpp"
 #include "tensor/tensor.hpp"
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "loss_impl/cuda/loss_ops.hpp"
 #endif
 #include <memory>
@@ -119,7 +119,7 @@ private:
                                predictions.data_as<T>(), targets.data_as<int>(), loss, batch_size,
                                num_classes);
       }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
       else if (predictions.device_type() == DeviceType::CUDA) {
         return create_cuda_task(defaultFlowHandle, cuda::loss::compute_crossentropy_loss_logits<T>,
                                 predictions.data_as<T>(), targets.data_as<int>(), loss, batch_size,
@@ -133,7 +133,7 @@ private:
                                predictions.data_as<T>(), targets.data_as<int>(), loss, batch_size,
                                num_classes, static_cast<T>(epsilon_));
       }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
       else if (predictions.device_type() == DeviceType::CUDA) {
         return create_cuda_task(defaultFlowHandle, cuda::loss::compute_crossentropy_loss_probs<T>,
                                 predictions.data_as<T>(), targets.data_as<int>(), loss, batch_size,
@@ -162,7 +162,7 @@ private:
                                predictions.data_as<T>(), targets.data_as<int>(),
                                gradient.data_as<T>(), batch_size, num_classes);
       }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
       else if (predictions.device_type() == DeviceType::CUDA) {
         return create_cuda_task(defaultFlowHandle,
                                 cuda::loss::compute_crossentropy_gradient_logits<T>,
@@ -178,7 +178,7 @@ private:
                                gradient.data_as<T>(), batch_size, num_classes,
                                static_cast<T>(epsilon_));
       }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
       else if (predictions.device_type() == DeviceType::CUDA) {
         return create_cuda_task(
             defaultFlowHandle, cuda::loss::compute_crossentropy_gradient_probs<T>,
@@ -239,7 +239,7 @@ private:
                              predictions.data_as<T>(), targets.data_as<T>(), loss, batch_size,
                              output_size);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
       return create_cuda_task(defaultFlowHandle, cuda::loss::compute_mse_loss<T>,
                               predictions.data_as<T>(), targets.data_as<T>(), loss, batch_size,
@@ -264,7 +264,7 @@ private:
                              predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
                              batch_size, output_size);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
       return create_cuda_task(defaultFlowHandle, cuda::loss::compute_mse_gradient<T>,
                               predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
@@ -323,7 +323,7 @@ private:
                              predictions.data_as<T>(), targets.data_as<T>(), loss, batch_size,
                              output_size);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
       return create_cuda_task(defaultFlowHandle, cuda::loss::compute_mae_loss<T>,
                               predictions.data_as<T>(), targets.data_as<T>(), loss, batch_size,
@@ -348,7 +348,7 @@ private:
                              predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
                              batch_size, output_size);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
       return create_cuda_task(defaultFlowHandle, cuda::loss::compute_mae_gradient<T>,
                               predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
@@ -414,7 +414,7 @@ private:
                              predictions.data_as<T>(), targets.data_as<T>(), loss, batch_size,
                              output_size, static_cast<T>(delta_));
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
       return create_cuda_task(defaultFlowHandle, cuda::loss::compute_huber_loss<T>,
                               predictions.data_as<T>(), targets.data_as<T>(), loss, batch_size,
@@ -439,7 +439,7 @@ private:
                              predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
                              batch_size, output_size, static_cast<T>(delta_));
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
       return create_cuda_task(defaultFlowHandle, cuda::loss::compute_huber_gradient<T>,
                               predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),

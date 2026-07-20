@@ -15,7 +15,7 @@
 
 using namespace tunx;
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 class CUDAEngineTest : public ::testing::Test {
 protected:
@@ -236,4 +236,4 @@ TEST_F(CUDAEngineTest, DenseBgradReturnsCorrectResults) {
   compare_tensor(grad_bias.to_host(), expected_grad_bias);
 }
 
-#endif  // USE_CUDA
+#endif  // TUNX_USE_CUDA

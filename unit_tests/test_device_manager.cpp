@@ -136,7 +136,7 @@ TEST_F(DeviceManagerTest, ClearDevices) {
   }
 }
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 TEST_F(DeviceManagerTest, CUDADeviceDiscovery) {
   DeviceManager &manager = DeviceManager::getInstance();

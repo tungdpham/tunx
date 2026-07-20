@@ -1,4 +1,4 @@
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "device/cuda/cuda_context.hpp"
 
 #include <cuda_runtime.h>
@@ -132,4 +132,4 @@ Flow *CUDAContext::getFlow(flowHandle_t handle) {
 
 }  // namespace tunx
 
-#endif  // USE_CUDA
+#endif  // TUNX_USE_CUDA

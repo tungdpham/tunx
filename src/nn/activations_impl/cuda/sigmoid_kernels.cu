@@ -1,6 +1,6 @@
 #include "nn/activations_impl/cuda/sigmoid_kernels.hpp"
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 #include "type/type.hpp"
 

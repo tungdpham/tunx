@@ -6,7 +6,7 @@
  */
 #pragma once
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include <cuda_runtime.h>
 
 #include <cstddef>

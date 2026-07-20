@@ -3,7 +3,7 @@
 #include "device/dptr.hpp"
 #include "ops/cpu/kernels.hpp"
 #include "ops/cpu/permute_heads.hpp"
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "ops/cuda/kernels.hpp"
 #include "ops/cuda/permute_heads.hpp"
 #endif
@@ -28,7 +28,7 @@ std::unique_ptr<Task> add(const dptr a, const dptr b, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::add<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::add<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
@@ -51,7 +51,7 @@ std::unique_ptr<Task> sub(const dptr a, const dptr b, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::sub<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::sub<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
@@ -74,7 +74,7 @@ std::unique_ptr<Task> mul(const dptr a, const dptr b, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::mul<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::mul<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
@@ -97,7 +97,7 @@ std::unique_ptr<Task> div(const dptr a, const dptr b, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::div<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::div<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
@@ -120,7 +120,7 @@ std::unique_ptr<Task> fmadd(const dptr a, const dptr b, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::fmadd<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::fmadd<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
@@ -143,7 +143,7 @@ std::unique_ptr<Task> fmsub(const dptr a, const dptr b, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::fmsub<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::fmsub<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
@@ -166,7 +166,7 @@ std::unique_ptr<Task> fnmadd(const dptr a, const dptr b, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::fnmadd<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::fnmadd<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
@@ -189,7 +189,7 @@ std::unique_ptr<Task> add_scalar(const dptr a, T scalar, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::add_scalar<T>, a.get<T>(), scalar, c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::add_scalar<T>, a.get<T>(), scalar, c.get<T>(), size);
   }
@@ -212,7 +212,7 @@ std::unique_ptr<Task> sub_scalar(const dptr a, T scalar, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::sub_scalar<T>, a.get<T>(), scalar, c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::sub_scalar<T>, a.get<T>(), scalar, c.get<T>(), size);
   }
@@ -235,7 +235,7 @@ std::unique_ptr<Task> mul_scalar(const dptr a, T scalar, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::mul_scalar<T>, a.get<T>(), scalar, c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::mul_scalar<T>, a.get<T>(), scalar, c.get<T>(), size);
   }
@@ -258,7 +258,7 @@ std::unique_ptr<Task> div_scalar(const dptr a, T scalar, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::div_scalar<T>, a.get<T>(), scalar, c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::div_scalar<T>, a.get<T>(), scalar, c.get<T>(), size);
   }
@@ -277,7 +277,7 @@ std::unique_ptr<Task> set_scalar(dptr c, T scalar, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::set_scalar<T>, c.get<T>(), scalar, size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::set_scalar<T>, c.get<T>(), scalar, size);
   }
@@ -300,7 +300,7 @@ std::unique_ptr<Task> axpy(T alpha, const dptr x, dptr y, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::axpy<T>, alpha, x.get<T>(), y.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::axpy<T>, alpha, x.get<T>(), y.get<T>(), size);
   }
@@ -323,7 +323,7 @@ std::unique_ptr<Task> sqrt(const dptr a, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::sqrt<T>, a.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::sqrt<T>, a.get<T>(), c.get<T>(), size);
   }
@@ -346,7 +346,7 @@ inline std::unique_ptr<Task> rsqrt(const dptr a, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::rsqrt<T>, a.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::rsqrt<T>, a.get<T>(), c.get<T>(), size);
   }
@@ -369,7 +369,7 @@ inline std::unique_ptr<Task> rcp(const dptr a, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::rcp<T>, a.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::rcp<T>, a.get<T>(), c.get<T>(), size);
   }
@@ -392,7 +392,7 @@ std::unique_ptr<Task> abs(const dptr a, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::abs<T>, a.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::abs<T>, a.get<T>(), c.get<T>(), size);
   }
@@ -415,7 +415,7 @@ std::unique_ptr<Task> min(const dptr a, const dptr b, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::min<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::min<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
@@ -438,7 +438,7 @@ std::unique_ptr<Task> max(const dptr a, const dptr b, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::max<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::max<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
@@ -461,7 +461,7 @@ std::unique_ptr<Task> scalar_max(const dptr a, T scalar, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::scalar_max<T>, a.get<T>(), scalar, c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::scalar_max<T>, a.get<T>(), scalar, c.get<T>(), size);
   }
@@ -484,7 +484,7 @@ std::unique_ptr<Task> clamp(const dptr a, T min_val, T max_val, dptr c, size_t s
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::clamp<T>, a.get<T>(), min_val, max_val, c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::clamp<T>, a.get<T>(), min_val, max_val, c.get<T>(), size);
   }
@@ -507,7 +507,7 @@ std::unique_ptr<Task> equal(const dptr a, const dptr b, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::equal<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::equal<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
@@ -530,7 +530,7 @@ std::unique_ptr<Task> greater(const dptr a, const dptr b, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::greater<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::greater<T>, a.get<T>(), b.get<T>(), c.get<T>(), size);
   }
@@ -557,7 +557,7 @@ std::unique_ptr<Task> copy(const dptr a, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::copy<T>, a.get<T>(), c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::copy<T>, a.get<T>(), c.get<T>(), size);
   }
@@ -582,14 +582,14 @@ std::unique_ptr<Task> cd_copy(const dptr a, dptr c, size_t size,
 
   if (a_device_type == DeviceType::CPU && c_device_type == DeviceType::CUDA) {
     // host to device copy
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     return create_cuda_task(handle, cuda::h2d_copy<T>, a.get<T>(), c.get<T>(), size);
 #else
     throw std::runtime_error("cd_copy: CUDA not enabled for CPU to CUDA copy");
 #endif
   } else if (a_device_type == DeviceType::CUDA && c_device_type == DeviceType::CPU) {
     // device to host copy
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     return create_cuda_task(handle, cuda::d2h_copy<T>, a.get<T>(), c.get<T>(), size);
 #else
     throw std::runtime_error("cd_copy: CUDA not enabled for CUDA to CPU copy");
@@ -612,7 +612,7 @@ std::unique_ptr<Task> bswap(const dptr a, dptr c, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::bswap<T>, a.get<T>(), c.get<T>(), size);
   } else if (device_type == DeviceType::CUDA) {
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     return create_cuda_task(handle, cuda::bswap<T>, a.get<T>(), c.get<T>(), size);
 #else
     throw std::runtime_error("bswap: CUDA support not compiled in");
@@ -630,7 +630,7 @@ std::unique_ptr<Task> zero(dptr c, size_t size, flowHandle_t handle = defaultFlo
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::zero<T>, c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::zero<T>, c.get<T>(), size);
   }
@@ -648,7 +648,7 @@ T sum(dptr a, size_t size) {
   if (device_type == DeviceType::CPU) {
     return cpu::sum(a.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return cuda::sum(a.get<T>(), size, 0);
   }
@@ -670,7 +670,7 @@ T dot_product(dptr a, dptr b, size_t size) {
   if (device_type == DeviceType::CPU) {
     return cpu::dot_product(a.get<T>(), b.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return cuda::dot_product(a.get<T>(), b.get<T>(), size, 0);
   }
@@ -688,7 +688,7 @@ T norm_squared(dptr a, size_t size) {
   if (device_type == DeviceType::CPU) {
     return cpu::norm_squared(a.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return cuda::norm_squared(a.get<T>(), size, 0);
   }
@@ -706,7 +706,7 @@ T sum_squared_diff(const dptr a, T mean, size_t size) {
   if (device_type == DeviceType::CPU) {
     return cpu::sum_squared_diff(a.get<T>(), mean, size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return cuda::sum_squared_diff(a.get<T>(), mean, size, 0);
   }
@@ -730,7 +730,7 @@ std::unique_ptr<Task> sub_mul_scalar(const dptr a, T sub_scalar, T mul_scalar, d
     return create_cpu_task(handle, cpu::sub_mul_scalar<T>, a.get<T>(), sub_scalar, mul_scalar,
                            c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::sub_mul_scalar<T>, a.get<T>(), sub_scalar, mul_scalar,
                             c.get<T>(), size);
@@ -755,7 +755,7 @@ std::unique_ptr<Task> mul_add_scalar(const dptr a, T mul_scalar, T add_scalar, d
     return create_cpu_task(handle, cpu::mul_add_scalar<T>, a.get<T>(), mul_scalar, add_scalar,
                            c.get<T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::mul_add_scalar<T>, a.get<T>(), mul_scalar, add_scalar,
                             c.get<T>(), size);
@@ -777,7 +777,7 @@ std::unique_ptr<Task> fill_random_uniform(dptr data, size_t size, T min_val, T m
     return create_cpu_task(handle, cpu::fill_random_uniform<T>, data.get<T>(), size, min_val,
                            max_val, seed);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::fill_random_uniform<T>, data.get<T>(), size, min_val,
                             max_val, seed);
@@ -799,7 +799,7 @@ std::unique_ptr<Task> fill_random_normal(dptr data, size_t size, T mean, T stdde
     return create_cpu_task(handle, cpu::fill_random_normal<T>, data.get<T>(), size, mean, stddev,
                            seed);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::fill_random_normal<T>, data.get<T>(), size, mean, stddev,
                             seed);
@@ -827,7 +827,7 @@ std::unique_ptr<Task> check_equals(const dptr a, const dptr b, bool &result, dou
     return create_cpu_task(handle, cpu::check_equals<T>, a.get<T>(), b.get<T>(), a.capacity(),
                            result, eps);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::check_equals<T>, a.get<T>(), b.get<T>(), a.capacity(),
                             result, eps);
@@ -851,7 +851,7 @@ std::unique_ptr<Task> cast(const dptr a, dptr b, size_t size,
   if (device_type == DeviceType::CPU) {
     return create_cpu_task(handle, cpu::cast<A_T, B_T>, a.get<A_T>(), b.get<B_T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (device_type == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::cast<A_T, B_T>, a.get<A_T>(), b.get<B_T>(), size);
   }

@@ -31,7 +31,7 @@ void gemm(const dptr &A, const dptr &B, const dptr &C, size_t M, size_t N, size_
     create_cpu_task(defaultFlowHandle, cpu::gemm<IO_T>, A.get<IO_T>(), B.get<Param_T>(),
                     C.get<IO_T>(), M, N, K, trans_A, trans_B, alpha, beta, lda, ldb, ldc);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (A.device_type() == DeviceType::CUDA) {
     create_cuda_task(defaultFlowHandle, cuda::gemm_ex<IO_T, Param_T, Compute_T>, A.get<IO_T>(),
                      B.get<Param_T>(), C.get<IO_T>(), M, N, K, trans_A, trans_B, alpha, beta, lda,

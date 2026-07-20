@@ -1,4 +1,4 @@
-#ifdef USE_CUDNN
+#ifdef TUNX_USE_CUDNN
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -2501,13 +2501,14 @@ __global__ void pos_embedding_fwd_kernel(const T_IO* input, const T_PARAM* pos_e
   size_t total = batch_size * sample_size;
   if (idx < total) {
     size_t embed_idx = idx % sample_size;
-    output[idx] = static_cast<T_IO>(static_cast<T_COMPUTE>(input[idx]) + static_cast<T_COMPUTE>(pos_embed[embed_idx]));
+    output[idx] = static_cast<T_IO>(static_cast<T_COMPUTE>(input[idx]) +
+                                    static_cast<T_COMPUTE>(pos_embed[embed_idx]));
   }
 }
 
 template <typename T_IO, typename T_PARAM, typename T_COMPUTE>
-__global__ void pos_embedding_bwd_kernel(const T_IO* grad_output, T_PARAM* grad_pos_embed, size_t batch_size,
-                                         size_t sample_size) {
+__global__ void pos_embedding_bwd_kernel(const T_IO* grad_output, T_PARAM* grad_pos_embed,
+                                         size_t batch_size, size_t sample_size) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < sample_size) {
     float sum = 0.0f;
@@ -2525,15 +2526,17 @@ void CuDNNEngine::positional_embedding_fwd(void* backend_handle,
   cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
-  DISPATCH_DTYPE3(type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, T_IO, T_PARAM, T_COMPUTE, {
-    size_t sample_size = stats.seq_len * stats.embed_dim;
-    size_t total_elements = stats.batch_size * sample_size;
-    int blockSize = 256;
-    int numBlocks = (total_elements + blockSize - 1) / blockSize;
-    pos_embedding_fwd_kernel<T_IO, T_PARAM, T_COMPUTE><<<numBlocks, blockSize, 0, stream>>>(
-        static_cast<const T_IO*>(input), static_cast<const T_PARAM*>(pos_embedding), static_cast<T_IO*>(output),
-        stats.batch_size, sample_size);
-  });
+  DISPATCH_DTYPE3(
+      type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, T_IO, T_PARAM, T_COMPUTE,
+      {
+        size_t sample_size = stats.seq_len * stats.embed_dim;
+        size_t total_elements = stats.batch_size * sample_size;
+        int blockSize = 256;
+        int numBlocks = (total_elements + blockSize - 1) / blockSize;
+        pos_embedding_fwd_kernel<T_IO, T_PARAM, T_COMPUTE><<<numBlocks, blockSize, 0, stream>>>(
+            static_cast<const T_IO*>(input), static_cast<const T_PARAM*>(pos_embedding),
+            static_cast<T_IO*>(output), stats.batch_size, sample_size);
+      });
 }
 
 void CuDNNEngine::positional_embedding_bwd(void* backend_handle,
@@ -2543,14 +2546,16 @@ void CuDNNEngine::positional_embedding_bwd(void* backend_handle,
   cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
-  DISPATCH_DTYPE3(type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, T_IO, T_PARAM, T_COMPUTE, {
-    size_t sample_size = stats.seq_len * stats.embed_dim;
-    int blockSize = 256;
-    int numBlocks = (sample_size + blockSize - 1) / blockSize;
-    pos_embedding_bwd_kernel<T_IO, T_PARAM, T_COMPUTE><<<numBlocks, blockSize, 0, stream>>>(
-        static_cast<const T_IO*>(grad_output), static_cast<T_PARAM*>(grad_pos_embedding), stats.batch_size,
-        sample_size);
-  });
+  DISPATCH_DTYPE3(
+      type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, T_IO, T_PARAM, T_COMPUTE,
+      {
+        size_t sample_size = stats.seq_len * stats.embed_dim;
+        int blockSize = 256;
+        int numBlocks = (sample_size + blockSize - 1) / blockSize;
+        pos_embedding_bwd_kernel<T_IO, T_PARAM, T_COMPUTE><<<numBlocks, blockSize, 0, stream>>>(
+            static_cast<const T_IO*>(grad_output), static_cast<T_PARAM*>(grad_pos_embedding),
+            stats.batch_size, sample_size);
+      });
 }
 
 void CuDNNEngine::batchnorm_fwd(void* backend_handle, const BatchNormStats& stats,

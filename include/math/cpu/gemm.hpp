@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef USE_MKL
+#ifdef TUNX_USE_MKL
 #include <stdexcept>
 
 #include "utils/mkl_utils.hpp"
@@ -16,7 +16,7 @@ namespace cpu {
 template <typename T>
 void gemm(const T *A, const T *B, T *C, size_t M, size_t N, size_t K, const bool trans_A,
           const bool trans_B, const T alpha, const T beta) {
-#ifdef USE_MKL
+#ifdef TUNX_USE_MKL
   if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) {
     char transa = trans_A ? 'T' : 'N';
     char transb = trans_B ? 'T' : 'N';

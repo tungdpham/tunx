@@ -48,7 +48,7 @@ Tensor SigmoidImpl::backward_impl(const Tensor &grad_output, Residuals &residual
       grad_in_data[i] = grad_out_data[i] * sig * (1.0f - sig);
     }
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (grad_output.device_type() == DeviceType::CUDA) {
     throw std::runtime_error("SigmoidImpl: CUDA backward not yet implemented");
   }

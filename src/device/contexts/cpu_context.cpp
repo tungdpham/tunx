@@ -134,7 +134,7 @@ void *CPUContext::allocateAlignedMemory(size_t size, size_t alignment) {
 #ifdef _WIN32
   return _aligned_malloc(size, alignment);
 #else
-#ifndef USE_CUDA
+#ifndef TUNX_USE_CUDA
   // POSIX aligned_alloc requires size to be a multiple of alignment
   size_t adjusted_size = ((size + alignment - 1) / alignment) * alignment;
   return std::aligned_alloc(alignment, adjusted_size);
@@ -155,7 +155,7 @@ void CPUContext::deallocateAlignedMemory(void *ptr) {
 #ifdef _WIN32
   _aligned_free(ptr);
 #else
-#ifndef USE_CUDA
+#ifndef TUNX_USE_CUDA
   std::free(ptr);
 #else
   cudaError_t err = cudaFreeHost(ptr);

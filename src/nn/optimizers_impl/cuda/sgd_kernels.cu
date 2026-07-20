@@ -7,7 +7,7 @@
 #include "nn/optimizers_impl/cuda/sgd_kernels.hpp"
 #include "type/type.hpp"
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 namespace tunx {
 namespace cuda {

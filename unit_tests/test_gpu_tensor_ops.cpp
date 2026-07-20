@@ -18,7 +18,7 @@
 
 using namespace tunx;
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 class GPUopsTest : public ::testing::Test {
 protected:

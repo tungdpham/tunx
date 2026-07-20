@@ -10,7 +10,7 @@
 
 #include "nn/activations_impl/cpu/gelu_kernels.hpp"
 #include "tensor/tensor.hpp"
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "nn/activations_impl/cuda/gelu_kernels.hpp"
 #endif
 
@@ -53,7 +53,7 @@ std::unique_ptr<Task> GELU::apply_impl(const Tensor &input, Tensor &output,
     return create_cpu_task(handle, cpu::gelu<Compute_T>, input.data_as<Compute_T>(),
                            output.data_as<Compute_T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (input.device_type() == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::gelu<Compute_T>, input.data_as<Compute_T>(),
                             output.data_as<Compute_T>(), size);
@@ -78,7 +78,7 @@ std::unique_ptr<Task> GELU::compute_gradient_impl(const Tensor &input, const Ten
     return create_cpu_task(handle, cpu::gelu_gradient<Compute_T>, input.data_as<Compute_T>(),
                            grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (input.device_type() == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::gelu_gradient<Compute_T>, input.data_as<Compute_T>(),
                             grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(),

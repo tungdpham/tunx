@@ -107,7 +107,7 @@ endif()
 
 # Handle result
 if(MKL_FOUND)
-    add_compile_definitions(USE_MKL)
+    add_compile_definitions(TUNX_USE_MKL)
     message(STATUS "Intel MKL enabled")
 else()
     message(FATAL_ERROR "Intel MKL requested but not found. Please install Intel MKL or set MKLROOT environment variable.")

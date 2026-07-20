@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef USE_CUDNN
+#ifdef TUNX_USE_CUDNN
 
 #include <cuda_runtime.h>
 #include <cudnn.h>

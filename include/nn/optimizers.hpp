@@ -18,7 +18,7 @@
 #include "nn/graph.hpp"
 #include "optimizers_impl/cpu/adam_kernels.hpp"
 #include "optimizers_impl/cpu/sgd_kernels.hpp"
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "optimizers_impl/cuda/adam_kernels.hpp"
 #include "optimizers_impl/cuda/sgd_kernels.hpp"
 #endif
@@ -125,7 +125,7 @@ private:
                         grad.data_as<T>(), size, this->learning_rate_);
       }
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (param.device_type() == DeviceType::CUDA) {
       if (momentum_ > 0.0f) {
         create_cuda_task(defaultFlowHandle, cuda::sgd::update_sgd_momentum<T>, param.data_as<T>(),
@@ -224,7 +224,7 @@ private:
                       beta1_, beta2_, epsilon_, bias_correction1, bias_correction2, weight_decay_,
                       decouple_weight_decay_);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (param.device_type() == DeviceType::CUDA) {
       create_cuda_task(defaultFlowHandle, cuda::adam::update_adam<T>, param.data_as<T>(),
                        grad.data_as<T>(), m.data_as<T>(), v.data_as<T>(), size,

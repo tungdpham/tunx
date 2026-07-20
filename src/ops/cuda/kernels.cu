@@ -3,7 +3,7 @@
 #include "ops/cuda/kernels.hpp"
 #include "type/type.hpp"
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>

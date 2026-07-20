@@ -6,7 +6,7 @@
  */
 #pragma once
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include <cuda_runtime.h>
 #endif
 
@@ -42,7 +42,7 @@ public:
   }
 };
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 // Manages CUDA streams for asynchronous execution, the id should be put into device's
 // hashmap for lookup
 class CUDAFlow : public Flow {

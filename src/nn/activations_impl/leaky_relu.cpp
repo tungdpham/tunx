@@ -10,7 +10,7 @@
 
 #include "nn/activations_impl/cpu/leaky_relu_kernels.hpp"
 #include "tensor/tensor.hpp"
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "nn/activations_impl/cuda/leaky_relu_kernels.hpp"
 #endif
 
@@ -62,7 +62,7 @@ std::unique_ptr<Task> LeakyReLU::apply_impl(const Tensor &input, Tensor &output,
     return create_cpu_task(handle, cpu::leaky_relu<Compute_T>, input.data_as<Compute_T>(),
                            output.data_as<Compute_T>(), size, slope_typed);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (input.device_type() == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::leaky_relu<Compute_T>, input.data_as<Compute_T>(),
                             output.data_as<Compute_T>(), size, slope_typed);
@@ -91,7 +91,7 @@ std::unique_ptr<Task> LeakyReLU::compute_gradient_impl(const Tensor &input,
                            grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size,
                            slope_typed);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (grad_output.device_type() == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::leaky_relu_gradient<Compute_T>,
                             input.data_as<Compute_T>(), grad_output.data_as<Compute_T>(),

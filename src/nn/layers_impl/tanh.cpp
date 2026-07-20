@@ -47,7 +47,7 @@ Tensor TanhImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) 
       grad_in_data[i] = grad_out_data[i] * (1.0f - tanh_val * tanh_val);
     }
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (grad_output.device_type() == DeviceType::CUDA) {
     throw std::runtime_error("TanhImpl: CUDA backward not yet implemented");
   }

@@ -8,7 +8,7 @@
 
 #include "metrics_impl/cpu/metrics.hpp"
 #include "tensor/tensor.hpp"
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "metrics_impl/cuda/metrics.hpp"
 #endif
 
@@ -24,7 +24,7 @@ inline float compute_precision_impl(const Tensor &predictions, const Tensor &tar
     return cpu::metrics::compute_precision(predictions.data_as<T>(), targets.data_as<int>(),
                                            batch_size, num_classes, class_id);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else {
     return cuda::metrics::compute_precision(predictions.data_as<T>(), targets.data_as<int>(),
                                             batch_size, num_classes, class_id);
@@ -41,7 +41,7 @@ inline float compute_recall_impl(const Tensor &predictions, const Tensor &target
     return cpu::metrics::compute_recall(predictions.data_as<T>(), targets.data_as<int>(),
                                         batch_size, num_classes, class_id);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else {
     return cuda::metrics::compute_recall(predictions.data_as<T>(), targets.data_as<int>(),
                                          batch_size, num_classes, class_id);
@@ -58,7 +58,7 @@ inline float compute_f1_score_impl(const Tensor &predictions, const Tensor &targ
     return cpu::metrics::compute_f1_score(predictions.data_as<T>(), targets.data_as<int>(),
                                           batch_size, num_classes, class_id);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else {
     return cuda::metrics::compute_f1_score(predictions.data_as<T>(), targets.data_as<int>(),
                                            batch_size, num_classes, class_id);
@@ -75,7 +75,7 @@ inline float compute_perplexity_impl(const Tensor &predictions, const Tensor &ta
     return cpu::metrics::compute_perplexity(predictions.data_as<T>(), targets.data_as<int>(),
                                             batch_size, num_classes);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else {
     return cuda::metrics::compute_perplexity(predictions.data_as<T>(), targets.data_as<int>(),
                                              batch_size, num_classes);
@@ -92,7 +92,7 @@ inline float compute_top_k_accuracy_impl(const Tensor &predictions, const Tensor
     return cpu::metrics::compute_top_k_accuracy(predictions.data_as<T>(), targets.data_as<int>(),
                                                 batch_size, num_classes, k);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else {
     return cuda::metrics::compute_top_k_accuracy(predictions.data_as<T>(), targets.data_as<int>(),
                                                  batch_size, num_classes, k);
@@ -109,7 +109,7 @@ inline float compute_mae_impl(const Tensor &predictions, const Tensor &targets,
     return cpu::metrics::compute_mae(predictions.data_as<T>(), targets.data_as<T>(),
                                      total_elements);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else {
     return cuda::metrics::compute_mae(predictions.data_as<T>(), targets.data_as<T>(),
                                       total_elements);
@@ -126,7 +126,7 @@ inline float compute_mse_impl(const Tensor &predictions, const Tensor &targets,
     return cpu::metrics::compute_mse(predictions.data_as<T>(), targets.data_as<T>(),
                                      total_elements);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else {
     return cuda::metrics::compute_mse(predictions.data_as<T>(), targets.data_as<T>(),
                                       total_elements);
@@ -143,7 +143,7 @@ inline int compute_class_corrects_impl(const Tensor &predictions, const Tensor &
     return cpu::metrics::compute_class_corrects(predictions.data_as<T>(), targets.data_as<int>(),
                                                 batch_size, num_classes, threshold);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else {
     return cuda::metrics::compute_class_corrects(predictions.data_as<T>(), targets.data_as<int>(),
                                                  batch_size, num_classes, threshold);

@@ -4,7 +4,7 @@
 #ifdef USE_TBB
 #include <tbb/task_arena.h>
 #endif
-#ifdef USE_MKL
+#ifdef TUNX_USE_MKL
 #include "utils/mkl_utils.hpp"
 #endif
 #include <iostream>
@@ -85,7 +85,7 @@ int main() {
     benchmark(
         "SGEMM (TT)",
         [&]() { cpu::sgemm(a.data(), b.data(), c4.data(), N, C, C * H * W, true, true); }, 3);
-#ifdef USE_MKL
+#ifdef TUNX_USE_MKL
     std::cout << "\n=== MKL Benchmarks ===" << std::endl;
     mkl_set_num_threads(8);
 

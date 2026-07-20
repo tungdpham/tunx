@@ -10,7 +10,7 @@
 
 #include "nn/activations_impl/cpu/elu_kernels.hpp"
 #include "tensor/tensor.hpp"
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "nn/activations_impl/cuda/elu_kernels.hpp"
 #endif
 
@@ -59,7 +59,7 @@ std::unique_ptr<Task> ELU::apply_impl(const Tensor &input, Tensor &output,
     return create_cpu_task(handle, cpu::elu<Compute_T>, input.data_as<Compute_T>(),
                            output.data_as<Compute_T>(), size, alpha_typed);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (input.device_type() == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::elu<Compute_T>, input.data_as<Compute_T>(),
                             output.data_as<Compute_T>(), size, alpha_typed);
@@ -86,7 +86,7 @@ std::unique_ptr<Task> ELU::compute_gradient_impl(const Tensor &input, const Tens
                            grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size,
                            alpha_typed);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (grad_output.device_type() == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::elu_gradient<Compute_T>, input.data_as<Compute_T>(),
                             grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size,

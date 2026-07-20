@@ -6,7 +6,7 @@
  */
 #pragma once
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 #include <cudnn_graph.h>
 
@@ -17,7 +17,7 @@
 #include "device/context.hpp"
 #include "device/flow.hpp"
 
-#ifdef USE_CUDNN
+#ifdef TUNX_USE_CUDNN
 #include <cudnn.h>
 #endif
 
@@ -46,4 +46,4 @@ public:
 };
 }  // namespace tunx
 
-#endif  // USE_CUDA
+#endif  // TUNX_USE_CUDA

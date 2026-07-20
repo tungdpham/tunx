@@ -3,12 +3,12 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include <cuda_runtime.h>
 #endif
 
 #include "device/cpu/cpu_context.hpp"
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "device/cuda/cuda_context.hpp"
 #endif
 
@@ -32,7 +32,7 @@ void DeviceManager::discoverDevices() {
     std::cerr << "Failed to create CPU device: " << e.what() << std::endl;
   }
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   // Discover CUDA devices
   int cuda_device_count = 0;
   cudaError_t err = cudaGetDeviceCount(&cuda_device_count);

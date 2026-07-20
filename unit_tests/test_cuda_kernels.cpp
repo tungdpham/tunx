@@ -1,4 +1,4 @@
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 #include <gtest/gtest.h>
 

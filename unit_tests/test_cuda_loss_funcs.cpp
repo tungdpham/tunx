@@ -16,7 +16,7 @@
 
 using namespace tunx;
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 class CUDALossOpsTest : public ::testing::Test {
 protected:

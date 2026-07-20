@@ -9,7 +9,7 @@
 #include "type/cuda/vectorized_types.hpp"
 #include "type/type.hpp"
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 namespace tunx {
 namespace cuda {

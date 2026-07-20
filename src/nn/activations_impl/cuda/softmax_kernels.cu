@@ -1,7 +1,7 @@
 #include "nn/activations_impl/cuda/softmax_kernels.hpp"
 #include "type/type.hpp"
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 namespace tunx {
 namespace cuda {

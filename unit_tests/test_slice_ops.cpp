@@ -1,6 +1,6 @@
 #include "nn/layers_impl/cpu/slice_ops.hpp"
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include <cuda_runtime.h>
 
 #include "nn/layers_impl/cuda/slice_ops.hpp"
@@ -133,7 +133,7 @@ TEST(SliceOpsTest, CpuForwardBackwardMatchesReference) {
   }
 }
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 TEST(SliceOpsTest, CudaForwardBackwardMatchesReference) {
   using T = float;
 

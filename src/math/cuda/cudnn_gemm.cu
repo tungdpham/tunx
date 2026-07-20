@@ -1,6 +1,6 @@
 #include "math/cuda/cudnn_gemm.hpp"
 
-#ifdef USE_CUDNN
+#ifdef TUNX_USE_CUDNN
 
 #include <cuda_runtime.h>
 #include <cudnn_frontend.h>

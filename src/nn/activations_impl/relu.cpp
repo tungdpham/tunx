@@ -10,7 +10,7 @@
 
 #include "nn/activations_impl/cpu/relu_kernels.hpp"
 #include "tensor/tensor.hpp"
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "nn/activations_impl/cuda/relu_kernels.hpp"
 #endif
 
@@ -57,7 +57,7 @@ std::unique_ptr<Task> ReLU::apply_impl(const Tensor &input, Tensor &output,
     return create_cpu_task(handle, cpu::relu<Compute_T>, input.data_as<Compute_T>(),
                            output.data_as<Compute_T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (input.device_type() == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::relu<Compute_T>, input.data_as<Compute_T>(),
                             output.data_as<Compute_T>(), size);
@@ -82,7 +82,7 @@ std::unique_ptr<Task> ReLU::compute_gradient_impl(const Tensor &input, const Ten
     return create_cpu_task(handle, cpu::relu_gradient<Compute_T>, input.data_as<Compute_T>(),
                            grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size);
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (grad_output.device_type() == DeviceType::CUDA) {
     return create_cuda_task(handle, cuda::relu_gradient<Compute_T>, input.data_as<Compute_T>(),
                             grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(),

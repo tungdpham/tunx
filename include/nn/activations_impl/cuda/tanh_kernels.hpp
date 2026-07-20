@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include <cuda_runtime.h>
 
 #include <cstddef>
@@ -16,4 +16,4 @@ void tanh_gradient(const T *input, const T *grad_output, T *grad_input, size_t s
 }  // namespace cuda
 }  // namespace tunx
 
-#endif  // USE_CUDA
+#endif  // TUNX_USE_CUDA

@@ -2,7 +2,7 @@
 
 #include <cstdint>
 #include <stdexcept>
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include <cuda_bf16.h>  // IWYU pragma: export
 #include <cuda_fp16.h>  // IWYU pragma: export
 #else
@@ -16,7 +16,7 @@ template <typename T>
 using Vec = std::vector<T>;
 using std::string;
 
-#if defined(USE_CUDA)
+#if defined(TUNX_USE_CUDA)
 using fp16 = __half;
 using bf16 = __nv_bfloat16;
 #endif
@@ -41,7 +41,7 @@ struct is_floating<float> : std::true_type {};
 template <>
 struct is_floating<double> : std::true_type {};
 
-#if defined(USE_CUDA)
+#if defined(TUNX_USE_CUDA)
 template <>
 struct is_floating<__half> : std::true_type {};
 
@@ -305,9 +305,11 @@ inline DType_t string_to_dtype(const std::string &dtype_str) {
   DISPATCH_DTYPE(dtype_value_a, type_alias_a,                                          \
                  { DISPATCH_DTYPE(dtype_value_b, type_alias_b, { __VA_ARGS__; }); })
 
-#define DISPATCH_DTYPE3(dtype_value_a, dtype_value_b, dtype_value_c, type_alias_a, type_alias_b, type_alias_c, ...) \
-  DISPATCH_DTYPE(dtype_value_a, type_alias_a,                                          \
-                 { DISPATCH_DTYPE2(dtype_value_b, dtype_value_c, type_alias_b, type_alias_c, { __VA_ARGS__; }); })
+#define DISPATCH_DTYPE3(dtype_value_a, dtype_value_b, dtype_value_c, type_alias_a, type_alias_b, \
+                        type_alias_c, ...)                                                       \
+  DISPATCH_DTYPE(dtype_value_a, type_alias_a, {                                                  \
+    DISPATCH_DTYPE2(dtype_value_b, dtype_value_c, type_alias_b, type_alias_c, { __VA_ARGS__; }); \
+  })
 
 #define DISPATCH_ANY_DTYPE(dtype_value, type_alias, ...)     \
   switch (dtype_value) {                                     \

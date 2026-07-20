@@ -15,7 +15,7 @@
 #include "device/device_manager.hpp"
 #include "flow.hpp"
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include <cuda_runtime.h>
 #endif
 
@@ -71,7 +71,7 @@ public:
   CPUTask &operator=(CPUTask &&) = delete;
 };
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 
 inline tunx::ErrorStatus cuda_error_to_status(cudaError_t err) {
   if (err == cudaSuccess) {
@@ -131,7 +131,7 @@ std::unique_ptr<Task> create_cpu_task(flowHandle_t handle, Func &&func, Args &&.
   return std::make_unique<CPUTask>(flow, std::forward<Func>(func), std::forward<Args>(args)...);
 }
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 // bundle the function and inject a stream based on the handle
 template <typename Func, typename... Args>
 std::unique_ptr<Task> create_cuda_task(flowHandle_t handle, Func &&func, Args &&...args) {

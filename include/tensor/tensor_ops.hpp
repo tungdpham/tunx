@@ -7,7 +7,7 @@
 #include "device/task.hpp"
 #include "ops/ops.hpp"
 #include "type/type.hpp"
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include "cuda/tensor_ops.hpp"
 #endif
 #include "tensor.hpp"
@@ -158,7 +158,7 @@ inline std::unique_ptr<Task> im2col(const Tensor &input, Tensor &col_data, size_
                              col_data.data_as<T>(), batch_size, channels, height, width, kernel_h,
                              kernel_w, stride_h, stride_w, pad_h, pad_w, output_h, output_w);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (input.device_type() == DeviceType::CUDA) {
       return create_cuda_task(handle, tunx::cuda::cuda_im2col<T>, input.data_as<T>(),
                               col_data.data_as<T>(), batch_size, channels, height, width, kernel_h,
@@ -200,7 +200,7 @@ inline std::unique_ptr<Task> col2im(const Tensor &col_data, Tensor &result_data,
                              batch_size, channels, height, width, kernel_h, kernel_w, stride_h,
                              stride_w, pad_h, pad_w, output_h, output_w);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (col_data.device_type() == DeviceType::CUDA) {
       return create_cuda_task(handle, tunx::cuda::cuda_col2im<T>, col_data_ptr, result_data_ptr,
                               batch_size, channels, height, width, kernel_h, kernel_w, stride_h,
@@ -245,7 +245,7 @@ inline std::unique_ptr<Task> pad(const Tensor &input, Tensor &result, size_t pad
       return create_cpu_task(handle, tunx::cpu::cpu_pad<T>, input_data, result_data, batch_size,
                              channels, height, width, pad_h, pad_w, value);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (input.device_type() == DeviceType::CUDA) {
       return create_cuda_task(handle, tunx::cuda::cuda_pad<T>, input_data, result_data, batch_size,
                               channels, height, width, pad_h, pad_w, value);
@@ -296,7 +296,7 @@ inline std::unique_ptr<Task> unpad(const Tensor &input, Tensor &result, size_t p
       return create_cpu_task(handle, tunx::cpu::cpu_unpad<T>, input_data, result_data, batch_size,
                              channels, height, width, pad_h, pad_w);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (input.device_type() == DeviceType::CUDA) {
       return create_cuda_task(handle, tunx::cuda::cuda_unpad<T>, input_data, result_data,
                               batch_size, channels, height, width, pad_h, pad_w);
@@ -348,7 +348,7 @@ inline std::unique_ptr<Task> crop(const Tensor &input, Tensor &result, size_t st
       return create_cpu_task(handle, tunx::cpu::cpu_crop<T>, input_data, result_data, batch_size,
                              channels, height, width, start_h, start_w, new_height, new_width);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (input.device_type() == DeviceType::CUDA) {
       return create_cuda_task(handle, tunx::cuda::cuda_crop<T>, input_data, result_data, batch_size,
                               channels, height, width, start_h, start_w, new_height, new_width);
@@ -401,7 +401,7 @@ inline std::unique_ptr<Task> slice_batch(const Tensor &input, Tensor &result, si
       return create_cpu_task(handle, ops::cpu::copy<T>, &input_data[start_batch * batch_stride],
                              result_data, copy_size);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (input.device_type() == DeviceType::CUDA) {
       return create_cuda_task(handle, ops::cuda::copy<T>, &input_data[start_batch * batch_stride],
                               result_data, copy_size);
@@ -455,7 +455,7 @@ inline std::unique_ptr<Task> split(const Tensor &input, Vec<Tensor> &results, si
         create_cpu_task(handle, ops::cpu::copy<T>, &input_data[start * batch_stride], result_data,
                         copy_size);
       }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
       else if (input.device_type() == DeviceType::CUDA) {
         create_cuda_task(handle, ops::cuda::copy<T>, &input_data[start * batch_stride], result_data,
                          copy_size);
@@ -497,7 +497,7 @@ inline std::unique_ptr<Task> transpose_2d(const Tensor &input, Tensor &output, s
       return create_cpu_task(handle, tunx::cpu::cpu_transpose_2d<T>, input_data, output_data, rows,
                              cols);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (device_type == DeviceType::CUDA) {
       return create_cuda_task(handle, tunx::cuda::cuda_transpose_2d<T>, input_data, output_data,
                               rows, cols);
@@ -536,7 +536,7 @@ inline std::unique_ptr<Task> nchw_to_cnhw(const Tensor &input, Tensor &output, s
       return create_cpu_task(handle, tunx::cpu::cpu_nchw_to_cnhw<T>, input_data, output_data, n, c,
                              h, w);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (device_type == DeviceType::CUDA) {
       return create_cuda_task(handle, tunx::cuda::cuda_nchw_to_cnhw<T>, input_data, output_data, n,
                               c, h, w);
@@ -575,7 +575,7 @@ inline std::unique_ptr<Task> cnhw_to_nchw(const Tensor &input, Tensor &output, s
       return create_cpu_task(handle, tunx::cpu::cpu_cnhw_to_nchw<T>, input_data, output_data, n, c,
                              h, w);
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (device_type == DeviceType::CUDA) {
       return create_cuda_task(handle, tunx::cuda::cuda_cnhw_to_nchw<T>, input_data, output_data, n,
                               c, h, w);

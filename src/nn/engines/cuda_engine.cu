@@ -1,4 +1,4 @@
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include <cublas_v2.h>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
@@ -961,8 +961,8 @@ __global__ void embedding_wgrad_kernel(const T* input, const T* grad, T* grad_we
 }
 
 template <typename T, typename ParamT>
-__global__ void layernorm_fwd_kernel(const T* input, T* output, const ParamT* gamma, const ParamT* beta,
-                                     size_t channels, T epsilon) {
+__global__ void layernorm_fwd_kernel(const T* input, T* output, const ParamT* gamma,
+                                     const ParamT* beta, size_t channels, T epsilon) {
   size_t n = static_cast<size_t>(blockIdx.x);
 
   const T* x = input + n * channels;
@@ -1628,7 +1628,8 @@ WorkspaceReq CUDAEngine::query_embedding_graph(void* backend_handle, const Embed
   return {0, 0, 0};
 }
 
-WorkspaceReq CUDAEngine::query_positional_embedding_graph(void* backend_handle, const PositionalEmbeddingStats& stats,
+WorkspaceReq CUDAEngine::query_positional_embedding_graph(void* backend_handle,
+                                                          const PositionalEmbeddingStats& stats,
                                                           DTypeDesc type_desc) {
   return {0, 0, 0};
 }
@@ -1977,17 +1978,20 @@ void CUDAEngine::embedding_bwd(void* backend_handle, const EmbeddingStats& stats
 }
 
 template <typename T_IO, typename T_PARAM, typename T_COMPUTE>
-__global__ void pos_embedding_fwd_kernel(const T_IO* input, const T_PARAM* pos_embed, T_IO* output, size_t batch_size, size_t sample_size) {
+__global__ void pos_embedding_fwd_kernel(const T_IO* input, const T_PARAM* pos_embed, T_IO* output,
+                                         size_t batch_size, size_t sample_size) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   size_t total = batch_size * sample_size;
   if (idx < total) {
     size_t embed_idx = idx % sample_size;
-    output[idx] = static_cast<T_IO>(static_cast<T_COMPUTE>(input[idx]) + static_cast<T_COMPUTE>(pos_embed[embed_idx]));
+    output[idx] = static_cast<T_IO>(static_cast<T_COMPUTE>(input[idx]) +
+                                    static_cast<T_COMPUTE>(pos_embed[embed_idx]));
   }
 }
 
 template <typename T_IO, typename T_PARAM, typename T_COMPUTE>
-__global__ void pos_embedding_bwd_kernel(const T_IO* grad_output, T_PARAM* grad_pos_embed, size_t batch_size, size_t sample_size) {
+__global__ void pos_embedding_bwd_kernel(const T_IO* grad_output, T_PARAM* grad_pos_embed,
+                                         size_t batch_size, size_t sample_size) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < sample_size) {
     float sum = 0.0f;
@@ -1998,33 +2002,39 @@ __global__ void pos_embedding_bwd_kernel(const T_IO* grad_output, T_PARAM* grad_
   }
 }
 
-void CUDAEngine::positional_embedding_fwd(void* backend_handle, const PositionalEmbeddingStats& stats, const void* input,
+void CUDAEngine::positional_embedding_fwd(void* backend_handle,
+                                          const PositionalEmbeddingStats& stats, const void* input,
                                           const void* pos_embedding, void* output, void* workspace,
                                           DTypeDesc type_desc) {
   cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
-  DISPATCH_DTYPE3(type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, T_IO, T_PARAM, T_COMPUTE, {
-    size_t sample_size = stats.seq_len * stats.embed_dim;
-    size_t total_elements = stats.batch_size * sample_size;
-    int blockSize = 256;
-    int numBlocks = (total_elements + blockSize - 1) / blockSize;
-    pos_embedding_fwd_kernel<T_IO, T_PARAM, T_COMPUTE><<<numBlocks, blockSize, 0, stream>>>(
-        static_cast<const T_IO*>(input), static_cast<const T_PARAM*>(pos_embedding),
-        static_cast<T_IO*>(output), stats.batch_size, sample_size);
-  });
+  DISPATCH_DTYPE3(
+      type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, T_IO, T_PARAM, T_COMPUTE,
+      {
+        size_t sample_size = stats.seq_len * stats.embed_dim;
+        size_t total_elements = stats.batch_size * sample_size;
+        int blockSize = 256;
+        int numBlocks = (total_elements + blockSize - 1) / blockSize;
+        pos_embedding_fwd_kernel<T_IO, T_PARAM, T_COMPUTE><<<numBlocks, blockSize, 0, stream>>>(
+            static_cast<const T_IO*>(input), static_cast<const T_PARAM*>(pos_embedding),
+            static_cast<T_IO*>(output), stats.batch_size, sample_size);
+      });
 }
 
-void CUDAEngine::positional_embedding_bwd(void* backend_handle, const PositionalEmbeddingStats& stats,
-                                          const void* grad_output, void* grad_pos_embedding, void* workspace,
-                                          DTypeDesc type_desc) {
+void CUDAEngine::positional_embedding_bwd(void* backend_handle,
+                                          const PositionalEmbeddingStats& stats,
+                                          const void* grad_output, void* grad_pos_embedding,
+                                          void* workspace, DTypeDesc type_desc) {
   cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
-  DISPATCH_DTYPE3(type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, T_IO, T_PARAM, T_COMPUTE, {
-    size_t sample_size = stats.seq_len * stats.embed_dim;
-    int blockSize = 256;
-    int numBlocks = (sample_size + blockSize - 1) / blockSize;
-    pos_embedding_bwd_kernel<T_IO, T_PARAM, T_COMPUTE><<<numBlocks, blockSize, 0, stream>>>(
-        static_cast<const T_IO*>(grad_output), static_cast<T_PARAM*>(grad_pos_embedding),
-        stats.batch_size, sample_size);
-  });
+  DISPATCH_DTYPE3(
+      type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, T_IO, T_PARAM, T_COMPUTE,
+      {
+        size_t sample_size = stats.seq_len * stats.embed_dim;
+        int blockSize = 256;
+        int numBlocks = (sample_size + blockSize - 1) / blockSize;
+        pos_embedding_bwd_kernel<T_IO, T_PARAM, T_COMPUTE><<<numBlocks, blockSize, 0, stream>>>(
+            static_cast<const T_IO*>(grad_output), static_cast<T_PARAM*>(grad_pos_embedding),
+            stats.batch_size, sample_size);
+      });
 }
 
 void CUDAEngine::batchnorm_fwd(void* backend_handle, const BatchNormStats& stats, const void* input,

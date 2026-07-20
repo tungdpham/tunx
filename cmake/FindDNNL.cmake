@@ -48,7 +48,7 @@ else()
 endif()
 
 if(DNNL_FOUND)
-    add_compile_definitions(USE_DNNL)
+    add_compile_definitions(TUNX_USE_DNNL)
     message(STATUS "Intel oneDNN (DNNL) enabled")
 
     set(DNNL_INTEL_RUNTIME_LIBS "")

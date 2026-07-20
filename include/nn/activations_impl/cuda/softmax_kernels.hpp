@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
 #include <cuda_runtime.h>
 
 #include <cstddef>
@@ -17,4 +17,4 @@ void softmax_gradient(const T *input, const T *grad_output, T *grad_input, size_
 }  // namespace cuda
 }  // namespace tunx
 
-#endif  // USE_CUDA
+#endif  // TUNX_USE_CUDA

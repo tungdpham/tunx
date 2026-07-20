@@ -34,7 +34,7 @@ Tensor LeakyReLUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
         mask_data[i] = (input_data[i] > 0.0f) ? 1 : 0;
       }
     }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
     else if (input.device_type() == DeviceType::CUDA) {
       throw std::runtime_error("LeakyReLUImpl: CUDA mask computation not yet implemented");
     }
@@ -65,7 +65,7 @@ Tensor LeakyReLUImpl::backward_impl(const Tensor &grad_output, Residuals &residu
       grad_in_data[i] = grad_out_data[i] * slope;
     }
   }
-#ifdef USE_CUDA
+#ifdef TUNX_USE_CUDA
   else if (grad_output.device_type() == DeviceType::CUDA) {
     throw std::runtime_error("LeakyReLUImpl: CUDA backward not yet implemented");
   }
