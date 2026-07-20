@@ -39,6 +39,8 @@ enum OpType {
   RELU_BWD,
   EMBEDDING_FWD,
   EMBEDDING_BWD,
+  POS_EMBEDDING_FWD,
+  POS_EMBEDDING_BWD,
   BATCHNORM_FWD,
   BATCHNORM_INFER,
   BATCHNORM_BWD,
@@ -159,6 +161,16 @@ public:
    */
   virtual WorkspaceReq query_embedding_graph(void* backend_handle, const EmbeddingStats& stats,
                                              DTypeDesc type_desc) = 0;
+
+  /**
+   * @brief Queries the workspace memory requirement for Positional Embedding graphs.
+   * @param backend_handle Opaque handle to the backend context.
+   * @param stats Positional Embedding layer configuration.
+   * @param type_desc Data type descriptors.
+   * @return WorkspaceReq specifying forward and backward workspace size in bytes.
+   */
+  virtual WorkspaceReq query_positional_embedding_graph(void* backend_handle, const PositionalEmbeddingStats& stats,
+                                                        DTypeDesc type_desc) = 0;
 
   /**
    * @brief Queries the workspace memory requirement for function::ReLU graphs.
@@ -444,6 +456,33 @@ public:
   virtual void embedding_bwd(void* backend_handle, const EmbeddingStats& stats,
                              const void* grad_output, const void* input, void* grad_weight,
                              void* workspace, DTypeDesc type_desc) = 0;
+
+  /**
+   * @brief Forward pass for a Positional Embedding layer.
+   * @param backend_handle Opaque handle to the backend context.
+   * @param stats Positional Embedding layer configuration.
+   * @param input Input tensor. Shape: [batch_size, seq_len, embed_dim], DType: io_dtype.
+   * @param pos_embedding Positional embedding tensor. Shape: [seq_len, embed_dim], DType: param_dtype.
+   * @param output Output tensor. Shape: [batch_size, seq_len, embed_dim], DType: io_dtype.
+   * @param workspace Workspace buffer.
+   * @param type_desc Data type descriptors.
+   */
+  virtual void positional_embedding_fwd(void* backend_handle, const PositionalEmbeddingStats& stats, const void* input,
+                                        const void* pos_embedding, void* output, void* workspace,
+                                        DTypeDesc type_desc) = 0;
+
+  /**
+   * @brief Backward pass for a Positional Embedding layer.
+   * @param backend_handle Opaque handle to the backend context.
+   * @param stats Positional Embedding layer configuration.
+   * @param grad_output Gradient w.r.t output. Shape: [batch_size, seq_len, embed_dim], DType: io_dtype.
+   * @param grad_pos_embedding Computed gradient w.r.t positional embedding. Shape: [seq_len, embed_dim], DType: param_dtype.
+   * @param workspace Workspace buffer.
+   * @param type_desc Data type descriptors.
+   */
+  virtual void positional_embedding_bwd(void* backend_handle, const PositionalEmbeddingStats& stats,
+                                        const void* grad_output, void* grad_pos_embedding, void* workspace,
+                                        DTypeDesc type_desc) = 0;
 
   /**
    * @brief Forward pass for a function::ReLU activation.

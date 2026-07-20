@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 
+#include "nn/param.hpp"
 #include "nn/siso_layer.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
@@ -29,10 +30,8 @@ private:
   size_t pad_w_;
   bool use_bias_;
 
-  Tensor weights_;
-  Tensor bias_;
-  Tensor grad_weights_;
-  Tensor grad_bias_;
+  Param weights_;
+  Param bias_;
 
   void init_impl() override;
   Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
@@ -42,32 +41,12 @@ public:
   static constexpr const char *TYPE_NAME = "conv2d";
 
   Conv2DImpl(size_t in_channels, size_t out_channels, size_t kernel_h, size_t kernel_w,
-                  size_t stride_h = 1, size_t stride_w = 1, size_t pad_h = 0, size_t pad_w = 0,
-                  bool use_bias = true, const std::string &name = "conv2d");
+             size_t stride_h = 1, size_t stride_w = 1, size_t pad_h = 0, size_t pad_w = 0,
+             bool use_bias = true, const std::string &name = "conv2d");
 
   std::string type() const override { return TYPE_NAME; }
   LayerConfig get_config() const override;
   Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
-  Vec<ParamDescriptor> param_descriptors() override {
-    Vec<ParamDescriptor> descriptors;
-    auto weight_desc = ParamDescriptor{
-        param_dtype_,
-        {out_channels_, kernel_h_, kernel_w_, in_channels_},
-        &weights_,
-        &grad_weights_,
-    };
-    descriptors.push_back(weight_desc);
-    if (use_bias_) {
-      auto bias_desc = ParamDescriptor{
-          param_dtype_,
-          {out_channels_},
-          &bias_,
-          &grad_bias_,
-      };
-      descriptors.push_back(bias_desc);
-    }
-    return descriptors;
-  }
   static std::shared_ptr<Conv2DImpl> create_from_config(const LayerConfig &config);
 };
 
@@ -76,11 +55,11 @@ public:
 class Conv2D : public LayerRef<internal::Conv2DImpl> {
 public:
   Conv2D(size_t in_channels, size_t out_channels, size_t kernel_h, size_t kernel_w,
-              size_t stride_h = 1, size_t stride_w = 1, size_t pad_h = 0, size_t pad_w = 0,
-              bool use_bias = true, const std::string &name = "conv2d")
-      : LayerRef(std::make_shared<internal::Conv2DImpl>(in_channels, out_channels, kernel_h, kernel_w,
-                                                   stride_h, stride_w, pad_h, pad_w, use_bias,
-                                                   name)) {}
+         size_t stride_h = 1, size_t stride_w = 1, size_t pad_h = 0, size_t pad_w = 0,
+         bool use_bias = true, const std::string &name = "conv2d")
+      : LayerRef(std::make_shared<internal::Conv2DImpl>(in_channels, out_channels, kernel_h,
+                                                        kernel_w, stride_h, stride_w, pad_h, pad_w,
+                                                        use_bias, name)) {}
 
   using LayerRef<internal::Conv2DImpl>::LayerRef;
 };

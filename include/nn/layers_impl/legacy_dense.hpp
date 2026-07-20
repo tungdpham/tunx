@@ -40,26 +40,6 @@ public:
 
   Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
 
-  Vec<ParamDescriptor> param_descriptors() override {
-    Vec<ParamDescriptor> descriptors;
-    auto weight_desc = ParamDescriptor{
-        param_dtype_,
-        {output_features_, input_features_},
-        &weights_,
-        &grad_weights_,
-    };
-    descriptors.push_back(weight_desc);
-    if (use_bias_) {
-      auto bias_desc = ParamDescriptor{
-          param_dtype_,
-          {output_features_},
-          &bias_,
-          &grad_bias_,
-      };
-      descriptors.push_back(bias_desc);
-    }
-    return descriptors;
-  }
 
   static std::shared_ptr<LegacyDenseImpl> create_from_config(const LayerConfig &config);
 };

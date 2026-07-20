@@ -224,8 +224,8 @@ TEST_F(GraphPlannerStateTest, BackwardAccumulatesGradientsAcrossFanOut) {
   graph.set_output(output);
   graph.compile(allocator);
 
-  fill(*left_dense.parameters()[0], 2.0f);
-  fill(*right_dense.parameters()[0], 3.0f);
+  fill(left_dense.params()[0].data(), 2.0f);
+  fill(right_dense.params()[0].data(), 3.0f);
 
   Tensor input_tensor = Tensor({1, 1}, DType_t::FP32, getHost());
   fill(input_tensor, 1.0f);
@@ -261,8 +261,8 @@ TEST_F(GraphPlannerStateTest, BackwardClearsAccumulatedGradientsBetweenPasses) {
   graph.set_output(output);
   graph.compile(allocator);
 
-  fill(*left_dense.parameters()[0], 2.0f);
-  fill(*right_dense.parameters()[0], 3.0f);
+  fill(left_dense.params()[0].data(), 2.0f);
+  fill(right_dense.params()[0].data(), 3.0f);
 
   Tensor first_input = Tensor({1, 1}, DType_t::FP32, getHost());
   fill(first_input, 1.0f);

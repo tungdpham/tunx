@@ -18,8 +18,10 @@
 #include "nn/graph.hpp"
 #include "optimizers_impl/cpu/adam_kernels.hpp"
 #include "optimizers_impl/cpu/sgd_kernels.hpp"
+#ifdef USE_CUDA
 #include "optimizers_impl/cuda/adam_kernels.hpp"
 #include "optimizers_impl/cuda/sgd_kernels.hpp"
+#endif
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
 
@@ -35,18 +37,9 @@ public:
 
   void attach(Graph &graph) {
     graph_ = &graph;
-    auto params = graph.parameters();
-    auto grads = graph.gradients();
-    if (params.size() != grads.size()) {
-      throw std::invalid_argument("Parameters and gradients size mismatch in optimizer attach" +
-                                  std::to_string(params.size()) + " vs " +
-                                  std::to_string(grads.size()));
-    }
-    parameters_ = params;
-    gradients_ = grads;
+    params_ = graph.params();
     on_attach();
-    std::cout << "Optimizer attached to " << parameters_.size() << " parameters and "
-              << gradients_.size() << " gradients." << std::endl;
+    std::cout << "Optimizer attached to " << params_.size() << " parameters" << std::endl;
   }
 
   virtual void update() = 0;
@@ -68,8 +61,7 @@ public:
 protected:
   float learning_rate_;
   Graph *graph_;
-  Vec<Tensor *> parameters_;
-  Vec<Tensor *> gradients_;
+  Vec<Param> params_;
 
   virtual void on_attach() {}
 };
@@ -81,11 +73,10 @@ public:
         momentum_(momentum) {}
 
   void update() override {
-    auto &params = this->parameters_;
-    auto &grads = this->gradients_;
-
+    auto &params = this->params_;
     for (size_t i = 0; i < params.size(); ++i) {
-      DISPATCH_DTYPE(params[i]->dtype(), T, update_impl<T>(*params[i], *grads[i], velocities_[i]));
+      DISPATCH_DTYPE(params[i].dtype(), T,
+                     update_impl<T>(params[i].data(), params[i].grad(), velocities_[i]));
     }
   }
 
@@ -107,11 +98,10 @@ public:
 protected:
   void on_attach() override {
     if (momentum_ > 0.0f) {
-      velocities_.resize(this->parameters_.size());
-      for (size_t i = 0; i < this->parameters_.size(); ++i) {
-        velocities_[i] =
-            Tensor(this->parameters_[i]->shape(), this->parameters_[i]->dtype(),
-                   PoolAllocator::instance(this->parameters_[i]->device(), defaultFlowHandle));
+      velocities_.resize(params_.size());
+      for (size_t i = 0; i < params_.size(); ++i) {
+        velocities_[i] = Tensor(params_[i].shape(), params_[i].dtype(),
+                                PoolAllocator::instance(params_[i].device(), defaultFlowHandle));
         fill(velocities_[i], 0.0f);
       }
     }
@@ -166,19 +156,16 @@ public:
         t_(0) {}
 
   void update() override {
-    auto &params = this->parameters_;
-    auto &grads = this->gradients_;
-
     t_++;
 
     // Precompute bias correction terms outside the loop
     const float bias_correction1 = 1.0f - std::pow(beta1_, static_cast<float>(t_));
     const float bias_correction2 = 1.0f - std::pow(beta2_, static_cast<float>(t_));
 
-    for (size_t i = 0; i < params.size(); ++i) {
-      DISPATCH_DTYPE(
-          params[i]->dtype(), T,
-          update_impl<T>(*params[i], *grads[i], m_[i], v_[i], bias_correction1, bias_correction2));
+    for (size_t i = 0; i < params_.size(); ++i) {
+      DISPATCH_DTYPE(params_[i].dtype(), T,
+                     update_impl<T>(params_[i].data(), params_[i].grad(), m_[i], v_[i],
+                                    bias_correction1, bias_correction2));
     }
   }
 
@@ -204,14 +191,14 @@ public:
 
 protected:
   void on_attach() override {
-    m_.resize(this->parameters_.size());
-    v_.resize(this->parameters_.size());
-    for (size_t i = 0; i < this->parameters_.size(); ++i) {
-      m_[i] = Tensor(this->parameters_[i]->shape(), this->parameters_[i]->dtype(),
-                     PoolAllocator::instance(this->parameters_[i]->device(), defaultFlowHandle));
+    m_.resize(params_.size());
+    v_.resize(params_.size());
+    for (size_t i = 0; i < params_.size(); ++i) {
+      m_[i] = Tensor(params_[i].shape(), params_[i].dtype(),
+                     PoolAllocator::instance(params_[i].device(), defaultFlowHandle));
       fill(m_[i], 0.0f);
-      v_[i] = Tensor(this->parameters_[i]->shape(), this->parameters_[i]->dtype(),
-                     PoolAllocator::instance(this->parameters_[i]->device(), defaultFlowHandle));
+      v_[i] = Tensor(params_[i].shape(), params_[i].dtype(),
+                     PoolAllocator::instance(params_[i].device(), defaultFlowHandle));
       fill(v_[i], 0.0f);
     }
     t_ = 0;

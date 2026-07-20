@@ -8,7 +8,6 @@
 
 #include <stdexcept>
 
-#include "device/flow.hpp"
 #include "ops/ops.hpp"
 #include "type/type.hpp"
 
@@ -38,9 +37,7 @@ Vec<Tensor> AddImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residual
 
   Tensor output = get_tensor(a.shape(), a.dtype());
   size_t n = a.size();
-  DISPATCH_DTYPE(a.dtype(), T, {
-    ops::add<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n, this->flow_handle_);
-  });
+  DISPATCH_DTYPE(a.dtype(), T, { ops::add<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n); });
 
   return {output};
 }
@@ -53,8 +50,8 @@ Vec<Tensor> AddImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &r
   Tensor grad_a = get_tensor(grad_out.shape(), this->io_dtype_);
   Tensor grad_b = get_tensor(grad_out.shape(), this->io_dtype_);
 
-  grad_out.copy_to(grad_a, flow_handle_);
-  grad_out.copy_to(grad_b, flow_handle_);
+  grad_out.copy_to(grad_a);
+  grad_out.copy_to(grad_b);
 
   return {grad_a, grad_b};
 }

@@ -18,9 +18,9 @@ signed main() {
   auto start = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < passes; ++i) {
     auto pass_start = std::chrono::high_resolution_clock::now();
-    Vec<Tensor *> grads = graph.gradients();
-    for (auto &grad : grads) {
-      fill(*grad, 0.0f);
+    Vec<Param> params = graph.params();
+    for (auto &param : params) {
+      fill(param.grad(), 0.0f);
     }
     auto flow = getGPU().getFlow(defaultFlowHandle);
     flow->synchronize();

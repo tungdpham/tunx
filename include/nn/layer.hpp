@@ -7,6 +7,7 @@
 #pragma once
 
 #include <fmt/core.h>
+#include <oneapi/tbb/profiling.h>
 
 #include <cstddef>
 #include <cstring>
@@ -21,18 +22,12 @@
 #include "device/del_allocator_v2.hpp"
 #include "device/engine.hpp"
 #include "nn/engine.hpp"
+#include "nn/param.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
 using LayerConfig = TConfig;
-
-struct ParamDescriptor {
-  DType_t dtype;  // data type of the parameter
-  Vec<size_t> shape;
-  Tensor *data_ptr;  // pointer to the actual param
-  Tensor *grad_ptr;  // pointer to the actual grad_output
-};
 
 inline size_t get_shapes_bytes(const Vec<Vec<size_t>> &shapes, DType_t dtype) {
   size_t total_bytes = 0;
@@ -102,9 +97,6 @@ public:
 
   virtual ~LayerImpl() = default;
 
-  void set_engine_type(EngineType engine_type);
-  EngineType get_engine_type() const;
-
   void init();
 
   Vec<Tensor> forward(const Vec<Tensor> &inputs);
@@ -133,26 +125,17 @@ public:
   virtual Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const = 0;
   std::string name() const { return name_; }
   void save_state(std::ostream &out) const;
-  virtual Vec<ParamDescriptor> param_descriptors() { return {}; }
-  const Vec<ParamDescriptor> param_descriptors() const {
-    return const_cast<LayerImpl *>(this)->param_descriptors();
-  }
   virtual std::string type() const = 0;
   virtual LayerConfig get_config() const = 0;
 
-  Vec<Tensor *> parameters() {
-    Vec<Tensor *> params;
-    for (const auto &desc : param_descriptors()) {
-      params.push_back(desc.data_ptr);
+  Vec<Param> &params() { return params_; }
+
+  const Vec<Param> &params() const { return params_; }
+
+  void zero_grads() {
+    for (auto &param : params_) {
+      param.zero_grad(flow_handle_);
     }
-    return params;
-  }
-  Vec<Tensor *> gradients() {
-    Vec<Tensor *> grads;
-    for (const auto &desc : param_descriptors()) {
-      grads.push_back(desc.grad_ptr);
-    }
-    return grads;
   }
 
   const Device &device() const {
@@ -163,9 +146,13 @@ public:
   }
 
 protected:
-  virtual void on_set_engine_type(EngineType engine_type) {}
-  virtual void on_set_engine(Engine engine) {}
+  Param make_param(const Vec<size_t> &shape, DType_t dtype) {
+    Param param(shape, dtype, *allocator_);
+    params_.push_back(param);
+    return param;
+  }
   virtual void init_impl() {}
+  virtual void on_set_engine(Engine engine) {}
   virtual void on_set_allocator(DELAllocatorV2 &allocator) {}
   virtual void on_set_flow_handle(flowHandle_t handle) {}
   virtual void on_set_seed(unsigned long long seed) {}
@@ -179,16 +166,15 @@ protected:
 
 protected:
   bool initialized_ = false;
-  EngineType engine_type_ = EngineType::UNKNOWN;
   Engine engine_;
   void *backend_handle_;
+  flowHandle_t flow_handle_ = defaultFlowHandle;
   DELAllocatorV2 *allocator_ = nullptr;
   bool is_training_ = true;
-  bool is_fwd_ = false;
   bool use_seed_ = false;
   unsigned long long srand_seed_ = 0;
-  flowHandle_t flow_handle_;
   std::string name_;
+  Vec<Param> params_;
   DType_t io_dtype_ = DType_t::FP32;       // data type for input/output tensors
   DType_t param_dtype_ = DType_t::FP32;    // data type for parameters/gradients
   DType_t compute_dtype_ = DType_t::FP32;  // data type for internal computations
@@ -267,11 +253,6 @@ public:
   decltype(auto) operator()(Args &&...args) const {
     check_layer("operator()");
     return (*impl_)(std::forward<Args>(args)...);
-  }
-
-  void set_engine_type(EngineType engine_type) {
-    check_layer("set_engine_type");
-    impl_->set_engine_type(engine_type);
   }
 
   EngineType get_engine_type() const {
@@ -386,16 +367,6 @@ public:
     impl_->save_state(file);
   }
 
-  Vec<ParamDescriptor> param_descriptors() {
-    check_layer("param_descriptors");
-    return impl_->param_descriptors();
-  }
-
-  const std::vector<ParamDescriptor> param_descriptors() const {
-    check_layer("param_descriptors");
-    return impl_->param_descriptors();
-  }
-
   std::string type() const {
     check_layer("type");
     return impl_->type();
@@ -406,14 +377,14 @@ public:
     return impl_->get_config();
   }
 
-  Vec<Tensor *> parameters() {
-    check_layer("parameters");
-    return impl_->parameters();
+  Vec<Param> &params() {
+    check_layer("params");
+    return impl_->params();
   }
 
-  Vec<Tensor *> gradients() {
-    check_layer("gradients");
-    return impl_->gradients();
+  const Vec<Param> &params() const {
+    check_layer("params");
+    return impl_->params();
   }
 
   const Device &device() const {

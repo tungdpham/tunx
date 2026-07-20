@@ -177,7 +177,7 @@ void maxpool2d_bwd_impl(const T* grad_output, T* grad_input, const int32* mask, 
                         size_t output_w, size_t pool_w, size_t stride_h, size_t stride_w,
                         size_t pad_h, size_t pad_w) {
   size_t total_elements = batch_size * input_h * input_w * channels;
-  std::memset(grad_input, 0, total_elements * sizeof(T));
+  parallel_for<size_t>(0, total_elements, [=](size_t i) { grad_input[i] = 0; });
   parallel_for<size_t>(0, batch_size, [&](size_t b) {
     size_t total_outputs_per_batch = output_h * output_w * channels;
     for (size_t i = 0; i < total_outputs_per_batch; ++i) {
@@ -383,6 +383,36 @@ void embedding_bwd_impl(const T_IO* input_data, const T_PARAM* gradient_data,
   });
 }
 
+template <typename T_IO, typename T_PARAM, typename T_COMPUTE>
+void pos_embedding_fwd_impl(const T_IO* input, const T_PARAM* pos_embed, T_IO* output,
+                            size_t batch_size, size_t seq_len, size_t embed_dim) {
+  size_t sample_size = seq_len * embed_dim;
+  parallel_for<size_t>(0, batch_size, [&](size_t b) {
+    const T_IO* in_b = input + b * sample_size;
+    T_IO* out_b = output + b * sample_size;
+    for (size_t s = 0; s < seq_len; ++s) {
+      for (size_t e = 0; e < embed_dim; ++e) {
+        size_t idx = s * embed_dim + e;
+        out_b[idx] = static_cast<T_IO>(static_cast<T_COMPUTE>(in_b[idx]) +
+                                       static_cast<T_COMPUTE>(pos_embed[idx]));
+      }
+    }
+  });
+}
+
+template <typename T_IO, typename T_PARAM, typename T_COMPUTE>
+void pos_embedding_bwd_impl(const T_IO* grad_output, T_PARAM* grad_pos_embed, size_t batch_size,
+                            size_t seq_len, size_t embed_dim) {
+  size_t sample_size = seq_len * embed_dim;
+  parallel_for<size_t>(0, sample_size, [&](size_t i) {
+    T_COMPUTE sum = 0;
+    for (size_t b = 0; b < batch_size; ++b) {
+      sum += static_cast<T_COMPUTE>(grad_output[b * sample_size + i]);
+    }
+    grad_pos_embed[i] = static_cast<T_PARAM>(static_cast<T_COMPUTE>(grad_pos_embed[i]) + sum);
+  });
+}
+
 template <typename T>
 void batchnorm_infer_impl(const T* input, const float* running_mean, const float* running_var,
                           const float* gamma, const float* beta, T* output, size_t N, size_t C,
@@ -519,8 +549,8 @@ void batchnorm_bwd_impl(const T* grad_output, const T* input, const float* mean,
 }
 
 template <typename T, typename ParamT>
-void layernorm_fwd_impl(const T* input, T* output, const ParamT* gamma, const ParamT* beta, size_t batch_size,
-                        size_t channels, T epsilon) {
+void layernorm_fwd_impl(const T* input, T* output, const ParamT* gamma, const ParamT* beta,
+                        size_t batch_size, size_t channels, T epsilon) {
   size_t batch_stride = channels;
   parallel_for<size_t>(0, batch_size, [&](size_t n) {
     T sum = 0;
@@ -661,7 +691,7 @@ void conv2d_dgrad_naive_impl(const T* grad_output, const T* weight, T* grad_inpu
                              size_t stride_w, size_t pad_h, size_t pad_w, size_t output_h,
                              size_t output_w) {
   size_t num_elements = batch_size * input_h * input_w * in_channels;
-  std::memset(grad_input, 0, num_elements * sizeof(T));
+  parallel_for<size_t>(0, num_elements, [&](size_t i) { grad_input[i] = T(0); });
   parallel_for<size_t>(0, batch_size, [&](size_t b) {
     for (size_t oh = 0; oh < output_h; ++oh) {
       for (size_t ow = 0; ow < output_w; ++ow) {
@@ -852,9 +882,9 @@ void legacy_batchnorm_inf_impl(const T* input_data, const float* running_mean_da
 
 template <typename T, typename ParamT>
 void legacy_batchnorm_fwd_impl(const T* input, float* mean, float* inv_std, float* running_mean,
-                               float* running_var, const ParamT* gamma, const ParamT* beta, T* output,
-                               float* norm_cache, size_t N, size_t C, size_t S, float momentum,
-                               float epsilon, bool affine) {
+                               float* running_var, const ParamT* gamma, const ParamT* beta,
+                               T* output, float* norm_cache, size_t N, size_t C, size_t S,
+                               float momentum, float epsilon, bool affine) {
   size_t total_elements = N * S;
   size_t channel_stride = C * S;
   const float inv_total = 1.0f / static_cast<float>(total_elements);
@@ -917,7 +947,8 @@ void legacy_batchnorm_fwd_impl(const T* input, float* mean, float* inv_std, floa
       if (norm_ptr) norm_ptr[s] = norm;
 
       if (affine) {
-        output_ptr[s] = static_cast<T>(norm * static_cast<float>(gamma[c]) + static_cast<float>(beta[c]));
+        output_ptr[s] =
+            static_cast<T>(norm * static_cast<float>(gamma[c]) + static_cast<float>(beta[c]));
       } else {
         output_ptr[s] = static_cast<T>(norm);
       }
@@ -1062,6 +1093,11 @@ WorkspaceReq CPUEngine::query_avgpool_graph(void*, const AvgPool2DStats&, DTypeD
 }
 
 WorkspaceReq CPUEngine::query_maxpool2d_graph(void*, const MaxPool2DStats&, DTypeDesc) {
+  return {0, 0, 0};
+}
+
+WorkspaceReq CPUEngine::query_positional_embedding_graph(void*, const PositionalEmbeddingStats&,
+                                                         DTypeDesc) {
   return {0, 0, 0};
 }
 
@@ -1307,6 +1343,28 @@ void CPUEngine::embedding_bwd(void*, const EmbeddingStats& stats, const void* gr
                                       static_cast<const T_PARAM*>(grad_output),
                                       static_cast<T_PARAM*>(grad_weight), stats.num_indices,
                                       stats.vocab_size, stats.embed_dim, stats.padding_idx);
+  });
+}
+
+void CPUEngine::positional_embedding_fwd(void*, const PositionalEmbeddingStats& stats,
+                                         const void* input, const void* pos_embedding, void* output,
+                                         void* workspace, DTypeDesc type_desc) {
+  CHECK_HOMOGENEOUS_DTYPE(type_desc);
+  DISPATCH_ANY_DTYPE(type_desc.io_dtype, T, {
+    pos_embedding_fwd_impl<T, T, T>(static_cast<const T*>(input),
+                                    static_cast<const T*>(pos_embedding), static_cast<T*>(output),
+                                    stats.batch_size, stats.seq_len, stats.embed_dim);
+  });
+}
+
+void CPUEngine::positional_embedding_bwd(void*, const PositionalEmbeddingStats& stats,
+                                         const void* grad_output, void* grad_pos_embedding,
+                                         void* workspace, DTypeDesc type_desc) {
+  CHECK_HOMOGENEOUS_DTYPE(type_desc);
+  DISPATCH_ANY_DTYPE(type_desc.io_dtype, T, {
+    pos_embedding_bwd_impl<T, T, T>(static_cast<const T*>(grad_output),
+                                    static_cast<T*>(grad_pos_embedding), stats.batch_size,
+                                    stats.seq_len, stats.embed_dim);
   });
 }
 

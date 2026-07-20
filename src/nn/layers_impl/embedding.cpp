@@ -8,7 +8,7 @@
 
 #include <cmath>
 #include <memory>
-#include <stdexcept>
+
 
 #include "nn/engines/iengine.hpp"
 #include "tensor/tensor.hpp"
@@ -34,17 +34,16 @@ void EmbeddingImpl::init_impl() {
   float stddev = static_cast<float>(1.0 / std::sqrt(static_cast<double>(embed_dim_)));
   long long seed = this->use_seed_ ? this->srand_seed_
                                    : std::chrono::system_clock::now().time_since_epoch().count();
-  fill_normal(weight_, 0, stddev, seed);
+  weight_ = make_param({vocab_size_, embed_dim_}, param_dtype_);
+  fill_normal(weight_.data(), 0, stddev, seed);
 
   // Set padding idx to zeros if valid
   if (padding_idx_ < vocab_size_) {
     // Zero out the padding index row
     for (size_t i = 0; i < embed_dim_; ++i) {
-      DISPATCH_DTYPE(weight_.dtype(), T, weight_.at<T>({padding_idx_, i}) = 0.0f);
+      DISPATCH_DTYPE(weight_.dtype(), T, weight_.data().at<T>({padding_idx_, i}) = 0.0f);
     }
   }
-
-  fill(grad_weights_, 0.0f);
 }
 
 Tensor EmbeddingImpl::forward_impl(const Tensor &input, Residuals &residuals) {
@@ -105,12 +104,8 @@ Tensor EmbeddingImpl::backward_impl(const Tensor &grad_output, Residuals &residu
   WorkspaceReq ws_req = engine_->query_embedding_graph(backend_handle_, stats, type_desc);
   Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  Tensor grad_weights_next({vocab_size_, embed_dim_}, param_dtype_);
-
   engine_->embedding_bwd(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
-                         grad_weights_.data_as<void>(), ws.data_as<void>(), type_desc);
-
-  grad_weights_ = grad_weights_next;
+                         weight_.grad_as<void>(), ws.data_as<void>(), type_desc);
 
   return grad_input;
 }

@@ -34,26 +34,6 @@ private:
   Tensor def_forward(const Tensor &input, Residuals &residuals);
   Tensor def_backward(const Tensor &current_gradient, Residuals &residuals);
 
-  Vec<ParamDescriptor> param_descriptors() override {
-    Vec<ParamDescriptor> descriptors;
-    auto weight_desc = ParamDescriptor{
-        param_dtype_,
-        {in_channels_, out_channels_, kernel_h_, kernel_w_},
-        &weights_,
-        &grad_weights_,
-    };
-    descriptors.push_back(weight_desc);
-    if (use_bias_) {
-      auto bias_desc = ParamDescriptor{
-          param_dtype_,
-          {out_channels_},
-          &bias_,
-          &grad_bias_,
-      };
-      descriptors.push_back(bias_desc);
-    }
-    return descriptors;
-  }
 
   void init_impl() override;
 

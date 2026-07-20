@@ -23,6 +23,8 @@ public:
                                    DTypeDesc type_desc) override;
   WorkspaceReq query_embedding_graph(void* backend_handle, const EmbeddingStats& stats,
                                      DTypeDesc type_desc) override;
+  WorkspaceReq query_positional_embedding_graph(void* backend_handle, const PositionalEmbeddingStats& stats,
+                                                DTypeDesc type_desc) override;
   WorkspaceReq query_relu_graph(void* backend_handle, const ReLUStats& stats,
                                 DTypeDesc type_desc) override;
   WorkspaceReq query_batchnorm_graph(void* backend_handle, const BatchNormStats& stats,
@@ -98,6 +100,14 @@ public:
   void embedding_bwd(void* backend_handle, const EmbeddingStats& stats, const void* grad_output,
                      const void* input, void* grad_weight, void* workspace,
                      DTypeDesc type_desc) override;
+
+  void positional_embedding_fwd(void* backend_handle, const PositionalEmbeddingStats& stats, const void* input,
+                                const void* pos_embedding, void* output, void* workspace,
+                                DTypeDesc type_desc) override;
+
+  void positional_embedding_bwd(void* backend_handle, const PositionalEmbeddingStats& stats,
+                                const void* grad_output, void* grad_pos_embedding, void* workspace,
+                                DTypeDesc type_desc) override;
 
   void batchnorm_fwd(void* backend_handle, const BatchNormStats& stats, const void* input,
                      const void* gamma, const void* beta, void* output, void* prev_running_mean,

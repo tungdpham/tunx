@@ -13,6 +13,8 @@
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
+#include "nn/engines/iengine.hpp"
+#include "nn/stats/stats.hpp"
 
 namespace tunx {
 namespace internal {
@@ -55,8 +57,28 @@ Tensor PositionalEmbeddingImpl::forward_impl(const Tensor &input, Residuals &res
 
   Tensor output = get_tensor(shape, io_dtype_);
 
-  DISPATCH_ON_3_DTYPES_TO_METHOD(add_positional_embedding, input, output, pos_embedding_,
-                                 this->flow_handle_);
+  size_t batch_size = 1;
+  for (size_t i = 0; i + 2 < shape.size(); ++i) {
+    batch_size *= shape[i];
+  }
+
+  PositionalEmbeddingStats stats{
+      .batch_size = batch_size,
+      .seq_len = seq_len_,
+      .embed_dim = embed_dim_,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = io_dtype_,
+      .param_dtype = param_dtype_,
+      .compute_dtype = compute_dtype_,
+  };
+
+  WorkspaceReq ws_req = engine_->query_positional_embedding_graph(backend_handle_, stats, type_desc);
+  Tensor ws = get_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+
+  engine_->positional_embedding_fwd(backend_handle_, stats, input.data_as<void>(), pos_embedding_.data_as<void>(),
+                                    output.data_as<void>(), ws.data_as<void>(), type_desc);
 
   return output;
 }
@@ -86,111 +108,30 @@ Tensor PositionalEmbeddingImpl::backward_impl(const Tensor &grad_output,
 
   grad_output.copy_to(grad_input);
 
-  DISPATCH_ON_3_DTYPES_TO_METHOD(accumulate_pos_gradients, grad_output, pos_embedding_gradients_,
-                                 this->flow_handle_);
+  size_t batch_size = 1;
+  for (size_t i = 0; i + 2 < shape.size(); ++i) {
+    batch_size *= shape[i];
+  }
+
+  PositionalEmbeddingStats stats{
+      .batch_size = batch_size,
+      .seq_len = seq_len_,
+      .embed_dim = embed_dim_,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = io_dtype_,
+      .param_dtype = param_dtype_,
+      .compute_dtype = compute_dtype_,
+  };
+
+  WorkspaceReq ws_req = engine_->query_positional_embedding_graph(backend_handle_, stats, type_desc);
+  Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+
+  engine_->positional_embedding_bwd(backend_handle_, stats, grad_output.data_as<void>(),
+                                    pos_embedding_gradients_.data_as<void>(), ws.data_as<void>(), type_desc);
 
   return grad_input;
-}
-
-template <typename IO_T, typename Param_T, typename Compute_T>
-std::unique_ptr<Task> PositionalEmbeddingImpl::add_positional_embedding(
-    const Tensor &input, Tensor &output, const Tensor &pos_embedding, flowHandle_t handle) const {
-  if constexpr (!std::is_same_v<IO_T, Compute_T> || !std::is_same_v<Param_T, Compute_T>) {
-    throw std::runtime_error(
-        "PositionalEmbeddingImpl mixed dtype dispatch not implemented "
-        "(io/param/compute must match).");
-  }
-  if (input.dtype() != dtype_of<IO_T>() || output.dtype() != dtype_of<IO_T>()) {
-    throw std::runtime_error(
-        "PositionalEmbeddingImpl IO tensor dtype mismatch with dispatch IO_T");
-  }
-  if (pos_embedding.dtype() != dtype_of<Param_T>()) {
-    throw std::runtime_error(
-        "PositionalEmbeddingImpl pos_embedding dtype mismatch with dispatch Param_T");
-  }
-
-  size_t sample_size = seq_len_ * embed_dim_;
-  size_t batch_size = 1;
-  const auto &shape = input.shape();
-  for (size_t i = 0; i + 2 < shape.size(); ++i) {
-    batch_size *= shape[i];
-  }
-
-  if (get_engine_type() == EngineType::CPU) {
-    // For CPU, we need to manually loop over batches and add
-    for (size_t i = 0; i < batch_size; ++i) {
-      create_cpu_task(handle, ops::cpu::add<Compute_T>,
-                      input.data_as<Compute_T>() + i * sample_size,
-                      pos_embedding.data_as<Compute_T>(),
-                      output.data_as<Compute_T>() + i * sample_size, sample_size);
-    }
-    return nullptr;
-  }
-#ifdef USE_CUDA
-  else if (get_engine_type() == EngineType::CUDA) {
-    // For CUDA, we need to manually loop over batches and add
-    for (size_t i = 0; i < batch_size; ++i) {
-      create_cuda_task(handle, ops::cuda::add<Compute_T>,
-                       input.data_as<Compute_T>() + i * sample_size,
-                       pos_embedding.data_as<Compute_T>(),
-                       output.data_as<Compute_T>() + i * sample_size, sample_size);
-    }
-    return nullptr;
-  }
-#endif
-  else {
-    throw std::runtime_error("Unsupported device type for add_positional_embedding");
-  }
-}
-
-template <typename IO_T, typename Param_T, typename Compute_T>
-std::unique_ptr<Task> PositionalEmbeddingImpl::accumulate_pos_gradients(
-    const Tensor &grad_output, Tensor &pos_embedding_gradients, flowHandle_t handle) const {
-  if constexpr (!std::is_same_v<IO_T, Compute_T> || !std::is_same_v<Param_T, Compute_T>) {
-    throw std::runtime_error(
-        "PositionalEmbeddingImpl mixed dtype dispatch not implemented "
-        "(io/param/compute must match).");
-  }
-  if (grad_output.dtype() != dtype_of<IO_T>()) {
-    throw std::runtime_error(
-        "PositionalEmbeddingImpl grad_output dtype mismatch with dispatch IO_T");
-  }
-  if (pos_embedding_gradients.dtype() != dtype_of<Param_T>()) {
-    throw std::runtime_error(
-        "PositionalEmbeddingImpl pos_embedding_gradients dtype mismatch with dispatch "
-        "Param_T");
-  }
-
-  size_t sample_size = seq_len_ * embed_dim_;
-  size_t batch_size = 1;
-  const auto &shape = grad_output.shape();
-  for (size_t i = 0; i + 2 < shape.size(); ++i) {
-    batch_size *= shape[i];
-  }
-
-  if (get_engine_type() == EngineType::CPU) {
-    for (size_t i = 0; i < batch_size; ++i) {
-      create_cpu_task(handle, ops::cpu::add<Compute_T>,
-                      pos_embedding_gradients.data_as<Compute_T>(),
-                      grad_output.data_as<Compute_T>() + i * sample_size,
-                      pos_embedding_gradients.data_as<Compute_T>(), sample_size);
-    }
-    return nullptr;
-  }
-#ifdef USE_CUDA
-  else if (get_engine_type() == EngineType::CUDA) {
-    for (size_t i = 0; i < batch_size; ++i) {
-      create_cuda_task(handle, ops::cuda::add<Compute_T>,
-                       pos_embedding_gradients.data_as<Compute_T>(),
-                       grad_output.data_as<Compute_T>() + i * sample_size,
-                       pos_embedding_gradients.data_as<Compute_T>(), sample_size);
-    }
-    return nullptr;
-  }
-#endif
-  else {
-    throw std::runtime_error("Unsupported device type for accumulate_pos_gradients");
-  }
 }
 
 LayerConfig PositionalEmbeddingImpl::get_config() const {

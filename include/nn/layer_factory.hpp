@@ -32,6 +32,7 @@
 #include "nn/layers_impl/div.hpp"
 #include "nn/layers_impl/mul.hpp"
 #include "nn/layers_impl/sub.hpp"
+#include "nn/param.hpp"
 #include "tensor/tensor_ops.hpp"
 
 namespace tunx {
@@ -150,9 +151,9 @@ std::unique_ptr<LayerType> load_config(std::istream &file) {
 }
 
 inline void load_params(std::istream &in, LayerImpl &layer) {
-  Vec<ParamDescriptor> params = layer.param_descriptors();
+  Vec<Param> &params = layer.params();
   for (auto &param : params) {
-    load(*param.data_ptr, in);
+    load(param.data(), in);
   }
 }
 

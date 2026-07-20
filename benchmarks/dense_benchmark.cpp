@@ -29,10 +29,10 @@ signed main() {
 
   graph.compile(allocator);
 
-  Vec<ParamDescriptor> current_params = dense_layer.param_descriptors();
-  Vec<ParamDescriptor> legacy_params = legacy_layer.param_descriptors();
+  Vec<Param> current_params = dense_layer.params();
+  Vec<Param> legacy_params = legacy_layer.params();
   for (size_t i = 0; i < current_params.size(); ++i) {
-    current_params[i].data_ptr->copy_to(*legacy_params[i].data_ptr);
+    current_params[i].data().copy_to(legacy_params[i].data());
   }
 
   Tensor input_data = Tensor({128, INPUT_FEATURES}, DType_t::FP32, getGPU());
@@ -158,11 +158,9 @@ signed main() {
 
   // check wgrad
 
-  Vec<ParamDescriptor> grad_weights_current = dense_layer.param_descriptors();
-  Vec<ParamDescriptor> grad_weights_legacy = legacy_layer.param_descriptors();
-  for (size_t i = 0; i < grad_weights_current.size(); ++i) {
-    auto cpu_grad_current = grad_weights_current[i].grad_ptr->to_host();
-    auto cpu_grad_legacy = grad_weights_legacy[i].grad_ptr->to_host();
+  for (size_t i = 0; i < current_params.size(); ++i) {
+    auto cpu_grad_current = current_params[i].grad().to_host();
+    auto cpu_grad_legacy = legacy_params[i].grad().to_host();
     float *grad_current_data = (float *)cpu_grad_current.data_as<void>();
     float *grad_legacy_data = (float *)cpu_grad_legacy.data_as<void>();
     size_t grad_elements = cpu_grad_current.size();

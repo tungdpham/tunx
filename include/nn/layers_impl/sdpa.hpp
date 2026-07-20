@@ -40,7 +40,6 @@ public:
   std::string type() const override { return TYPE_NAME; }
   LayerConfig get_config() const override;
   Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const override;
-  Vec<ParamDescriptor> param_descriptors() override { return {}; }
 
   Node operator()(const Node &q, const Node &k, const Node &v) {
     if (!q || !k || !v) {

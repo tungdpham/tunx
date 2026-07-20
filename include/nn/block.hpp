@@ -8,25 +8,9 @@ public:
   Block(const std::string &name = "block")
       : LayerImpl(name) {}
 
-  Vec<ParamDescriptor> param_descriptors() override {
-    Vec<ParamDescriptor> descriptors;
-    for (const Layer &layer : layers()) {
-      const auto &layer_descriptors = layer.param_descriptors();
-      descriptors.insert(descriptors.end(), layer_descriptors.begin(), layer_descriptors.end());
-    }
-    return descriptors;
-  }
-
   virtual Vec<Layer> layers() = 0;
 
 protected:
-  void on_set_engine_type(EngineType engine_type) override {
-    Vec<Layer> layers = this->layers();
-    for (Layer &layer : layers) {
-      layer.set_engine_type(engine_type);
-    }
-  }
-
   void init_impl() override {
     Vec<Layer> layers = this->layers();
     for (Layer &layer : layers) {

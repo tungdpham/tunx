@@ -22,10 +22,8 @@ private:
   float epsilon_;
   bool affine_;  // Whether to use learnable affine parameters
 
-  Tensor gamma_;
-  Tensor beta_;
-  Tensor grad_gamma_;
-  Tensor grad_beta_;
+  Param gamma_;
+  Param beta_;
 
   void init_impl() override;
   Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
@@ -45,26 +43,6 @@ public:
     return input_shape;
   }
 
-  Vec<ParamDescriptor> param_descriptors() override {
-    Vec<ParamDescriptor> descriptors;
-    if (affine_) {
-      auto gamma_desc = ParamDescriptor{
-          param_dtype_,
-          {normalized_shape_},
-          &gamma_,
-          &grad_gamma_,
-      };
-      descriptors.push_back(gamma_desc);
-      auto beta_desc = ParamDescriptor{
-          param_dtype_,
-          {normalized_shape_},
-          &beta_,
-          &grad_beta_,
-      };
-      descriptors.push_back(beta_desc);
-    }
-    return descriptors;
-  }
 
   static std::shared_ptr<LayerNormImpl> create_from_config(const LayerConfig &config);
 };

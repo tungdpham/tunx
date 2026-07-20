@@ -26,11 +26,16 @@ LayerNormImpl::LayerNormImpl(size_t normalized_shape, float epsilon, bool affine
 LayerNormImpl::~LayerNormImpl() {}
 
 void LayerNormImpl::init_impl() {
-  fill(gamma_, 1.0f);
-  fill(beta_, 0.0f);
+  if (affine_) {
+    gamma_ = make_param({normalized_shape_}, param_dtype_);
+    beta_ = make_param({normalized_shape_}, param_dtype_);
+  } else {
+    gamma_.data() = get_tensor({normalized_shape_}, param_dtype_);
+    beta_.data() = get_tensor({normalized_shape_}, param_dtype_);
+  }
 
-  fill(grad_gamma_, 0.0f);
-  fill(grad_beta_, 0.0f);
+  fill(gamma_.data(), 1.0f);
+  fill(beta_.data(), 0.0f);
 }
 
 Tensor LayerNormImpl::forward_impl(const Tensor &input, Residuals &residuals) {
@@ -128,8 +133,8 @@ Tensor LayerNormImpl::backward_impl(const Tensor &grad_output, Residuals &residu
     engine_->layernorm_bwd(backend_handle_, stats, grad_output.data_as<void>(),
                            input.data_as<void>(), gamma_.data_as<void>(),
                            batch_mean.data_as<void>(), batch_invar.data_as<void>(),
-                           grad_input.data_as<void>(), grad_gamma_.data_as<void>(),
-                           grad_beta_.data_as<void>(), ws.data_as<void>(), type_desc);
+                           grad_input.data_as<void>(), gamma_.grad_as<void>(),
+                           beta_.grad_as<void>(), ws.data_as<void>(), type_desc);
   } else {
     engine_->layernorm_bwd(
         backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),

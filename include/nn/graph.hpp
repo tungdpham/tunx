@@ -9,8 +9,8 @@
 #include <set>
 #include <string>
 
+#include "device/iallocator.hpp"
 #include "nn/edge.hpp"
-#include "nn/graph_context.hpp"
 #include "nn/node.hpp"
 #include "nn/tensor_bundle.hpp"
 #include "type/type.hpp"
@@ -64,7 +64,7 @@ public:
   Vec<Edge> edges() const { return edges_; }
   Vec<std::string> input_uids() const;
   Vec<std::string> output_uids() const;
-  const Device &device() const { return context_->device(); }
+  const Device &device() const { return param_allocator_->device(); }
   const DELAllocatorV2 *workspace_allocator() const { return workspace_allocator_.get(); }
 
   void add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producers,
@@ -79,8 +79,6 @@ public:
   TensorBundle backward(TensorBundle &output_grad_map, size_t pid = 0);
 
   Node make_node(std::string uid = "");
-
-  GraphContext *context() const { return context_.get(); }
 
   void set_mode(ExecutionMode mode);
   void set_io_dtype(DType_t dtype);
@@ -102,15 +100,14 @@ public:
 
   void zero_grads();
 
-  Vec<Tensor *> parameters();
-  Vec<Tensor *> gradients();
+  Vec<Param> params();
 
 private:
   Vec<Node> nodes_;
   Vec<Edge> edges_;
   std::set<Node> input_nodes_;
   std::set<Node> output_nodes_;
-  std::unique_ptr<GraphContext> context_;
+  IAllocator *param_allocator_;
   std::shared_ptr<DELAllocatorV2> workspace_allocator_;
   std::map<std::weak_ptr<NodeImpl>, int, std::owner_less<std::weak_ptr<NodeImpl>>> in_degree_;
   std::map<std::weak_ptr<NodeImpl>, int, std::owner_less<std::weak_ptr<NodeImpl>>> out_degree_;

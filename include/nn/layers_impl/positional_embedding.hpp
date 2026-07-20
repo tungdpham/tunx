@@ -22,15 +22,6 @@ private:
   Tensor pos_embedding_;
   Tensor pos_embedding_gradients_;
 
-  template <typename IO_T, typename Param_T, typename Compute_T>
-  std::unique_ptr<Task> add_positional_embedding(const Tensor &input, Tensor &output,
-                                                 const Tensor &pos_embedding,
-                                                 flowHandle_t handle) const;
-
-  template <typename IO_T, typename Param_T, typename Compute_T>
-  std::unique_ptr<Task> accumulate_pos_gradients(const Tensor &grad_output,
-                                                 Tensor &pos_embedding_gradients,
-                                                 flowHandle_t handle) const;
 
   void init_impl() override;
   Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
@@ -46,17 +37,6 @@ public:
   LayerConfig get_config() const override;
   Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
 
-  Vec<ParamDescriptor> param_descriptors() override {
-    Vec<ParamDescriptor> descriptors;
-    auto pos_emb_desc = ParamDescriptor{
-        param_dtype_,
-        {seq_len_, embed_dim_},
-        &pos_embedding_,
-        &pos_embedding_gradients_,
-    };
-    descriptors.push_back(pos_emb_desc);
-    return descriptors;
-  }
 
 public:
   static std::shared_ptr<PositionalEmbeddingImpl> create_from_config(

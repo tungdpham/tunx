@@ -50,38 +50,6 @@ public:
 
   Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
 
-  Vec<ParamDescriptor> param_descriptors() override {
-    Vec<ParamDescriptor> descriptors;
-    auto gamma_desc = ParamDescriptor{
-        param_dtype_,
-        {num_features_},
-        &gamma_,
-        &grad_gamma_,
-    };
-    descriptors.push_back(gamma_desc);
-    auto beta_desc = ParamDescriptor{
-        param_dtype_,
-        {num_features_},
-        &beta_,
-        &grad_beta_,
-    };
-    descriptors.push_back(beta_desc);
-    auto running_mean_desc = ParamDescriptor{
-        param_dtype_,
-        {num_features_},
-        &running_mean_,
-        &grad_dummy_mean_,
-    };
-    descriptors.push_back(running_mean_desc);
-    auto running_var_desc = ParamDescriptor{
-        param_dtype_,
-        {num_features_},
-        &running_var_,
-        &grad_dummy_var_,
-    };
-    descriptors.push_back(running_var_desc);
-    return descriptors;
-  }
 
   static std::shared_ptr<LegacyBatchNormImpl> create_from_config(const LayerConfig &config);
 };

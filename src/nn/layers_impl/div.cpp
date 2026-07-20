@@ -43,9 +43,7 @@ Vec<Tensor> DivImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residual
     residuals["b"] = b;
   }
 
-  DISPATCH_DTYPE(a.dtype(), T, {
-    ops::div<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n, this->flow_handle_);
-  });
+  DISPATCH_DTYPE(a.dtype(), T, { ops::div<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n); });
 
   return {output};
 }

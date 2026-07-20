@@ -18,8 +18,7 @@ namespace internal {
 class ClassTokenImpl : public SISOLayerImpl {
 private:
   size_t embed_dim_;
-  Tensor class_token_;
-  Tensor class_token_gradients_;
+  Param class_token_;
 
   void init_impl() override;
   Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
@@ -34,17 +33,6 @@ public:
   LayerConfig get_config() const override;
 
   Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
-  Vec<ParamDescriptor> param_descriptors() override {
-    Vec<ParamDescriptor> descriptors;
-    auto token_desc = ParamDescriptor{
-        param_dtype_,
-        {embed_dim_},
-        &class_token_,
-        &class_token_gradients_,
-    };
-    descriptors.push_back(token_desc);
-    return descriptors;
-  }
 
   static std::shared_ptr<ClassTokenImpl> create_from_config(const LayerConfig &config);
 };

@@ -16,20 +16,9 @@
 
 namespace tunx {
 
-void LayerImpl::set_engine_type(EngineType engine_type) {
-  engine_type_ = engine_type;
-  on_set_engine_type(engine_type);
-}
-
-EngineType LayerImpl::get_engine_type() const { return engine_type_; }
-
 void LayerImpl::init() {
   if (initialized_) {
     throw std::runtime_error("Cannot initalize LayerImpl more than once. ");
-  }
-  if (engine_type_ == EngineType::UNKNOWN) {
-    throw std::runtime_error(
-        "Engine type must be set to a valid value before initializing LayerImpl.");
   }
   init_impl();
   initialized_ = true;
@@ -44,7 +33,6 @@ Vec<Tensor> LayerImpl::forward(const Vec<Tensor> &inputs, Residuals &residuals) 
   if (!initialized_) {
     throw std::runtime_error("LayerImpl must be initialized before calling forward");
   }
-  is_fwd_ = true;
   Vec<Tensor> current_inputs;
   for (auto &input : inputs) {
     if (input.device() == this->device())
@@ -63,7 +51,6 @@ Vec<Tensor> LayerImpl::backward(const Vec<Tensor> &grad_outputs, Residuals &resi
   if (!initialized_) {
     throw std::runtime_error("LayerImpl must be initialized before calling backward");
   }
-  is_fwd_ = false;
   Vec<Tensor> current_grad_outputs;
   for (auto &grad : grad_outputs) {
     if (grad.device() == this->device())
@@ -160,10 +147,9 @@ void LayerImpl::save_state(std::ostream &out) const {
   size_t j_size = j_str.size();
   out.write(reinterpret_cast<const char *>(&j_size), sizeof(size_t));
   out.write(j_str.c_str(), j_size);
-  auto descs = param_descriptors();
-  for (const auto &desc : descs) {
-    Tensor param = *desc.data_ptr;
-    save(param, out);
+  const Vec<Param> &parameters = params();
+  for (const auto &param : parameters) {
+    save(param.data(), out);
   }
 }
 

@@ -33,17 +33,17 @@ BatchNormImpl::BatchNormImpl(size_t num_features, float epsilon, float momentum,
 BatchNormImpl::~BatchNormImpl() {}
 
 void BatchNormImpl::init_impl() {
-  fill(gamma_, 1.0f);
-  fill(beta_, 0.0f);
+  gamma_ = make_param({num_features_}, param_dtype_);
+  beta_ = make_param({num_features_}, param_dtype_);
 
-  fill(running_mean_, 0.0f);
-  fill(running_var_, 1.0f);
+  fill(gamma_.data(), 1.0f);
+  fill(beta_.data(), 0.0f);
 
-  fill(grad_gamma_, 0.0f);
-  fill(grad_beta_, 0.0f);
+  running_mean_ = make_param({num_features_}, DType_t::FP32);
+  running_var_ = make_param({num_features_}, DType_t::FP32);
 
-  fill(grad_dummy_mean_, 0.0f);
-  fill(grad_dummy_var_, 0.0f);
+  fill(running_mean_.grad(), 0.0f);
+  fill(running_var_.grad(), 1.0f);
 }
 
 /**
@@ -161,9 +161,9 @@ Tensor BatchNormImpl::backward_impl(const Tensor &grad_output, Residuals &residu
 
   engine_->batchnorm_bwd(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
                          use_relu_ ? relu_mask.data_as<void>() : nullptr, gamma_.data_as<void>(),
-                         grad_input.data_as<void>(), grad_gamma_.data_as<void>(),
-                         grad_beta_.data_as<void>(), batch_mean.data_as<void>(),
-                         batch_invar.data_as<void>(), workspace.data_as<void>(), type_desc);
+                         grad_input.data_as<void>(), gamma_.grad_as<void>(), beta_.grad_as<void>(),
+                         batch_mean.data_as<void>(), batch_invar.data_as<void>(),
+                         workspace.data_as<void>(), type_desc);
 
   return grad_input;
 }

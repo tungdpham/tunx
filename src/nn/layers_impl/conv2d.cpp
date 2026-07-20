@@ -41,15 +41,12 @@ void Conv2DImpl::init_impl() {
   long long seed = this->use_seed_ ? this->srand_seed_
                                    : std::chrono::system_clock::now().time_since_epoch().count();
 
-  fill_normal(weights_, 0, stddev, seed);
+  weights_ = make_param({out_channels_, kernel_h_, kernel_w_, in_channels_}, param_dtype_);
+  fill_normal(weights_.data(), 0, stddev, seed);
 
   if (use_bias_) {
-    fill_normal(bias_, 0, stddev, seed);
-  }
-
-  fill(grad_weights_, 0.0f);
-  if (use_bias_) {
-    fill(grad_bias_, 0.0f);
+    bias_ = make_param({out_channels_}, param_dtype_);
+    fill_normal(bias_.data(), 0, stddev, seed);
   }
 }
 
@@ -165,11 +162,11 @@ Tensor Conv2DImpl::backward_impl(const Tensor &grad_output, Residuals &residuals
   Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
   engine_->conv2d_wgrad(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
-                        grad_weights_.data_as<void>(), ws.data_as<void>(), type_desc);
+                        weights_.grad_as<void>(), ws.data_as<void>(), type_desc);
 
   if (use_bias_) {
     engine_->conv2d_bgrad(backend_handle_, stats, grad_output.data_as<void>(),
-                          grad_bias_.data_as<void>(), ws.data_as<void>(), type_desc);
+                          bias_.grad_as<void>(), ws.data_as<void>(), type_desc);
   }
 
   engine_->conv2d_dgrad(backend_handle_, stats, grad_output.data_as<void>(),

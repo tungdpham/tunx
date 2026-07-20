@@ -9,6 +9,7 @@
 #include <memory>
 #include <string>
 
+#include "nn/param.hpp"
 #include "nn/siso_layer.hpp"
 #include "tensor/tensor.hpp"
 
@@ -20,10 +21,8 @@ private:
   size_t input_features_;
   size_t output_features_;
   bool use_bias_;
-  Tensor weights_;
-  Tensor bias_;
-  Tensor grad_weights_;
-  Tensor grad_bias_;
+  Param weights_;
+  Param bias_;
 
   void init_impl() override;
   Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
@@ -31,7 +30,7 @@ private:
 
 public:
   DenseImpl(size_t input_features, size_t output_features, bool use_bias = true,
-                 const std::string &name = "dense");
+            const std::string &name = "dense");
 
   ~DenseImpl();
 
@@ -40,26 +39,6 @@ public:
   std::string type() const override { return TYPE_NAME; }
   LayerConfig get_config() const override;
   Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
-  Vec<ParamDescriptor> param_descriptors() override {
-    Vec<ParamDescriptor> descriptors;
-    auto weight_desc = ParamDescriptor{
-        param_dtype_,
-        {output_features_, input_features_},
-        &weights_,
-        &grad_weights_,
-    };
-    descriptors.push_back(weight_desc);
-    if (use_bias_) {
-      auto bias_desc = ParamDescriptor{
-          param_dtype_,
-          {output_features_},
-          &bias_,
-          &grad_bias_,
-      };
-      descriptors.push_back(bias_desc);
-    }
-    return descriptors;
-  }
 
   static std::shared_ptr<DenseImpl> create_from_config(const LayerConfig &config);
 };
@@ -69,9 +48,9 @@ public:
 class Dense : public LayerRef<internal::DenseImpl> {
 public:
   Dense(size_t input_features, size_t output_features, bool use_bias = true,
-             const std::string &name = "dense")
-      : LayerRef(
-            std::make_shared<internal::DenseImpl>(input_features, output_features, use_bias, name)) {}
+        const std::string &name = "dense")
+      : LayerRef(std::make_shared<internal::DenseImpl>(input_features, output_features, use_bias,
+                                                       name)) {}
 
   using LayerRef<internal::DenseImpl>::LayerRef;
 };

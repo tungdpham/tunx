@@ -10,6 +10,7 @@
 #include <string>
 
 #include "nn/siso_layer.hpp"
+#include "nn/param.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
@@ -20,8 +21,7 @@ private:
   size_t vocab_size_;
   size_t embed_dim_;
   size_t padding_idx_;
-  Tensor weight_;
-  Tensor grad_weights_;
+  Param weight_;
 
   void init_impl() override;
   Tensor forward_impl(const Tensor &input, Residuals &residualsuals) override;
@@ -37,17 +37,6 @@ public:
   std::string type() const override { return TYPE_NAME; }
   LayerConfig get_config() const override;
 
-  Vec<ParamDescriptor> param_descriptors() override {
-    Vec<ParamDescriptor> descriptors;
-    auto weight_desc = ParamDescriptor{
-        param_dtype_,
-        {vocab_size_, embed_dim_},
-        &weight_,
-        &grad_weights_,
-    };
-    descriptors.push_back(weight_desc);
-    return descriptors;
-  }
 
   static std::shared_ptr<EmbeddingImpl> create_from_config(const LayerConfig &config);
 };

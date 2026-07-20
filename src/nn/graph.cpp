@@ -16,10 +16,13 @@
 
 #include "device/device_type.hpp"
 #include "nn/engines/cpu_engine.hpp"
+#ifdef USE_CUDA
 #include "nn/engines/cuda_engine.hpp"
 #include "nn/engines/cudnn_engine.hpp"
+#endif
 #include "nn/layer.hpp"
 #include "nn/layer_factory.hpp"
+#include "nn/param.hpp"
 
 namespace tunx {
 
@@ -41,7 +44,6 @@ static Engine get_default_engine(const Device &device) {
 
 void Graph::compile(IAllocator &allocator) {
   sort();
-  GraphContextDescriptor ctx_desc;
   std::set<LayerImpl *> unique_layers;
   for (const auto &edge : edges_) {
     LayerImpl *layer_ptr = edge->layer().get();
@@ -49,19 +51,13 @@ void Graph::compile(IAllocator &allocator) {
       unique_layers.insert(layer_ptr);
     }
   }
-  for (LayerImpl *layer_ptr : unique_layers) {
-    for (const auto &param_desc : layer_ptr->param_descriptors()) {
-      ctx_desc.register_desc(param_desc);
-    }
-  }
-  context_ = std::make_unique<GraphContext>(allocator, ctx_desc);
-  workspace_allocator_ = DELAllocatorV2::create(context_->device(), defaultFlowHandle);
-  Engine engine = get_default_engine(context_->device());
+  Engine engine = get_default_engine(allocator.device());
+  param_allocator_ = &allocator;
+  workspace_allocator_ = DELAllocatorV2::create(allocator.device(), defaultFlowHandle);
   void *backend_handle = engine->create_backend_handle();
   for (LayerImpl *layer_ptr : unique_layers) {
     layer_ptr->set_engine(engine);
     layer_ptr->set_backend_handle(backend_handle);
-    layer_ptr->set_engine_type(allocator.device().get_engine());
     layer_ptr->set_allocator(*workspace_allocator_);
     layer_ptr->init();
   }
@@ -199,8 +195,8 @@ TensorBundle Graph::forward(TensorBundle &input_map, size_t pid) {
     }
     auto node = it->second;
     Tensor device_tensor = tensor;
-    if (tensor.device() != context_->device()) {
-      device_tensor = tensor.to_device(context_->device());
+    if (tensor.device() != this->device()) {
+      device_tensor = tensor.to_device(this->device());
     }
     it->second->set_data(pid, device_tensor, out_degree_[node]);
   }
@@ -254,8 +250,8 @@ TensorBundle Graph::backward(TensorBundle &output_grad_map, size_t pid) {
     }
     auto node = it->second;
     Tensor device_tensor = tensor;
-    if (tensor.device() != context_->device()) {
-      device_tensor = tensor.to_device(context_->device());
+    if (tensor.device() != this->device()) {
+      device_tensor = tensor.to_device(this->device());
     }
     it->second->set_grad(pid, device_tensor, in_degree_[node]);
   }
@@ -341,11 +337,19 @@ void Graph::zero_grads() {
   for (const auto &node : nodes_) {
     node->zero_grads();
   }
-  context_->zero_grads();
+  for (const auto &edge : edges_) {
+    edge->layer()->zero_grads();
+  }
 }
 
-Vec<Tensor *> Graph::parameters() { return context_->parameters(); }
-Vec<Tensor *> Graph::gradients() { return context_->gradients(); }
+Vec<Param> Graph::params() {
+  Vec<Param> params;
+  for (auto &edge : edges_) {
+    auto layer = edge->layer();
+    params.insert(params.end(), layer->params().begin(), layer->params().end());
+  }
+  return params;
+}
 
 int Graph::node_in_degree(const Node &node) const {
   auto it = in_degree_.find(node);
@@ -573,13 +577,13 @@ void Graph::save_state(std::ostream &stream) const {
 
   write_binary(stream, unique_layers.size());
   for (const auto &layer : unique_layers) {
-    Vec<ParamDescriptor> descriptors = layer->param_descriptors();
-    write_binary(stream, descriptors.size());
-    for (const ParamDescriptor &descriptor : descriptors) {
-      if (!descriptor.data_ptr) {
+    Vec<Param> params = layer->params();
+    write_binary(stream, params.size());
+    for (const Param &param : params) {
+      if (!param) {
         throw std::runtime_error("Cannot save uninitialized layer parameter");
       }
-      save(*descriptor.data_ptr, stream);
+      save(param.data(), stream);
     }
   }
 }
@@ -678,13 +682,13 @@ Graph Graph::load_state(std::istream &stream, IAllocator &allocator) {
   }
 
   for (size_t i = 0; i < layers.size(); ++i) {
-    Vec<ParamDescriptor> descriptors = layers[i]->param_descriptors();
+    Vec<Param> params = layers[i]->params();
     const size_t param_count = read_binary<size_t>(stream);
-    if (param_count != descriptors.size()) {
+    if (param_count != params.size()) {
       throw std::runtime_error("Graph state parameter count does not match layer definition");
     }
-    for (auto &descriptor : descriptors) {
-      load(*descriptor.data_ptr, stream);
+    for (auto &param : params) {
+      load(param.data(), stream);
     }
   }
 

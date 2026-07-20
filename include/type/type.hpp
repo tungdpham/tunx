@@ -301,6 +301,14 @@ inline DType_t string_to_dtype(const std::string &dtype_str) {
       throw std::runtime_error("Unknown dtype in dispatch"); \
   }
 
+#define DISPATCH_DTYPE2(dtype_value_a, dtype_value_b, type_alias_a, type_alias_b, ...) \
+  DISPATCH_DTYPE(dtype_value_a, type_alias_a,                                          \
+                 { DISPATCH_DTYPE(dtype_value_b, type_alias_b, { __VA_ARGS__; }); })
+
+#define DISPATCH_DTYPE3(dtype_value_a, dtype_value_b, dtype_value_c, type_alias_a, type_alias_b, type_alias_c, ...) \
+  DISPATCH_DTYPE(dtype_value_a, type_alias_a,                                          \
+                 { DISPATCH_DTYPE2(dtype_value_b, dtype_value_c, type_alias_b, type_alias_c, { __VA_ARGS__; }); })
+
 #define DISPATCH_ANY_DTYPE(dtype_value, type_alias, ...)     \
   switch (dtype_value) {                                     \
     case DType_t::UINT8_T: {                                 \

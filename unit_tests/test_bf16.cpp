@@ -40,10 +40,10 @@ TEST_F(BF16Test, Dense) {
   bf16_output->set_uid("bf16_output");
   graph.compile(allocator);
 
-  auto bf16_params = bf16_dense_layer.parameters();
-  auto fp32_params = fp32_dense_layer.parameters();
+  auto bf16_params = bf16_dense_layer.params();
+  auto fp32_params = fp32_dense_layer.params();
   for (size_t i = 0; i < bf16_params.size(); ++i) {
-    bf16_params[i]->copy_to(*fp32_params[i]);
+    bf16_params[i].data().copy_to(fp32_params[i].data());
   }
 
   Tensor bf16_input = Tensor({batch_size, input_dim}, DType_t::BF16, getHost());

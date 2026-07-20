@@ -27,9 +27,8 @@ void ClassTokenImpl::init_impl() {
   long long seed = this->use_seed_ ? this->srand_seed_
                                    : std::chrono::system_clock::now().time_since_epoch().count();
 
-  fill_normal(class_token_, 0, bound, seed);
-
-  fill(class_token_gradients_, 0.0);
+  class_token_ = make_param({embed_dim_}, DType_t::FP32);
+  fill_normal(class_token_.data(), 0, bound, seed);
 }
 
 Tensor ClassTokenImpl::forward_impl(const Tensor &input, Residuals &residuals) {
@@ -95,13 +94,9 @@ Tensor ClassTokenImpl::backward_impl(const Tensor &grad_output, Residuals &resid
   WorkspaceReq ws_req = engine_->query_class_token_graph(backend_handle_, stats, type_desc);
   Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  Tensor class_token_gradients_next = get_tensor({embed_dim_}, param_dtype_);
-
   engine_->class_token_bwd(backend_handle_, stats, grad_output.data_as<void>(),
-                           grad_input.data_as<void>(), class_token_gradients_.data_as<void>(),
+                           grad_input.data_as<void>(), class_token_.grad_as<void>(),
                            ws.data_as<void>(), type_desc);
-
-  class_token_gradients_ = class_token_gradients_next;
 
   return grad_input;
 }
@@ -124,8 +119,7 @@ Vec<size_t> ClassTokenImpl::compute_output_shape(const Vec<size_t> &input_shape)
   return {batch_size, seq_len + 1, embed_dim};
 }
 
-std::shared_ptr<ClassTokenImpl> ClassTokenImpl::create_from_config(
-    const LayerConfig &config) {
+std::shared_ptr<ClassTokenImpl> ClassTokenImpl::create_from_config(const LayerConfig &config) {
   size_t embed_dim = config.get<size_t>("embed_dim");
   return std::make_shared<ClassTokenImpl>(embed_dim, config.name);
 }

@@ -92,6 +92,12 @@ struct EmbeddingStats {
   size_t padding_idx;
 };
 
+struct PositionalEmbeddingStats {
+  size_t batch_size;
+  size_t seq_len;
+  size_t embed_dim;
+};
+
 struct ClassTokenStats {
   size_t batch_size;
   size_t seq_len;

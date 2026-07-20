@@ -33,17 +33,17 @@ TEST_F(FP16Test, Dense) {
   fp16_output->set_uid("fp16_output");
   graph.compile(allocator);
 
-  auto fp16_params = fp16_dense_layer.parameters();
-  auto fp32_params = fp32_dense_layer.parameters();
+  auto fp16_params = fp16_dense_layer.params();
+  auto fp32_params = fp32_dense_layer.params();
   for (size_t i = 0; i < fp16_params.size(); ++i) {
-    Tensor cpu_fp16_param = fp16_params[i]->to_host();
-    Tensor cpu_fp32_param = fp32_params[i]->to_host();
+    Tensor cpu_fp16_param = fp16_params[i].data().to_host();
+    Tensor cpu_fp32_param = fp32_params[i].data().to_host();
     fp16 *fp16_data = cpu_fp16_param.data_as<fp16>();
     float *fp32_data = cpu_fp32_param.data_as<float>();
     for (size_t j = 0; j < cpu_fp16_param.size(); ++j) {
       fp32_data[j] = static_cast<float>(fp16_data[j]);
     }
-    cpu_fp32_param.copy_to(*fp32_params[i]);
+    cpu_fp32_param.copy_to(fp32_params[i].data());
   }
 
   Tensor fp16_input = Tensor({32, 128}, DType_t::FP16, getHost());

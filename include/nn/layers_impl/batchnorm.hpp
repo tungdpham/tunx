@@ -10,6 +10,7 @@
 #include <memory>
 #include <string>
 
+#include "nn/param.hpp"
 #include "nn/siso_layer.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
@@ -25,15 +26,11 @@ private:
   bool affine_;
   bool use_relu_;
 
-  Tensor gamma_;
-  Tensor beta_;
-  Tensor grad_gamma_;
-  Tensor grad_beta_;
+  Param gamma_;
+  Param beta_;
 
-  Tensor running_mean_;
-  Tensor running_var_;
-  Tensor grad_dummy_mean_;
-  Tensor grad_dummy_var_;
+  Param running_mean_;
+  Param running_var_;
 
   void init_impl() override;
   Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
@@ -50,38 +47,6 @@ public:
   std::string type() const override { return TYPE_NAME; }
   LayerConfig get_config() const override;
   static std::shared_ptr<BatchNormImpl> create_from_config(const LayerConfig &config);
-  Vec<ParamDescriptor> param_descriptors() override {
-    Vec<ParamDescriptor> descriptors;
-    auto gamma_desc = ParamDescriptor{
-        param_dtype_,
-        {num_features_},
-        &gamma_,
-        &grad_gamma_,
-    };
-    descriptors.push_back(gamma_desc);
-    auto beta_desc = ParamDescriptor{
-        param_dtype_,
-        {num_features_},
-        &beta_,
-        &grad_beta_,
-    };
-    descriptors.push_back(beta_desc);
-    auto running_mean_desc = ParamDescriptor{
-        DType_t::FP32,
-        {num_features_},
-        &running_mean_,
-        &grad_dummy_mean_,
-    };
-    descriptors.push_back(running_mean_desc);
-    auto running_var_desc = ParamDescriptor{
-        DType_t::FP32,
-        {num_features_},
-        &running_var_,
-        &grad_dummy_var_,
-    };
-    descriptors.push_back(running_var_desc);
-    return descriptors;
-  }
   Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
 };
 
