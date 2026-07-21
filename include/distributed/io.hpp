@@ -15,7 +15,7 @@
 #include "common/endian.hpp"
 #include "device/device.hpp"
 #include "device/dptr.hpp"
-#include "device/flow.hpp"
+#include "device/stream.hpp"
 #include "ops/ops.hpp"
 
 namespace tunx {
@@ -25,7 +25,7 @@ private:
 
 public:
   template <typename T>
-  void archive_impl(const T* data, size_t count, const Device& device) {
+  void archive_impl(const T* data, size_t count, Device& device) {
     size_ += sizeof(T) * count;
   }
 
@@ -46,16 +46,14 @@ public:
         offset_(0) {}
 
   template <typename T>
-  void archive_impl(const T* data, size_t count, const Device& device) {
+  void archive_impl(const T* data, size_t count, Device& device) {
     static_assert(std::is_trivially_copyable<T>::value, "...");
     if (offset_ + sizeof(T) * count > buffer_.capacity()) {
       throw std::runtime_error(fmt::format("Writer overflow: Offset {}, Size: {}, Capacity: {}",
                                            offset_, sizeof(T) * count, buffer_.capacity()));
     }
     const dptr src(const_cast<T*>(data), sizeof(T) * count, device);
-    std::unique_ptr<Task> task =
-        ops::cd_copy<unsigned char>(src, buffer_ + offset_, sizeof(T) * count, defaultFlowHandle);
-    task_sync_all({task.get()});
+    ops::cd_copy<unsigned char>(src, buffer_ + offset_, sizeof(T) * count, nullptr);
     offset_ += sizeof(T) * count;
   }
 
@@ -76,13 +74,11 @@ public:
         endianness_(host_endianness) {}
 
   template <typename T>
-  void archive_impl(T* data, size_t count, const Device& device) {
+  void archive_impl(T* data, size_t count, Device& device) {
     dptr dst(data, sizeof(T) * count, device);
-    std::unique_ptr<Task> task =
-        ops::cd_copy<unsigned char>(buffer_ + offset_, dst, sizeof(T) * count, defaultFlowHandle);
-    task_sync_all({task.get()});
+    ops::cd_copy<unsigned char>(buffer_ + offset_, dst, sizeof(T) * count, nullptr);
     if (endianness_ != device.get_endianness()) {
-      ops::bswap<T>(dst, dst, count, defaultFlowHandle);
+      ops::bswap<T>(dst, dst, count, nullptr);
     }
     offset_ += sizeof(T) * count;
   }

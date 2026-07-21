@@ -26,7 +26,7 @@ protected:
 
     has_gpu_ = false;
     for (const DeviceID& id : device_ids) {
-      const Device& device = manager.get(id);
+      Device& device = manager.get(id);
       if (device.device_type() == DeviceType::CUDA) {
         has_gpu_ = true;
         break;
@@ -38,22 +38,20 @@ protected:
     }
 
     engine_ = std::make_unique<CUDAEngine>();
-    handle_ = engine_->create_backend_handle();
+    handle_ = engine_->create_handle(getGPU().default_stream());
   }
 
-  static void TearDownTestSuite() {
-    engine_.reset();
-    handle_ = nullptr;
-  }
+  static void TearDownTestSuite() { engine_.reset(); }
 
   static bool has_gpu_;
   static std::unique_ptr<CUDAEngine> engine_;
-  static void* handle_;
+  static stream stream_;
+  static engine_handle handle_;
 };
 
 bool CUDAEngineTest::has_gpu_ = false;
 std::unique_ptr<CUDAEngine> CUDAEngineTest::engine_;
-void* CUDAEngineTest::handle_ = nullptr;
+engine_handle CUDAEngineTest::handle_;
 
 TEST_F(CUDAEngineTest, DenseFwdReturnsCorrectResults) {
   size_t batch_size = 16;

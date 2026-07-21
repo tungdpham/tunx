@@ -5,6 +5,7 @@
  * project root for the full license text.
  */
 #pragma once
+#include "device/stream.hpp"
 #include "nn/activations_impl/base_activation.hpp"
 #include "tensor/tensor.hpp"
 
@@ -12,10 +13,10 @@ namespace tunx {
 namespace func {
 class Linear : public ActivationFunction {
 public:
-  std::unique_ptr<Task> apply(const Tensor &input, Tensor &output) const override;
+  void apply(const Tensor &input, Tensor &output, stream s = nullptr) const override;
 
-  std::unique_ptr<Task> compute_gradient(const Tensor &input, const Tensor &grad_output,
-                                         Tensor &grad_input) const override;
+  void compute_gradient(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
+                        stream s = nullptr) const override;
 
   std::string name() const override;
   std::unique_ptr<ActivationFunction> clone() const override;

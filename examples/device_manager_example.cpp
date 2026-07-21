@@ -20,7 +20,7 @@ int main() {
     cout << "Found " << device_ids.size() << " device(s):" << endl;
 
     for (DeviceID device_id : device_ids) {
-      const Device &device = manager.get(device_id);
+      Device &device = manager.get(device_id);
       cout << "  Device " << device_id << ": " << device.get_name()
            << " (Type: " << device_type_to_string(device.device_type()) << ")" << endl;
 
@@ -32,7 +32,7 @@ int main() {
 
     if (manager.has(DeviceType::CPU, 0)) {
       cout << "Testing allocation on CPU device..." << endl;
-      const Device &cpu_device = manager.get({DeviceType::CPU, 0});
+      Device &cpu_device = manager.get({DeviceType::CPU, 0});
 
       size_t test_size = 1024 * 1024;
       void *ptr = cpu_device.allocate_memory(test_size);

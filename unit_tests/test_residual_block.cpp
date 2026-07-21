@@ -36,9 +36,11 @@ protected:
     has_cpu_ = false;
 
     for (const DeviceID &id : device_ids) {
-      const Device &device = manager.get(id);
+      Device &device = manager.get(id);
       if (device.device_type() == DeviceType::CPU) {
         has_cpu_ = true;
+        device_ = device;
+        stream_ = device.default_stream();
         break;
       }
     }
@@ -103,6 +105,8 @@ protected:
   }
 
   bool has_cpu_;
+  sref<Device> device_;
+  stream stream_;
 };
 
 // Identity Shortcut Tests
@@ -113,11 +117,12 @@ TEST_F(ResidualBlockTest, IdentityShortcutForward) {
   main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2x"));
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "identity_residual");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 2.0f);
 
-  Tensor input = Tensor({1, 1, 2, 2}, DType_t::FP32, getHost());
+  Tensor input = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(input, 1.0f);
 
   auto output = residual_layer.forward({input})[0];
@@ -136,11 +141,12 @@ TEST_F(ResidualBlockTest, IdentityShortcutForwardWithReLU) {
   main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_neg2x"));
 
   auto residual_layer = ResidualBlock(std::move(main_path), Vec<Layer>{}, "relu", "identity_relu");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), -2.0f);
 
-  Tensor input = Tensor({1, 1, 2, 2}, DType_t::FP32, getHost());
+  Tensor input = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   float *input_data = input.data_as<float>();
   for (int i = 0; i < 4; ++i) {
     input_data[i] = 1.0f;
@@ -161,7 +167,7 @@ TEST_F(ResidualBlockTest, IdentityShortcutMultiChannel) {
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "identity_multichannel");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 0.5f);
 
@@ -193,7 +199,7 @@ TEST_F(ResidualBlockTest, IdentityShortcutMultiBatch) {
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "identity_multibatch");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 1.0f);
 
@@ -228,7 +234,7 @@ TEST_F(ResidualBlockTest, ProjectionShortcutForward) {
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), std::move(shortcut), "none", "projection_residual");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 0.5f);
   fill(residual_layer.params()[1].data(), 0.25f);
@@ -256,7 +262,7 @@ TEST_F(ResidualBlockTest, ProjectionShortcutWithReLU) {
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), std::move(shortcut), "relu", "projection_relu");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), -1.0f);
   fill(residual_layer.params()[1].data(), 0.5f);
@@ -283,7 +289,7 @@ TEST_F(ResidualBlockTest, IdentityShortcutBackward) {
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "identity_backward");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 2.0f);
 
@@ -338,7 +344,7 @@ TEST_F(ResidualBlockTest, EdgeCaseZeroGradient) {
   main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2x"));
 
   auto residual_layer = ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "zero_gradient");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 2.0f);
 
@@ -363,7 +369,7 @@ TEST_F(ResidualBlockTest, EdgeCaseLargeValues) {
   main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1x"));
 
   auto residual_layer = ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "large_values");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 1.0f);
 
@@ -388,7 +394,7 @@ TEST_F(ResidualBlockTest, EdgeCaseNegativeValues) {
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "negative_values");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), -1.0f);
 
@@ -412,7 +418,7 @@ TEST_F(ResidualBlockTest, NumericalStabilitySmallValues) {
   main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_1x"));
 
   auto residual_layer = ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "small_values");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 1.0f);
 
@@ -437,7 +443,7 @@ TEST_F(ResidualBlockTest, NumericalStabilityBackward) {
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "backward_stability");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 1.0f);
 
@@ -467,7 +473,7 @@ TEST_F(ResidualBlockTest, MultiLayerMainPath) {
   main_path.push_back(Conv2D(1, 1, 1, 1, 1, 1, 0, 0, false, "scale_2"));
 
   auto residual_layer = ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "multi_layer");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 0.5f);
   fill(residual_layer.params()[1].data(), 2.0f);
@@ -494,7 +500,7 @@ TEST_F(ResidualBlockTest, MultiLayerMainPathBackward) {
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "none", "multi_layer_backward");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 0.5f);
   fill(residual_layer.params()[1].data(), 2.0f);
@@ -526,7 +532,7 @@ TEST_F(ResidualBlockTest, ReLUNegativeInputSuppressionForward) {
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "relu", "relu_suppression");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 0.0f);
 
@@ -551,7 +557,7 @@ TEST_F(ResidualBlockTest, ReLUNegativeInputSuppressionBackward) {
 
   auto residual_layer =
       ResidualBlock(std::move(main_path), Vec<Layer>{}, "relu", "relu_suppression_bwd");
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = test::compile_single_layer(residual_layer, allocator);
   fill(residual_layer.params()[0].data(), 0.0f);
 

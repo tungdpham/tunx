@@ -4,8 +4,8 @@
 #include <cstdlib>
 
 #include "device/device_manager.hpp"
-#include "device/flow.hpp"
 #include "device/pool_allocator.hpp"
+#include "device/stream.hpp"
 #include "distributed/binary_serializer.hpp"
 #include "distributed/job.hpp"
 #include "distributed/message.hpp"
@@ -26,7 +26,7 @@ signed main() {
 
   Message message(CommandType::FORWARD_JOB, std::move(job));
 
-  auto &device_allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &device_allocator = PoolAllocator::instance(getHost(), getHost().default_stream());
 
   BinarySerializer bserializer(device_allocator);
   dptr buffer = device_allocator.allocate(data_size * sizeof(float) + 1024);

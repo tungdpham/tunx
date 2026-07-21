@@ -48,7 +48,7 @@ private:
 public:
   OpenWebText(size_t context_length, DType_t dtype = DType_t::FP32,
                         int padding_token_id = -1)
-      : allocator_(PoolAllocator::instance(getHost(), defaultFlowHandle)),
+      : allocator_(PoolAllocator::instance(getHost(), nullptr)),
         dtype_(dtype),
         context_length_(context_length),
         padding_token_id_(padding_token_id) {}

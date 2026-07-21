@@ -8,8 +8,6 @@
 
 #include <stdexcept>
 
-#include "device/task.hpp"
-
 namespace tunx {
 namespace internal {
 
@@ -27,7 +25,7 @@ Tensor SliceImpl::forward_impl(const Tensor &input, Residuals &residuals) {
   Vec<size_t> output_shape = compute_output_shape(input.shape());
   Tensor output = get_tensor(output_shape, io_dtype_);
 
-  DISPATCH_ON_3_DTYPES_TO_METHOD(slice_forward, input, output, this->flow_handle_);
+  DISPATCH_ON_3_DTYPES_TO_METHOD(slice_forward, input, output, backend_handle_.get_stream());
   return output;
 }
 
@@ -43,20 +41,18 @@ Tensor SliceImpl::backward_impl(const Tensor &grad_output, Residuals &residuals)
   Tensor grad_input = get_tensor(original_shape, io_dtype_);
 
   DISPATCH_ON_3_DTYPES_TO_METHOD(slice_backward, grad_output, grad_input, original_shape,
-                                 this->flow_handle_);
+                                 backend_handle_.get_stream());
   return grad_input;
 }
 
 template <typename IO_T, typename Param_T, typename Compute_T>
-std::unique_ptr<Task> SliceImpl::slice_forward(const Tensor &input, Tensor &output,
-                                                    flowHandle_t handle) const {
+void SliceImpl::slice_forward(const Tensor &input, Tensor &output, stream handle) const {
   throw std::runtime_error("Not implemented");
 }
 
 template <typename IO_T, typename Param_T, typename Compute_T>
-std::unique_ptr<Task> SliceImpl::slice_backward(const Tensor &grad_output, Tensor &grad_input,
-                                                     const Vec<size_t> &original_shape,
-                                                     flowHandle_t handle) const {
+void SliceImpl::slice_backward(const Tensor &grad_output, Tensor &grad_input,
+                               const Vec<size_t> &original_shape, stream handle) const {
   throw std::runtime_error("Not implemented");
 }
 

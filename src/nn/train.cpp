@@ -19,12 +19,11 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
-#include <string_view>
 
 #include "data_loading/batch_prefetcher.hpp"
 #include "device/device_type.hpp"
-#include "device/flow.hpp"
 #include "device/pool_allocator.hpp"
+#include "device/stream.hpp"
 #include "nn/csv_logger.hpp"
 #include "nn/metrics.hpp"
 #include "threading/thread_wrapper.hpp"
@@ -207,8 +206,8 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
                           CsvLogger &logger, int epoch) {
   auto train_start = chrono::high_resolution_clock::now();
   Tensor batch_data, batch_labels;
-  const Device &model_device = graph.device();
-  auto &mem_pool = PoolAllocator::instance(model_device, defaultFlowHandle);
+  Device &model_device = graph.device();
+  auto &mem_pool = PoolAllocator::instance(model_device, model_device.default_stream());
 
   cout << "Starting training epoch..." << endl;
   graph.set_mode(ExecutionMode::TRAIN);
@@ -302,7 +301,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
         scheduler->step();
       }
     }
-    model_device.get_flow(defaultFlowHandle)->synchronize();
+    model_device.default_stream().sync();
 
     // Log batch metrics
     {
@@ -422,8 +421,8 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
   train_dataset->shuffle();
   train_dataset->reset();
 
-  const Device &model_device = graph.device();
-  auto &mem_pool = PoolAllocator::instance(model_device, defaultFlowHandle);
+  Device &model_device = graph.device();
+  auto &mem_pool = PoolAllocator::instance(model_device, nullptr);
 
   int grad_accum_counter = 0;
   const std::string artifact_name = training_artifact_name(config);
@@ -607,7 +606,7 @@ Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
   double val_loss = 0.0;
   double val_corrects = 0.0;
   int val_batches = 0;
-  csref<Device> model_device = graph.device();
+  sref<Device> model_device = graph.device();
 
   Tensor device_batch_labels;
 

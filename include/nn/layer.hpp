@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <device/stream.hpp>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
@@ -106,8 +107,6 @@ public:
   // Note: have to call init again after changing param dtype
   LayerImpl &set_allocator(DELAllocatorV2 &allocator);
   DELAllocatorV2 *get_allocator() const;
-  LayerImpl &set_flow_handle(flowHandle_t handle);
-  flowHandle_t get_flow_handle() const;
   LayerImpl &set_seed(unsigned long long seed);
   LayerImpl &set_io_dtype(DType_t dtype);
   DType_t get_io_dtype() const;
@@ -119,8 +118,8 @@ public:
   bool is_training() const;
   LayerImpl &set_engine(Engine engine);
   Engine get_engine();
-  void set_backend_handle(void *handle);
-  void *get_backend_handle() const;
+  void set_backend_handle(engine_handle handle);
+  engine_handle get_backend_handle() const;
 
   virtual Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const = 0;
   std::string name() const { return name_; }
@@ -134,11 +133,11 @@ public:
 
   void zero_grads() {
     for (auto &param : params_) {
-      param.zero_grad(flow_handle_);
+      param.zero_grad(backend_handle_.get_stream());
     }
   }
 
-  const Device &device() const {
+  Device &device() const {
     if (!allocator_) {
       throw std::runtime_error("LayerImpl: Allocator is not set to get device.");
     }
@@ -154,21 +153,20 @@ protected:
   virtual void init_impl() {}
   virtual void on_set_engine(Engine engine) {}
   virtual void on_set_allocator(DELAllocatorV2 &allocator) {}
-  virtual void on_set_flow_handle(flowHandle_t handle) {}
+  virtual void on_set_flow_handle(stream handle) {}
   virtual void on_set_seed(unsigned long long seed) {}
   virtual void on_set_training(bool training) {}
   virtual void on_set_io_dtype(DType_t dtype) {}
   virtual void on_set_param_dtype(DType_t dtype) {}
   virtual void on_set_compute_dtype(DType_t dtype) {}
-  virtual void on_set_backend_handle(void *handle) {}
+  virtual void on_set_backend_handle(engine_handle handle) {}
   virtual Vec<Tensor> forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) = 0;
   virtual Vec<Tensor> backward_impl(const Vec<Tensor> &grad_outputs, Residuals &residuals) = 0;
 
 protected:
   bool initialized_ = false;
   Engine engine_;
-  void *backend_handle_;
-  flowHandle_t flow_handle_ = defaultFlowHandle;
+  engine_handle backend_handle_;
   DELAllocatorV2 *allocator_ = nullptr;
   bool is_training_ = true;
   bool use_seed_ = false;
@@ -291,17 +289,6 @@ public:
     return impl_->get_allocator();
   }
 
-  LayerRef &set_flow_handle(flowHandle_t handle) {
-    check_layer("set_flow_handle");
-    impl_->set_flow_handle(handle);
-    return *this;
-  }
-
-  flowHandle_t get_flow_handle() const {
-    check_layer("get_flow_handle");
-    return impl_->get_flow_handle();
-  }
-
   LayerRef &set_seed(unsigned long long seed) {
     check_layer("set_seed");
     impl_->set_seed(seed);
@@ -387,7 +374,7 @@ public:
     return impl_->params();
   }
 
-  const Device &device() const {
+  Device &device() const {
     check_layer("device");
     return impl_->device();
   }

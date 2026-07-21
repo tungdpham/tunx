@@ -7,6 +7,7 @@
 #pragma once
 
 #include <asio.hpp>
+#include <device/stream.hpp>
 #include <memory>
 
 #include "coordinator.hpp"
@@ -77,7 +78,7 @@ public:
                     std::move(coordinator_config.local_worker),
                     Endpoint::tcp(tcp_config.host, tcp_config.port),
                     std::move(coordinator_config.worker_endpoints), ParallelMode_t::PIPELINE) {
-    auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+    auto &allocator = PoolAllocator::instance(getHost(), nullptr);
     // Initialize TCP communicator for the coordinator
     auto communicator =
         std::make_unique<TCPCommunicator>(this->coordinator_endpoint_, allocator,

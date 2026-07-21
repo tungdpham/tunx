@@ -7,6 +7,7 @@
 #pragma once
 
 #include <algorithm>
+#include <device/stream.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -280,7 +281,7 @@ private:
 public:
   explicit TinyImageNet(DType_t dtype = DType_t::FP32)
       : Dataset(),
-        allocator_(PoolAllocator::instance(getHost(), defaultFlowHandle)),
+        allocator_(PoolAllocator::instance(getHost(), nullptr)),
         dtype_(dtype) {
     sample_list_.reserve(100000);
   }

@@ -17,8 +17,8 @@
 #include <vector>
 
 #include "communicator.hpp"
-#include "device/flow.hpp"
 #include "device/pool_allocator.hpp"
+#include "device/stream.hpp"
 #include "distributed/endpoint.hpp"
 #include "distributed/worker.hpp"
 #include "logging/logger.hpp"
@@ -219,7 +219,7 @@ public:
 
           total_loss += loss;
           PoolAllocator &allocator =
-              PoolAllocator::instance(predictions.device(), defaultFlowHandle);
+              PoolAllocator::instance(predictions.device(), nullptr);
           Tensor grad_output(predictions.shape(), predictions.dtype(), allocator);
           criterion->compute_gradient(predictions, device_targets, grad_output);
           grad_output *= 1.0 / (num_microbatches * accumulation_steps);
@@ -348,7 +348,7 @@ public:
       total_loss += loss;
       total_corrects += compute_class_corrects(predictions, device_targets);
 
-      PoolAllocator &allocator = PoolAllocator::instance(predictions.device(), defaultFlowHandle);
+      PoolAllocator &allocator = PoolAllocator::instance(predictions.device(), nullptr);
       Tensor grad_output(predictions.shape(), predictions.dtype(), allocator);
       criterion->compute_gradient(predictions, device_targets, grad_output);
       grad_output *= (1.0f / (num_microbatches * accumulation_steps));

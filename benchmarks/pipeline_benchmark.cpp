@@ -12,7 +12,7 @@ using namespace std;
 
 signed main() {
   auto &device = getGPU();
-  auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
   Graph graph;
   auto input = graph.make_node("input");
@@ -38,8 +38,7 @@ signed main() {
   auto conv2d_output = conv_layer.forward({input_data}, conv_residuals)[0];
   auto batchnorm_output = bn_layer.forward({conv2d_output}, bn_residuals)[0];
   auto maxpool_output = maxpool_layer.forward({batchnorm_output}, maxpool_residuals)[0];
-  Flow *flow = getGPU().get_flow(defaultFlowHandle);
-  flow->synchronize();
+  device.default_stream().sync();
 
   // warm pass
   int passes = 10;
@@ -49,8 +48,7 @@ signed main() {
     conv2d_output = conv_layer.forward({input_data}, conv_residuals)[0];
     batchnorm_output = bn_layer.forward({conv2d_output}, bn_residuals)[0];
     maxpool_output = maxpool_layer.forward({batchnorm_output}, maxpool_residuals)[0];
-    Flow *flow = getGPU().get_flow(defaultFlowHandle);
-    flow->synchronize();
+    device.default_stream().sync();
 
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =

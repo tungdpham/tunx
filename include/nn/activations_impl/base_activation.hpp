@@ -15,10 +15,10 @@ class ActivationFunction {
 public:
   virtual ~ActivationFunction() = default;
 
-  virtual std::unique_ptr<Task> apply(const Tensor &input, Tensor &output) const = 0;
+  virtual void apply(const Tensor &input, Tensor &output, stream s = nullptr) const = 0;
 
-  virtual std::unique_ptr<Task> compute_gradient(const Tensor &input, const Tensor &grad_output,
-                                                 Tensor &grad_input) const = 0;
+  virtual void compute_gradient(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
+                                stream s = nullptr) const = 0;
 
   virtual std::string name() const = 0;
   virtual std::unique_ptr<ActivationFunction> clone() const = 0;

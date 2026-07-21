@@ -10,7 +10,9 @@
 #include <string>
 
 #include "device/iallocator.hpp"
+#include "device/stream.hpp"
 #include "nn/edge.hpp"
+#include "nn/engines/engine_handle.hpp"
 #include "nn/node.hpp"
 #include "nn/tensor_bundle.hpp"
 #include "type/type.hpp"
@@ -58,14 +60,26 @@ public:
   void save_state(std::ostream &stream) const;
   static Graph load_state(std::istream &stream, IAllocator &allocator);
 
-  void compile(IAllocator &allocator);
+  void compile(IAllocator &allocator, stream s = nullptr);
+
+  Engine &engine() { return engine_; }
+  const Engine &engine() const { return engine_; }
+
+  engine_handle &handle() { return engine_handle_; }
+  const engine_handle &handle() const { return engine_handle_; }
 
   Vec<Node> nodes() const { return nodes_; }
   Vec<Edge> edges() const { return edges_; }
+
   Vec<std::string> input_uids() const;
   Vec<std::string> output_uids() const;
-  const Device &device() const { return param_allocator_->device(); }
-  const DELAllocatorV2 *workspace_allocator() const { return workspace_allocator_.get(); }
+
+  Device &device() const { return param_allocator_->device(); }
+
+  const IAllocator *param_allocator() const { return param_allocator_; }
+  const std::shared_ptr<DELAllocatorV2> &workspace_allocator() const {
+    return workspace_allocator_;
+  }
 
   void add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producers,
                 const Vec<Node> &consumers);
@@ -87,7 +101,6 @@ public:
 
   void set_input(Node node);
   void set_output(Node node);
-
   bool is_input(const Node &node) const { return input_nodes_.count(node) > 0; }
   bool is_output(const Node &node) const { return output_nodes_.count(node) > 0; }
 
@@ -103,12 +116,17 @@ public:
   Vec<Param> params();
 
 private:
+  // backend
+  IAllocator *param_allocator_;
+  std::shared_ptr<DELAllocatorV2> workspace_allocator_;
+  Engine engine_;
+  engine_handle engine_handle_;
+
+  // connectivity
   Vec<Node> nodes_;
   Vec<Edge> edges_;
   std::set<Node> input_nodes_;
   std::set<Node> output_nodes_;
-  IAllocator *param_allocator_;
-  std::shared_ptr<DELAllocatorV2> workspace_allocator_;
   std::map<std::weak_ptr<NodeImpl>, int, std::owner_less<std::weak_ptr<NodeImpl>>> in_degree_;
   std::map<std::weak_ptr<NodeImpl>, int, std::owner_less<std::weak_ptr<NodeImpl>>> out_degree_;
   ExecutionMode mode_ = ExecutionMode::TRAIN;

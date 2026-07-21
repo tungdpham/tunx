@@ -7,6 +7,7 @@
 #pragma once
 
 #include <fcntl.h>
+#include <device/stream.hpp>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -181,7 +182,7 @@ public:
   explicit CIFAR100(bool use_coarse_labels = false, DType_t dtype = DType_t::FP32)
       : Dataset(),
         use_coarse_labels_(use_coarse_labels),
-        allocator_(PoolAllocator::instance(getHost(), defaultFlowHandle)),
+        allocator_(PoolAllocator::instance(getHost(), nullptr)),
         dtype_(dtype) {}
 
   virtual ~CIFAR100() { cleanup_maps(); }

@@ -106,33 +106,32 @@ Vec<Tensor> SDPAImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residua
       .attn_scale = attn_scale_,
       .is_causal = is_causal_,
   };
-  
+
   DTypeDesc type_desc{
       .io_dtype = io_dtype_,
       .param_dtype = param_dtype_,
       .compute_dtype = compute_dtype_,
   };
 
-  void* backend_handle = engine_->create_backend_handle();
-  WorkspaceReq req = engine_->query_sdpa_graph(backend_handle, stats, type_desc);
+  WorkspaceReq req = engine_->query_sdpa_graph(backend_handle_, stats, type_desc);
 
   Tensor workspace = this->get_tensor({req.fwd_workspace}, DType_t::BYTE);
-  
+
   // Use a stats_tensor to hold statistics for backward pass
   // CPU uses [B, H, S, S] float/double
   // CuDNN uses [B, H, S, 1] float32
   // We allocate conservatively.
-  size_t stats_elements = std::max(batch_size * num_heads * seq_len * seq_len,
-                                   batch_size * num_heads * seq_len * 1);
+  size_t stats_elements =
+      std::max(batch_size * num_heads * seq_len * seq_len, batch_size * num_heads * seq_len * 1);
   Tensor stats_tensor = this->get_tensor({stats_elements}, io_dtype_);
 
   if (this->is_training_) {
     residuals["stats"] = stats_tensor;
   }
 
-  engine_->sdpa_fwd(backend_handle, stats, q.data_as<void>(), k.data_as<void>(),
-                    v.data_as<void>(), output.data_as<void>(), stats_tensor.data_as<void>(),
-                    workspace.data_as<void>(), type_desc);
+  engine_->sdpa_fwd(backend_handle_, stats, q.data_as<void>(), k.data_as<void>(), v.data_as<void>(),
+                    output.data_as<void>(), stats_tensor.data_as<void>(), workspace.data_as<void>(),
+                    type_desc);
 
   return {output};
 }
@@ -168,20 +167,19 @@ Vec<Tensor> SDPAImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &
       .attn_scale = attn_scale_,
       .is_causal = is_causal_,
   };
-  
+
   DTypeDesc type_desc{
       .io_dtype = io_dtype_,
       .param_dtype = param_dtype_,
       .compute_dtype = compute_dtype_,
   };
 
-  void* backend_handle = engine_->create_backend_handle();
-  WorkspaceReq req = engine_->query_sdpa_graph(backend_handle, stats, type_desc);
+  WorkspaceReq req = engine_->query_sdpa_graph(backend_handle_, stats, type_desc);
 
   Tensor workspace = this->get_tensor({req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->sdpa_bwd(backend_handle, stats, q.data_as<void>(), k.data_as<void>(),
-                    v.data_as<void>(), output.data_as<void>(), grad_output.data_as<void>(),
+  engine_->sdpa_bwd(backend_handle_, stats, q.data_as<void>(), k.data_as<void>(), v.data_as<void>(),
+                    output.data_as<void>(), grad_output.data_as<void>(),
                     stats_tensor.data_as<void>(), grad_q.data_as<void>(), grad_k.data_as<void>(),
                     grad_v.data_as<void>(), workspace.data_as<void>(), type_desc);
 

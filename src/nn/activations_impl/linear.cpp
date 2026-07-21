@@ -16,25 +16,24 @@
 namespace tunx {
 namespace func {
 
-std::unique_ptr<Task> Linear::apply(const Tensor &input, Tensor &output) const {
+void Linear::apply(const Tensor &input, Tensor &output, stream s) const {
   if (input.shape() != output.shape()) {
     throw std::runtime_error("Input and output shapes must match for Linear");
   }
   if (input.device() != output.device()) {
     throw std::runtime_error("Input and output must be on the same device for Linear");
   }
-  return nullptr;
+
 }
 
-std::unique_ptr<Task> Linear::compute_gradient(const Tensor &input, const Tensor &grad_output,
-                                               Tensor &grad_input) const {
+void Linear::compute_gradient(const Tensor &input, const Tensor &grad_output, Tensor &grad_input, stream s) const {
   if (grad_input.shape() != grad_output.shape()) {
     throw std::invalid_argument(
         "Upstream grad_output must have the same "
         "shape as pre-activation values");
   }
   grad_output.copy_to(grad_input);
-  return nullptr;
+
 }
 
 std::string Linear::name() const { return "linear"; }

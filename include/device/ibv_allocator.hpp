@@ -30,7 +30,7 @@ namespace tunx {
 // back to the allocator's free list.
 class IbvAllocator : public IAllocator {
 public:
-  IbvAllocator(const Device &device, ibv_pd *pd, size_t slab_size)
+  IbvAllocator(Device &device, ibv_pd *pd, size_t slab_size)
       : device_(device),
         pd_(pd),
         slab_size_(slab_size),
@@ -91,9 +91,9 @@ public:
   IbvAllocator(const IbvAllocator &) = delete;
   IbvAllocator &operator=(const IbvAllocator &) = delete;
 
-  static IbvAllocator &instance(const Device &device, ibv_pd *pd, size_t slab_size) {
+  static IbvAllocator &instance(Device &device, ibv_pd *pd, size_t slab_size) {
     static std::mutex registry_mutex;
-    static std::map<const Device *, std::unique_ptr<IbvAllocator>> instances;
+    static std::map<Device *, std::unique_ptr<IbvAllocator>> instances;
     std::lock_guard<std::mutex> lock(registry_mutex);
     auto &allocator = instances[&device];
     if (!allocator) {
@@ -167,7 +167,7 @@ public:
 
   size_t slab_size() const { return slab_size_; }
 
-  const Device &device() const override { return device_; }
+  Device &device() const override { return device_; }
 
   ibv_mr *get_mr() const { return slab_mr_; }
 
@@ -195,7 +195,7 @@ public:
 private:
   std::multimap<size_t, size_t> free_blocks_by_size_;  // size -> offset
   std::map<size_t, size_t> free_blocks_by_offset_;     // offset -> size
-  const Device &device_;
+  Device &device_;
   ibv_pd *pd_;
   ibv_mr *slab_mr_;
   void *slab_ptr_;

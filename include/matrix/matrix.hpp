@@ -26,7 +26,7 @@ template <typename T = float>
 struct Matrix {
 private:
   size_t rows_, cols_;
-  csref<Device> device_;
+  sref<Device> device_;
   dptr data_;
 
   static constexpr size_t MKL_ALIGNMENT = 64;
@@ -39,20 +39,20 @@ private:
   }
 
 public:
-  Matrix(sref<const Device> device)
+  Matrix(sref<Device> device)
       : rows_(0),
         cols_(0),
         device_(device),
         data_(nullptr) {}
 
-  Matrix(size_t rows, size_t cols, sref<const Device> device = getHost())
+  Matrix(size_t rows, size_t cols, sref<Device> device = getHost())
       : rows_(rows),
         cols_(cols),
         device_(device) {
     allocate_aligned(rows_ * cols_);
   }
 
-  Matrix(size_t rows, size_t cols, const dptr &data, const sref<const Device> device = getHost())
+  Matrix(size_t rows, size_t cols, const dptr &data, const sref<Device> device = getHost())
       : rows_(rows),
         cols_(cols),
         device_(device) {

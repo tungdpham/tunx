@@ -11,7 +11,7 @@ using namespace std;
 
 signed main() {
   auto &device = getGPU();
-  auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
   Graph graph;
   auto input = graph.make_node("input");
@@ -36,8 +36,7 @@ signed main() {
   for (int i = 0; i < passes; ++i) {
     auto pass_start = std::chrono::high_resolution_clock::now();
     output = conv_layer.forward({input_data}, residuals)[0];
-    Flow *flow = getGPU().get_flow(defaultFlowHandle);
-    flow->synchronize();
+    device.default_stream().sync();
 
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =
@@ -61,8 +60,8 @@ signed main() {
   for (int i = 0; i < passes; ++i) {
     auto pass_start = std::chrono::high_resolution_clock::now();
     nchw_output = legacy_layer.forward({nchw_input}, legacy_residuals)[0];
-    Flow *flow = getGPU().get_flow(defaultFlowHandle);
-    flow->synchronize();
+    device.default_stream().sync();
+
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(pass_end - pass_start);

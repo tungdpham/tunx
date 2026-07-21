@@ -18,8 +18,8 @@
 #include <stdexcept>
 
 #include "device/dptr.hpp"
-#include "device/flow.hpp"
 #include "device/iallocator.hpp"
+#include "device/stream.hpp"
 
 namespace tunx {
 
@@ -71,29 +71,28 @@ class DELAllocatorV2 : public IAllocator, public std::enable_shared_from_this<DE
 private:
   constexpr static size_t DEFAULT_SLAB_SIZE = 64 * 1024 * 1024;  // 64MB
 
-  DELAllocatorV2(const Device &device, flowHandle_t flow)
+  DELAllocatorV2(Device &device, stream s)
       : device_(device),
-        flow_(flow),
+        stream_(s),
         side_(0) {}  // Added tracking counter
 
 public:
-  static std::shared_ptr<DELAllocatorV2> create(const Device &device, flowHandle_t flow) {
-    return std::shared_ptr<DELAllocatorV2>(new DELAllocatorV2(device, flow));
+  static std::shared_ptr<DELAllocatorV2> create(Device &device, stream s) {
+    return std::shared_ptr<DELAllocatorV2>(new DELAllocatorV2(device, s));
   }
 
-  static std::shared_ptr<DELAllocatorV2> instance(const Device &device, flowHandle_t flow) {
+  static std::shared_ptr<DELAllocatorV2> instance(Device &device, stream s) {
     static std::mutex mutex;
-    static std::map<std::pair<DeviceType, flowHandle_t>, std::shared_ptr<DELAllocatorV2>> instances;
+    static std::map<stream, std::shared_ptr<DELAllocatorV2>> instances;
 
     std::lock_guard<std::mutex> lock(mutex);
 
-    auto key = std::make_pair(device.device_type(), flow);
-    auto it = instances.find(key);
+    auto it = instances.find(s);
     if (it != instances.end()) {
       return it->second;
     }
-    auto instance = create(device, flow);
-    instances[key] = instance;
+    auto instance = create(device, s);
+    instances[s] = instance;
     return instance;
   }
 
@@ -235,7 +234,7 @@ public:
     allocate_slab(aligned_size);
   }
 
-  const Device &device() const override { return device_; }
+  Device &device() const override { return device_; }
 
   size_t total_allocated() const {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -268,8 +267,8 @@ private:
       return offset < other.offset;
     }
   };
-  const Device &device_;
-  flowHandle_t flow_;
+  Device &device_;
+  stream stream_;
   mutable std::mutex mutex_;
   int side_;
   std::list<Slab> slabs_;

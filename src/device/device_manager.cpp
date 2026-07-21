@@ -70,7 +70,7 @@ void DeviceManager::remove(DeviceID device_id) { devices_.erase(device_id); }
 
 void DeviceManager::clear() { devices_.clear(); }
 
-const Device &DeviceManager::get(DeviceType type, int id) const {
+Device &DeviceManager::get(DeviceType type, int id) const {
   auto it = devices_.find(DeviceID{type, id});
   if (it != devices_.end()) {
     return *(it->second);
@@ -78,7 +78,7 @@ const Device &DeviceManager::get(DeviceType type, int id) const {
   throw std::runtime_error("Device with the given ID not found");
 }
 
-const Device &DeviceManager::get(DeviceID device_id) const {
+Device &DeviceManager::get(DeviceID device_id) const {
   auto it = devices_.find(device_id);
   if (it != devices_.end()) {
     return *(it->second);
@@ -108,13 +108,13 @@ void initializeDefaultDevices() {
   manager.discover();
 }
 
-const Device &getGPU(size_t id) {
+Device &getGPU(size_t id) {
   DeviceManager &manager = DeviceManager::instance();
   return manager.get(DeviceType::CUDA, id);
   throw std::runtime_error("Requested CUDA index not found");
 }
 
-const Device &getHost() {
+Device &getHost() {
   DeviceManager &manager = DeviceManager::instance();
   return manager.get(DeviceType::CPU, 0);
 }

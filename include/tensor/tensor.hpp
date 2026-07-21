@@ -12,8 +12,8 @@
 #include "device/device.hpp"
 #include "device/device_allocator.hpp"
 #include "device/dptr.hpp"
-#include "device/flow.hpp"
 #include "device/iallocator.hpp"
+#include "device/stream.hpp"
 #include "device/task.hpp"
 #include "ops/ops.hpp"
 #include "type/type.hpp"
@@ -89,7 +89,7 @@ public:
     compute_strides();
   }
 
-  Tensor(const Vec<size_t> &shape, DType_t dtype, const Device &device)
+  Tensor(const Vec<size_t> &shape, DType_t dtype, Device &device)
       : Tensor(shape, dtype, DeviceAllocator::instance(device)) {}
 
   ~Tensor() = default;
@@ -127,7 +127,7 @@ public:
   size_t size() const { return data_size_; }
   size_t capacity() const { return data_.capacity() / get_dtype_size(dtype_); }
   IAllocator &allocator() const { return allocator_; }
-  const Device &device() const { return data_.device(); }
+  Device &device() const { return data_.device(); }
   DeviceType device_type() const { return device().device_type(); }
   DType_t dtype() const { return dtype_; }
 
@@ -142,7 +142,7 @@ public:
                   *allocator_);
   }
 
-  std::unique_ptr<Task> copy_to(Tensor &dest, flowHandle_t flow = defaultFlowHandle) const {
+  void copy_to(Tensor &dest, stream flow = nullptr) const {
     if (data_size_ != dest.data_size_) {
       throw std::invalid_argument("Tensor copy_to: Shape mismatch between source and destination");
     }
@@ -150,11 +150,10 @@ public:
       throw std::invalid_argument(
           "Tensor copy_to: Data type mismatch between source and destination");
     }
-    DISPATCH_ANY_DTYPE(dtype_, T,
-                       return ops::cd_copy<T>(data_, dest.data_, data_size_, defaultFlowHandle));
+    DISPATCH_ANY_DTYPE(dtype_, T, return ops::cd_copy<T>(data_, dest.data_, data_size_, nullptr));
   }
 
-  Tensor to_device(const Device &target_device) const {
+  Tensor to_device(Device &target_device) const {
     Tensor result(shape_, dtype_, DeviceAllocator::instance(target_device));
     copy_to(result);
     return result;

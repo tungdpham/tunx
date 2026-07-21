@@ -19,8 +19,8 @@
 #include <stdexcept>
 
 #include "device/dptr.hpp"
-#include "device/flow.hpp"
 #include "device/iallocator.hpp"
+#include "device/stream.hpp"
 
 namespace tunx {
 
@@ -32,9 +32,9 @@ inline size_t align_up(size_t size, size_t alignment) {
 // input/output allocation patterns, with fallback to coalescing free-lists.
 class DELAllocator : public IAllocator, public std::enable_shared_from_this<DELAllocator> {
 private:
-  DELAllocator(const Device &device, flowHandle_t flow)
+  DELAllocator(Device &device, stream s)
       : device_(device),
-        flow_(flow),
+        stream_(s),
         slab_ptr_(nullptr),
         capacity_(0),
         left_offset_(0),
@@ -43,8 +43,8 @@ private:
         side_(0) {}  // Added tracking counter
 
 public:
-  static std::shared_ptr<DELAllocator> create(const Device &device, flowHandle_t flow) {
-    return std::shared_ptr<DELAllocator>(new DELAllocator(device, flow));
+  static std::shared_ptr<DELAllocator> create(Device &device, stream s) {
+    return std::shared_ptr<DELAllocator>(new DELAllocator(device, s));
   }
 
   ~DELAllocator() {
@@ -168,11 +168,11 @@ public:
     return capacity_;
   }
 
-  const Device &device() const override { return device_; }
+  Device &device() const override { return device_; }
 
 private:
-  const Device &device_;
-  flowHandle_t flow_;
+  Device &device_;
+  stream stream_;
   mutable std::mutex mutex_;
   void *slab_ptr_;
   size_t capacity_;

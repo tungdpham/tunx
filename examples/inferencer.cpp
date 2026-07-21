@@ -44,7 +44,7 @@ signed main(int argc, char *argv[]) {
   train_config.print_config();
 
   auto &device = DeviceManager::instance().get(train_config.device_id);
-  auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
   auto [train_dataset, val_dataset] =
       DatasetFactory::create(train_config.dataset_name, train_config.dataset_path);

@@ -86,8 +86,36 @@ void expect_tensors_close(const Tensor &lhs, const Tensor &rhs, float tolerance)
 
 class GraphPlannerStateTest : public ::testing::Test {
 protected:
-  static void SetUpTestSuite() { initializeDefaultDevices(); }
+  static void SetUpTestSuite() {
+    initializeDefaultDevices();
+    DeviceManager &manager = DeviceManager::instance();
+    Vec<DeviceID> device_ids = manager.get_all();
+
+    has_cpu_ = false;
+    for (const DeviceID &id : device_ids) {
+      Device &device = manager.get(id);
+      if (device.device_type() == DeviceType::CUDA) {
+        has_cpu_ = true;
+        device_ = device;
+        break;
+      }
+    }
+
+    if (!has_cpu_) {
+      GTEST_SKIP() << "No CPU device available, skipping CuDNN engine tests";
+    }
+
+    stream_ = device_->default_stream();
+  }
+
+  static bool has_cpu_;
+  static sref<Device> device_;
+  static stream stream_;
 };
+
+bool GraphPlannerStateTest::has_cpu_;
+sref<Device> GraphPlannerStateTest::device_;
+stream GraphPlannerStateTest::stream_;
 
 TEST(GraphPartitionerTest, SplitsLinearGraphIntoRequestedLayerCounts) {
   Graph graph = build_linear_graph();
@@ -130,7 +158,7 @@ TEST(GraphPartitionerTest, PreservesBoundaryNodesForBranchedGraph) {
 }
 
 TEST_F(GraphPlannerStateTest, SaveAndLoadPreservesExplicitBoundaryNodes) {
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
   Graph graph = build_branched_graph();
   graph.compile(allocator);
 
@@ -152,7 +180,7 @@ TEST(GraphPartitionerTest, RejectsPartitionRatiosThatResolveToEmptyPartitions) {
 }
 
 TEST_F(GraphPlannerStateTest, PartitionedResNet9MatchesFullGraphForwardAndBackward) {
-  auto &allocator = PoolAllocator::instance(getGPU(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(getGPU(), getGPU().default_stream());
   ExampleGraphs::register_defaults();
 
   Graph full_graph = ExampleGraphs::create("cifar10_resnet9", allocator);
@@ -206,7 +234,7 @@ TEST_F(GraphPlannerStateTest, PartitionedResNet9MatchesFullGraphForwardAndBackwa
 }
 
 TEST_F(GraphPlannerStateTest, BackwardAccumulatesGradientsAcrossFanOut) {
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
 
   Graph graph;
   Node input = graph.make_node("input");
@@ -243,7 +271,7 @@ TEST_F(GraphPlannerStateTest, BackwardAccumulatesGradientsAcrossFanOut) {
 }
 
 TEST_F(GraphPlannerStateTest, BackwardClearsAccumulatedGradientsBetweenPasses) {
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
 
   Graph graph;
   Node input = graph.make_node("input");

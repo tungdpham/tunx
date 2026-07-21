@@ -4,10 +4,13 @@
 #include <cmath>
 #include <cstddef>
 #include <cstring>
+#include <memory>
 #include <random>
 #include <vector>
 
+#include "device/stream.hpp"
 #include "math/cpu/gemm.hpp"
+#include "nn/engines/engine_handle.hpp"
 #include "nn/stats/stats.hpp"
 #include "threading/thread_handler.hpp"
 #include "type/type.hpp"
@@ -1079,70 +1082,78 @@ void legacy_maxpool2d_bwd_impl(const T* gradient_data, T* grad_input_data, size_
 
 }  // namespace
 
-void* CPUEngine::create_backend_handle() {
-  return nullptr;  // TODO: make something proper
+engine_handle CPUEngine::create_handle(stream s) {
+  std::shared_ptr<IEngineHandle> handle = std::make_shared<CPUEngineHandle>(s);
+  return engine_handle(handle);
 }
 
-WorkspaceReq CPUEngine::query_dense_graph(void* backend_handle, const DenseStats& stats,
+WorkspaceReq CPUEngine::query_dense_graph(engine_handle backend_handle, const DenseStats& stats,
                                           DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CPUEngine::query_avgpool_graph(void*, const AvgPool2DStats&, DTypeDesc) {
+WorkspaceReq CPUEngine::query_avgpool_graph(engine_handle backend_handle, const AvgPool2DStats&,
+                                            DTypeDesc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CPUEngine::query_maxpool2d_graph(void*, const MaxPool2DStats&, DTypeDesc) {
+WorkspaceReq CPUEngine::query_maxpool2d_graph(engine_handle backend_handle, const MaxPool2DStats&,
+                                              DTypeDesc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CPUEngine::query_positional_embedding_graph(void*, const PositionalEmbeddingStats&,
+WorkspaceReq CPUEngine::query_positional_embedding_graph(engine_handle backend_handle,
+                                                         const PositionalEmbeddingStats&,
                                                          DTypeDesc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CPUEngine::query_class_token_graph(void* backend_handle, const ClassTokenStats& stats,
-                                                DTypeDesc type_desc) {
+WorkspaceReq CPUEngine::query_class_token_graph(engine_handle backend_handle,
+                                                const ClassTokenStats& stats, DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CPUEngine::query_dropout_graph(void*, const DropoutStats&, DTypeDesc) {
+WorkspaceReq CPUEngine::query_dropout_graph(engine_handle backend_handle, const DropoutStats&,
+                                            DTypeDesc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CPUEngine::query_embedding_graph(void* backend_handle, const EmbeddingStats& stats,
-                                              DTypeDesc type_desc) {
+WorkspaceReq CPUEngine::query_embedding_graph(engine_handle backend_handle,
+                                              const EmbeddingStats& stats, DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CPUEngine::query_relu_graph(void*, const ReLUStats&, DTypeDesc) { return {0, 0, 0}; }
-
-WorkspaceReq CPUEngine::query_batchnorm_graph(void* backend_handle, const BatchNormStats& stats,
-                                              DTypeDesc type_desc) {
+WorkspaceReq CPUEngine::query_relu_graph(engine_handle backend_handle, const ReLUStats&,
+                                         DTypeDesc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CPUEngine::query_conv2d_graph(void* backend_handle, const Conv2DStats& stats,
+WorkspaceReq CPUEngine::query_batchnorm_graph(engine_handle backend_handle,
+                                              const BatchNormStats& stats, DTypeDesc type_desc) {
+  return {0, 0, 0};
+}
+
+WorkspaceReq CPUEngine::query_conv2d_graph(engine_handle backend_handle, const Conv2DStats& stats,
                                            DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CPUEngine::query_layernorm_graph(void* backend_handle, const LayerNormStats& stats,
-                                              DTypeDesc type_desc) {
+WorkspaceReq CPUEngine::query_layernorm_graph(engine_handle backend_handle,
+                                              const LayerNormStats& stats, DTypeDesc type_desc) {
   return WorkspaceReq{0, 0, 0};
 }
 
-WorkspaceReq CPUEngine::query_sdpa_graph(void* backend_handle, const AttentionStats& stats,
+WorkspaceReq CPUEngine::query_sdpa_graph(engine_handle backend_handle, const AttentionStats& stats,
                                          DTypeDesc type_desc) {
   return WorkspaceReq{0, 0, 0};
 }
 
-WorkspaceReq CPUEngine::query_transpose_graph(void* backend_handle, const TransposeStats& stats,
-                                              DTypeDesc type_desc) {
+WorkspaceReq CPUEngine::query_transpose_graph(engine_handle backend_handle,
+                                              const TransposeStats& stats, DTypeDesc type_desc) {
   return WorkspaceReq{0, 0, 0};
 }
 
-void CPUEngine::dense_fwd(void* backend_handle, const DenseStats& stats, const void* input,
+void CPUEngine::dense_fwd(engine_handle backend_handle, const DenseStats& stats, const void* input,
                           const void* weight, const void* bias, void* output, void* workspace,
                           DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
@@ -1157,9 +1168,9 @@ void CPUEngine::dense_fwd(void* backend_handle, const DenseStats& stats, const v
   });
 }
 
-void CPUEngine::dense_wgrad(void*, const DenseStats& stats, const void* grad_output,
-                            const void* input, void* grad_weight, void* workspace,
-                            DTypeDesc type_desc) {
+void CPUEngine::dense_wgrad(engine_handle backend_handle, const DenseStats& stats,
+                            const void* grad_output, const void* input, void* grad_weight,
+                            void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     dense_wgrad_impl<T>(static_cast<const T*>(input), static_cast<const T*>(grad_output),
@@ -1168,9 +1179,9 @@ void CPUEngine::dense_wgrad(void*, const DenseStats& stats, const void* grad_out
   });
 }
 
-void CPUEngine::dense_dgrad(void*, const DenseStats& stats, const void* grad_output,
-                            const void* weight, void* grad_input, void* workspace,
-                            DTypeDesc type_desc) {
+void CPUEngine::dense_dgrad(engine_handle backend_handle, const DenseStats& stats,
+                            const void* grad_output, const void* weight, void* grad_input,
+                            void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     dense_dgrad_impl<T>(static_cast<const T*>(grad_output), static_cast<const T*>(weight),
@@ -1179,8 +1190,9 @@ void CPUEngine::dense_dgrad(void*, const DenseStats& stats, const void* grad_out
   });
 }
 
-void CPUEngine::dense_bgrad(void*, const DenseStats& stats, const void* grad_output,
-                            void* grad_bias, void* workspace, DTypeDesc type_desc) {
+void CPUEngine::dense_bgrad(engine_handle backend_handle, const DenseStats& stats,
+                            const void* grad_output, void* grad_bias, void* workspace,
+                            DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     dense_bgrad_impl<T>(static_cast<const T*>(grad_output), static_cast<T*>(grad_bias),
@@ -1188,8 +1200,8 @@ void CPUEngine::dense_bgrad(void*, const DenseStats& stats, const void* grad_out
   });
 }
 
-void CPUEngine::avgpool_fwd(void*, const AvgPool2DStats& stats, const void* input, void* output,
-                            void* workspace, DTypeDesc type_desc) {
+void CPUEngine::avgpool_fwd(engine_handle backend_handle, const AvgPool2DStats& stats,
+                            const void* input, void* output, void* workspace, DTypeDesc type_desc) {
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
@@ -1201,8 +1213,9 @@ void CPUEngine::avgpool_fwd(void*, const AvgPool2DStats& stats, const void* inpu
   });
 }
 
-void CPUEngine::avgpool_bwd(void*, const AvgPool2DStats& stats, const void* grad_output,
-                            void* grad_input, void* workspace, DTypeDesc type_desc) {
+void CPUEngine::avgpool_bwd(engine_handle backend_handle, const AvgPool2DStats& stats,
+                            const void* grad_output, void* grad_input, void* workspace,
+                            DTypeDesc type_desc) {
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
@@ -1214,8 +1227,9 @@ void CPUEngine::avgpool_bwd(void*, const AvgPool2DStats& stats, const void* grad
   });
 }
 
-void CPUEngine::maxpool2d_fwd(void*, const MaxPool2DStats& stats, const void* input, void* output,
-                              void* mask, void* workspace, DTypeDesc type_desc) {
+void CPUEngine::maxpool2d_fwd(engine_handle backend_handle, const MaxPool2DStats& stats,
+                              const void* input, void* output, void* mask, void* workspace,
+                              DTypeDesc type_desc) {
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
@@ -1227,8 +1241,9 @@ void CPUEngine::maxpool2d_fwd(void*, const MaxPool2DStats& stats, const void* in
   });
 }
 
-void CPUEngine::maxpool2d_infer(void*, const MaxPool2DStats& stats, const void* input, void* output,
-                                void* workspace, DTypeDesc type_desc) {
+void CPUEngine::maxpool2d_infer(engine_handle backend_handle, const MaxPool2DStats& stats,
+                                const void* input, void* output, void* workspace,
+                                DTypeDesc type_desc) {
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
@@ -1240,9 +1255,9 @@ void CPUEngine::maxpool2d_infer(void*, const MaxPool2DStats& stats, const void* 
   });
 }
 
-void CPUEngine::maxpool2d_bwd(void*, const MaxPool2DStats& stats, const void* grad_output,
-                              void* grad_input, const void* mask, void* workspace,
-                              DTypeDesc type_desc) {
+void CPUEngine::maxpool2d_bwd(engine_handle backend_handle, const MaxPool2DStats& stats,
+                              const void* grad_output, void* grad_input, const void* mask,
+                              void* workspace, DTypeDesc type_desc) {
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
@@ -1254,8 +1269,8 @@ void CPUEngine::maxpool2d_bwd(void*, const MaxPool2DStats& stats, const void* gr
   });
 }
 
-void CPUEngine::class_token_fwd(void*, const ClassTokenStats& stats, const void* input,
-                                const void* token, void* output, void* workspace,
+void CPUEngine::class_token_fwd(engine_handle backend_handle, const ClassTokenStats& stats,
+                                const void* input, const void* token, void* output, void* workspace,
                                 DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1265,9 +1280,9 @@ void CPUEngine::class_token_fwd(void*, const ClassTokenStats& stats, const void*
   });
 }
 
-void CPUEngine::class_token_bwd(void*, const ClassTokenStats& stats, const void* grad_output,
-                                void* grad_input, void* grad_token, void* workspace,
-                                DTypeDesc type_desc) {
+void CPUEngine::class_token_bwd(engine_handle backend_handle, const ClassTokenStats& stats,
+                                const void* grad_output, void* grad_input, void* grad_token,
+                                void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     class_token_bwd_impl<T>(static_cast<const T*>(grad_output), static_cast<T*>(grad_input),
@@ -1276,8 +1291,9 @@ void CPUEngine::class_token_bwd(void*, const ClassTokenStats& stats, const void*
   });
 }
 
-void CPUEngine::dropout_fwd(void*, const DropoutStats& stats, const void* input, void* output,
-                            bool* mask, void* workspace, DTypeDesc type_desc) {
+void CPUEngine::dropout_fwd(engine_handle backend_handle, const DropoutStats& stats,
+                            const void* input, void* output, bool* mask, void* workspace,
+                            DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     dropout_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output), mask,
@@ -1286,9 +1302,9 @@ void CPUEngine::dropout_fwd(void*, const DropoutStats& stats, const void* input,
   });
 }
 
-void CPUEngine::dropout_bwd(void*, const DropoutStats& stats, const void* grad_output,
-                            void* grad_input, const bool* mask, double scale, void* workspace,
-                            DTypeDesc type_desc) {
+void CPUEngine::dropout_bwd(engine_handle backend_handle, const DropoutStats& stats,
+                            const void* grad_output, void* grad_input, const bool* mask,
+                            double scale, void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     dropout_bwd_impl<T>(static_cast<const T*>(grad_output), static_cast<T*>(grad_input), mask,
@@ -1297,8 +1313,8 @@ void CPUEngine::dropout_bwd(void*, const DropoutStats& stats, const void* grad_o
   });
 }
 
-void CPUEngine::relu_fwd(void*, const ReLUStats& stats, const void* input, void* output, bool* mask,
-                         void* workspace, DTypeDesc type_desc) {
+void CPUEngine::relu_fwd(engine_handle backend_handle, const ReLUStats& stats, const void* input,
+                         void* output, bool* mask, void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     relu_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output), mask,
@@ -1306,8 +1322,8 @@ void CPUEngine::relu_fwd(void*, const ReLUStats& stats, const void* input, void*
   });
 }
 
-void CPUEngine::relu_inf(void*, const ReLUStats& stats, const void* input, void* output,
-                         void* workspace, DTypeDesc type_desc) {
+void CPUEngine::relu_inf(engine_handle backend_handle, const ReLUStats& stats, const void* input,
+                         void* output, void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     relu_inf_impl<T>(static_cast<const T*>(input), static_cast<T*>(output),
@@ -1315,8 +1331,9 @@ void CPUEngine::relu_inf(void*, const ReLUStats& stats, const void* input, void*
   });
 }
 
-void CPUEngine::relu_bwd(void*, const ReLUStats& stats, const void* grad_output, void* grad_input,
-                         const bool* mask, void* workspace, DTypeDesc type_desc) {
+void CPUEngine::relu_bwd(engine_handle backend_handle, const ReLUStats& stats,
+                         const void* grad_output, void* grad_input, const bool* mask,
+                         void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     relu_bwd_impl<T>(static_cast<const T*>(grad_output), static_cast<T*>(grad_input), mask,
@@ -1324,8 +1341,8 @@ void CPUEngine::relu_bwd(void*, const ReLUStats& stats, const void* grad_output,
   });
 }
 
-void CPUEngine::embedding_fwd(void*, const EmbeddingStats& stats, const void* input,
-                              const void* weight, void* output, void* workspace,
+void CPUEngine::embedding_fwd(engine_handle backend_handle, const EmbeddingStats& stats,
+                              const void* input, const void* weight, void* output, void* workspace,
                               DTypeDesc type_desc) {
   DISPATCH_ANY_DTYPE2(type_desc.io_dtype, type_desc.param_dtype, T_IO, T_PARAM, {
     embedding_fwd_impl<T_IO, T_PARAM>(static_cast<const T_IO*>(input),
@@ -1335,9 +1352,9 @@ void CPUEngine::embedding_fwd(void*, const EmbeddingStats& stats, const void* in
   });
 }
 
-void CPUEngine::embedding_bwd(void*, const EmbeddingStats& stats, const void* grad_output,
-                              const void* input, void* grad_weight, void* workspace,
-                              DTypeDesc type_desc) {
+void CPUEngine::embedding_bwd(engine_handle backend_handle, const EmbeddingStats& stats,
+                              const void* grad_output, const void* input, void* grad_weight,
+                              void* workspace, DTypeDesc type_desc) {
   DISPATCH_ANY_DTYPE2(type_desc.io_dtype, type_desc.param_dtype, T_IO, T_PARAM, {
     embedding_bwd_impl<T_IO, T_PARAM>(static_cast<const T_IO*>(input),
                                       static_cast<const T_PARAM*>(grad_output),
@@ -1346,9 +1363,10 @@ void CPUEngine::embedding_bwd(void*, const EmbeddingStats& stats, const void* gr
   });
 }
 
-void CPUEngine::positional_embedding_fwd(void*, const PositionalEmbeddingStats& stats,
-                                         const void* input, const void* pos_embedding, void* output,
-                                         void* workspace, DTypeDesc type_desc) {
+void CPUEngine::positional_embedding_fwd(engine_handle backend_handle,
+                                         const PositionalEmbeddingStats& stats, const void* input,
+                                         const void* pos_embedding, void* output, void* workspace,
+                                         DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_ANY_DTYPE(type_desc.io_dtype, T, {
     pos_embedding_fwd_impl<T, T, T>(static_cast<const T*>(input),
@@ -1357,7 +1375,8 @@ void CPUEngine::positional_embedding_fwd(void*, const PositionalEmbeddingStats& 
   });
 }
 
-void CPUEngine::positional_embedding_bwd(void*, const PositionalEmbeddingStats& stats,
+void CPUEngine::positional_embedding_bwd(engine_handle backend_handle,
+                                         const PositionalEmbeddingStats& stats,
                                          const void* grad_output, void* grad_pos_embedding,
                                          void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
@@ -1368,10 +1387,10 @@ void CPUEngine::positional_embedding_bwd(void*, const PositionalEmbeddingStats& 
   });
 }
 
-void CPUEngine::batchnorm_fwd(void*, const BatchNormStats& stats, const void* input,
-                              const void* gamma, const void* beta, void* output, void*, void*,
-                              void* next_running_mean, void* next_running_var, void* batch_mean,
-                              void* batch_invar, void* relu_mask, void* workspace,
+void CPUEngine::batchnorm_fwd(engine_handle backend_handle, const BatchNormStats& stats,
+                              const void* input, const void* gamma, const void* beta, void* output,
+                              void*, void*, void* next_running_mean, void* next_running_var,
+                              void* batch_mean, void* batch_invar, void* relu_mask, void* workspace,
                               DTypeDesc type_desc) {
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     batchnorm_fwd_impl<T>(static_cast<const T*>(input), static_cast<float*>(batch_mean),
@@ -1384,10 +1403,10 @@ void CPUEngine::batchnorm_fwd(void*, const BatchNormStats& stats, const void* in
   });
 }
 
-void CPUEngine::batchnorm_infer(void*, const BatchNormStats& stats, const void* input,
-                                const void* gamma, const void* beta, const void* saved_mean,
-                                const void* saved_var, void* output, void* workspace,
-                                DTypeDesc type_desc) {
+void CPUEngine::batchnorm_infer(engine_handle backend_handle, const BatchNormStats& stats,
+                                const void* input, const void* gamma, const void* beta,
+                                const void* saved_mean, const void* saved_var, void* output,
+                                void* workspace, DTypeDesc type_desc) {
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     batchnorm_infer_impl<T>(static_cast<const T*>(input), static_cast<const float*>(saved_mean),
                             static_cast<const float*>(saved_var), static_cast<const float*>(gamma),
@@ -1397,11 +1416,11 @@ void CPUEngine::batchnorm_infer(void*, const BatchNormStats& stats, const void* 
   });
 }
 
-void CPUEngine::batchnorm_bwd(void*, const BatchNormStats& stats, const void* grad_output,
-                              const void* input, const void* relu_mask, const void* gamma,
-                              void* grad_input, void* grad_gamma, void* grad_beta,
-                              const void* batch_mean, const void* batch_invar, void* workspace,
-                              DTypeDesc type_desc) {
+void CPUEngine::batchnorm_bwd(engine_handle backend_handle, const BatchNormStats& stats,
+                              const void* grad_output, const void* input, const void* relu_mask,
+                              const void* gamma, void* grad_input, void* grad_gamma,
+                              void* grad_beta, const void* batch_mean, const void* batch_invar,
+                              void* workspace, DTypeDesc type_desc) {
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     batchnorm_bwd_impl<T>(static_cast<const T*>(grad_output), static_cast<const T*>(input),
                           static_cast<const float*>(batch_mean),
@@ -1413,8 +1432,9 @@ void CPUEngine::batchnorm_bwd(void*, const BatchNormStats& stats, const void* gr
   });
 }
 
-void CPUEngine::conv2d_fwd(void*, const Conv2DStats& stats, const void* input, const void* weight,
-                           const void* bias, void* output, void* workspace, DTypeDesc type_desc) {
+void CPUEngine::conv2d_fwd(engine_handle backend_handle, const Conv2DStats& stats,
+                           const void* input, const void* weight, const void* bias, void* output,
+                           void* workspace, DTypeDesc type_desc) {
   size_t output_h = (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
   size_t output_w = (stats.input_w + 2 * stats.pad_w - stats.kernel_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
@@ -1427,9 +1447,9 @@ void CPUEngine::conv2d_fwd(void*, const Conv2DStats& stats, const void* input, c
   });
 }
 
-void CPUEngine::conv2d_dgrad(void*, const Conv2DStats& stats, const void* grad_output,
-                             const void* weight, void* grad_input, void* workspace,
-                             DTypeDesc type_desc) {
+void CPUEngine::conv2d_dgrad(engine_handle backend_handle, const Conv2DStats& stats,
+                             const void* grad_output, const void* weight, void* grad_input,
+                             void* workspace, DTypeDesc type_desc) {
   size_t output_h = (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
   size_t output_w = (stats.input_w + 2 * stats.pad_w - stats.kernel_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
@@ -1442,9 +1462,9 @@ void CPUEngine::conv2d_dgrad(void*, const Conv2DStats& stats, const void* grad_o
   });
 }
 
-void CPUEngine::conv2d_wgrad(void*, const Conv2DStats& stats, const void* grad_output,
-                             const void* input, void* grad_weight, void* workspace,
-                             DTypeDesc type_desc) {
+void CPUEngine::conv2d_wgrad(engine_handle backend_handle, const Conv2DStats& stats,
+                             const void* grad_output, const void* input, void* grad_weight,
+                             void* workspace, DTypeDesc type_desc) {
   size_t output_h = (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
   size_t output_w = (stats.input_w + 2 * stats.pad_w - stats.kernel_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
@@ -1457,8 +1477,9 @@ void CPUEngine::conv2d_wgrad(void*, const Conv2DStats& stats, const void* grad_o
   });
 }
 
-void CPUEngine::conv2d_bgrad(void*, const Conv2DStats& stats, const void* grad_output,
-                             void* grad_bias, void* workspace, DTypeDesc type_desc) {
+void CPUEngine::conv2d_bgrad(engine_handle backend_handle, const Conv2DStats& stats,
+                             const void* grad_output, void* grad_bias, void* workspace,
+                             DTypeDesc type_desc) {
   size_t output_h = (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
   size_t output_w = (stats.input_w + 2 * stats.pad_w - stats.kernel_w) / stats.stride_w + 1;
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
@@ -1468,9 +1489,10 @@ void CPUEngine::conv2d_bgrad(void*, const Conv2DStats& stats, const void* grad_o
   });
 }
 
-void CPUEngine::layernorm_fwd(void*, const LayerNormStats& stats, const void* input,
-                              const void* gamma, const void* beta, void* output, void* mean,
-                              void* inv_variance, void* workspace, DTypeDesc type_desc) {
+void CPUEngine::layernorm_fwd(engine_handle backend_handle, const LayerNormStats& stats,
+                              const void* input, const void* gamma, const void* beta, void* output,
+                              void* mean, void* inv_variance, void* workspace,
+                              DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     layernorm_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output),
@@ -1479,9 +1501,9 @@ void CPUEngine::layernorm_fwd(void*, const LayerNormStats& stats, const void* in
   });
 }
 
-void CPUEngine::layernorm_infer(void*, const LayerNormStats& stats, const void* input,
-                                const void* gamma, const void* beta, void* output, void* workspace,
-                                DTypeDesc type_desc) {
+void CPUEngine::layernorm_infer(engine_handle backend_handle, const LayerNormStats& stats,
+                                const void* input, const void* gamma, const void* beta,
+                                void* output, void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     layernorm_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output),
@@ -1490,10 +1512,11 @@ void CPUEngine::layernorm_infer(void*, const LayerNormStats& stats, const void* 
   });
 }
 
-void CPUEngine::layernorm_bwd(void*, const LayerNormStats& stats, const void* grad_output,
-                              const void* input, const void* gamma, const void* mean,
-                              const void* inv_variance, void* grad_input, void* grad_gamma,
-                              void* grad_beta, void* workspace, DTypeDesc type_desc) {
+void CPUEngine::layernorm_bwd(engine_handle backend_handle, const LayerNormStats& stats,
+                              const void* grad_output, const void* input, const void* gamma,
+                              const void* mean, const void* inv_variance, void* grad_input,
+                              void* grad_gamma, void* grad_beta, void* workspace,
+                              DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     layernorm_bwd_impl<T>(static_cast<const T*>(grad_output), static_cast<const T*>(input),
@@ -1505,9 +1528,9 @@ void CPUEngine::layernorm_bwd(void*, const LayerNormStats& stats, const void* gr
 
 // Legacy APIs
 
-void CPUEngine::legacy_dense_fwd(void*, const void* input, const void* weight, void* output,
-                                 size_t batch_size, size_t in_features, size_t out_features,
-                                 DTypeDesc type_desc) {
+void CPUEngine::legacy_dense_fwd(engine_handle backend_handle, const void* input,
+                                 const void* weight, void* output, size_t batch_size,
+                                 size_t in_features, size_t out_features, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     cpu::gemm<T>(static_cast<const T*>(input), static_cast<const T*>(weight),
@@ -1516,9 +1539,9 @@ void CPUEngine::legacy_dense_fwd(void*, const void* input, const void* weight, v
   });
 }
 
-void CPUEngine::legacy_dense_wgrad(void*, const void* input, const void* grad_output,
-                                   void* grad_weight, size_t batch_size, size_t in_features,
-                                   size_t out_features, DTypeDesc type_desc) {
+void CPUEngine::legacy_dense_wgrad(engine_handle backend_handle, const void* input,
+                                   const void* grad_output, void* grad_weight, size_t batch_size,
+                                   size_t in_features, size_t out_features, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     cpu::gemm<T>(static_cast<const T*>(grad_output), static_cast<const T*>(input),
@@ -1527,9 +1550,9 @@ void CPUEngine::legacy_dense_wgrad(void*, const void* input, const void* grad_ou
   });
 }
 
-void CPUEngine::legacy_dense_dgrad(void*, const void* grad_output, const void* weight,
-                                   void* grad_input, size_t batch_size, size_t in_features,
-                                   size_t out_features, DTypeDesc type_desc) {
+void CPUEngine::legacy_dense_dgrad(engine_handle backend_handle, const void* grad_output,
+                                   const void* weight, void* grad_input, size_t batch_size,
+                                   size_t in_features, size_t out_features, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     cpu::gemm<T>(static_cast<const T*>(grad_output), static_cast<const T*>(weight),
@@ -1538,8 +1561,9 @@ void CPUEngine::legacy_dense_dgrad(void*, const void* grad_output, const void* w
   });
 }
 
-void CPUEngine::legacy_dense_bgrad(void*, const void* grad_output, void* grad_bias,
-                                   size_t batch_size, size_t out_features, DTypeDesc type_desc) {
+void CPUEngine::legacy_dense_bgrad(engine_handle backend_handle, const void* grad_output,
+                                   void* grad_bias, size_t batch_size, size_t out_features,
+                                   DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     const T* go = static_cast<const T*>(grad_output);
@@ -1554,8 +1578,8 @@ void CPUEngine::legacy_dense_bgrad(void*, const void* grad_output, void* grad_bi
   });
 }
 
-void CPUEngine::legacy_dense_add_bias(void*, void* output, const void* bias, size_t batch_size,
-                                      size_t out_features, DTypeDesc type_desc) {
+void CPUEngine::legacy_dense_add_bias(engine_handle backend_handle, void* output, const void* bias,
+                                      size_t batch_size, size_t out_features, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     add_bias_impl<T>(static_cast<T*>(output), static_cast<const T*>(bias), batch_size,
@@ -1563,11 +1587,11 @@ void CPUEngine::legacy_dense_add_bias(void*, void* output, const void* bias, siz
   });
 }
 
-void CPUEngine::legacy_avgpool2d_fwd(void*, const void* input, void* output, size_t batch_size,
-                                     size_t channels, size_t input_h, size_t input_w,
-                                     size_t output_h, size_t output_w, size_t pool_h, size_t pool_w,
-                                     size_t stride_h, size_t stride_w, size_t pad_h, size_t pad_w,
-                                     DTypeDesc type_desc) {
+void CPUEngine::legacy_avgpool2d_fwd(engine_handle backend_handle, const void* input, void* output,
+                                     size_t batch_size, size_t channels, size_t input_h,
+                                     size_t input_w, size_t output_h, size_t output_w,
+                                     size_t pool_h, size_t pool_w, size_t stride_h, size_t stride_w,
+                                     size_t pad_h, size_t pad_w, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     legacy_avgpool2d_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output), batch_size,
@@ -1576,11 +1600,12 @@ void CPUEngine::legacy_avgpool2d_fwd(void*, const void* input, void* output, siz
   });
 }
 
-void CPUEngine::legacy_avgpool2d_bwd(void*, const void* grad_output, void* grad_input,
-                                     size_t batch_size, size_t channels, size_t input_h,
-                                     size_t input_w, size_t output_h, size_t output_w,
-                                     size_t pool_h, size_t pool_w, size_t stride_h, size_t stride_w,
-                                     size_t pad_h, size_t pad_w, DTypeDesc type_desc) {
+void CPUEngine::legacy_avgpool2d_bwd(engine_handle backend_handle, const void* grad_output,
+                                     void* grad_input, size_t batch_size, size_t channels,
+                                     size_t input_h, size_t input_w, size_t output_h,
+                                     size_t output_w, size_t pool_h, size_t pool_w, size_t stride_h,
+                                     size_t stride_w, size_t pad_h, size_t pad_w,
+                                     DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     legacy_avgpool2d_bwd_impl<T>(static_cast<const T*>(grad_output), static_cast<T*>(grad_input),
@@ -1589,11 +1614,12 @@ void CPUEngine::legacy_avgpool2d_bwd(void*, const void* grad_output, void* grad_
   });
 }
 
-void CPUEngine::legacy_maxpool2d_fwd(void*, const void* input, void* output, size_t batch_size,
-                                     size_t channels, size_t input_h, size_t input_w,
-                                     size_t output_h, size_t output_w, size_t pool_h, size_t pool_w,
-                                     size_t stride_h, size_t stride_w, size_t pad_h, size_t pad_w,
-                                     void* mask_indices, DTypeDesc type_desc) {
+void CPUEngine::legacy_maxpool2d_fwd(engine_handle backend_handle, const void* input, void* output,
+                                     size_t batch_size, size_t channels, size_t input_h,
+                                     size_t input_w, size_t output_h, size_t output_w,
+                                     size_t pool_h, size_t pool_w, size_t stride_h, size_t stride_w,
+                                     size_t pad_h, size_t pad_w, void* mask_indices,
+                                     DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     legacy_maxpool2d_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output), batch_size,
@@ -1603,9 +1629,9 @@ void CPUEngine::legacy_maxpool2d_fwd(void*, const void* input, void* output, siz
   });
 }
 
-void CPUEngine::legacy_maxpool2d_bwd(void*, const void* grad_output, void* grad_input,
-                                     size_t batch_size, size_t channels, size_t output_h,
-                                     size_t output_w, const void* mask_indices,
+void CPUEngine::legacy_maxpool2d_bwd(engine_handle backend_handle, const void* grad_output,
+                                     void* grad_input, size_t batch_size, size_t channels,
+                                     size_t output_h, size_t output_w, const void* mask_indices,
                                      DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1615,12 +1641,12 @@ void CPUEngine::legacy_maxpool2d_bwd(void*, const void* grad_output, void* grad_
   });
 }
 
-void CPUEngine::legacy_batchnorm_fwd(void*, const void* input, void* batch_mean,
-                                     void* batch_inv_std, void* running_mean, void* running_var,
-                                     const void* gamma, const void* beta, void* output, void* norm,
-                                     size_t batch_size, size_t channels, size_t spatial_size,
-                                     float momentum, float epsilon, bool affine,
-                                     DTypeDesc type_desc) {
+void CPUEngine::legacy_batchnorm_fwd(engine_handle backend_handle, const void* input,
+                                     void* batch_mean, void* batch_inv_std, void* running_mean,
+                                     void* running_var, const void* gamma, const void* beta,
+                                     void* output, void* norm, size_t batch_size, size_t channels,
+                                     size_t spatial_size, float momentum, float epsilon,
+                                     bool affine, DTypeDesc type_desc) {
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     legacy_batchnorm_fwd_impl<T>(
         static_cast<const T*>(input), static_cast<float*>(batch_mean),
@@ -1631,11 +1657,11 @@ void CPUEngine::legacy_batchnorm_fwd(void*, const void* input, void* batch_mean,
   });
 }
 
-void CPUEngine::legacy_batchnorm_infer(void*, const void* input, const void* running_mean,
-                                       const void* running_var, const void* gamma, const void* beta,
-                                       void* output, size_t batch_size, size_t channels,
-                                       size_t spatial_size, float epsilon, bool affine,
-                                       DTypeDesc type_desc) {
+void CPUEngine::legacy_batchnorm_infer(engine_handle backend_handle, const void* input,
+                                       const void* running_mean, const void* running_var,
+                                       const void* gamma, const void* beta, void* output,
+                                       size_t batch_size, size_t channels, size_t spatial_size,
+                                       float epsilon, bool affine, DTypeDesc type_desc) {
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     legacy_batchnorm_inf_impl<T>(
         static_cast<const T*>(input), static_cast<const float*>(running_mean),
@@ -1645,11 +1671,11 @@ void CPUEngine::legacy_batchnorm_infer(void*, const void* input, const void* run
   });
 }
 
-void CPUEngine::legacy_batchnorm_bwd(void*, const void* grad_output, const void* norm_input,
-                                     const void* inv_std, const void* gamma, void* d_gamma,
-                                     void* d_beta, void* grad_input, size_t batch_size,
-                                     size_t channels, size_t spatial_size, bool affine,
-                                     DTypeDesc type_desc) {
+void CPUEngine::legacy_batchnorm_bwd(engine_handle backend_handle, const void* grad_output,
+                                     const void* norm_input, const void* inv_std, const void* gamma,
+                                     void* d_gamma, void* d_beta, void* grad_input,
+                                     size_t batch_size, size_t channels, size_t spatial_size,
+                                     bool affine, DTypeDesc type_desc) {
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     legacy_batchnorm_bwd_impl<T>(
         static_cast<const T*>(grad_output), static_cast<const float*>(norm_input),
@@ -1659,9 +1685,9 @@ void CPUEngine::legacy_batchnorm_bwd(void*, const void* grad_output, const void*
   });
 }
 
-void CPUEngine::legacy_conv2d_fwd(void*, const void* col_data, const void* weight_data,
-                                  void* output_data, size_t output_size, size_t kernel_size,
-                                  size_t out_channels, DTypeDesc type_desc) {
+void CPUEngine::legacy_conv2d_fwd(engine_handle backend_handle, const void* col_data,
+                                  const void* weight_data, void* output_data, size_t output_size,
+                                  size_t kernel_size, size_t out_channels, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     cpu::gemm<T>(static_cast<const T*>(weight_data), static_cast<const T*>(col_data),
@@ -1670,9 +1696,10 @@ void CPUEngine::legacy_conv2d_fwd(void*, const void* col_data, const void* weigh
   });
 }
 
-void CPUEngine::legacy_conv2d_wgrad(void*, const void* col_data, const void* gradient_data,
-                                    void* grad_weight_data, size_t output_size, size_t kernel_size,
-                                    size_t out_channels, DTypeDesc type_desc) {
+void CPUEngine::legacy_conv2d_wgrad(engine_handle backend_handle, const void* col_data,
+                                    const void* gradient_data, void* grad_weight_data,
+                                    size_t output_size, size_t kernel_size, size_t out_channels,
+                                    DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     cpu::gemm<T>(static_cast<const T*>(gradient_data), static_cast<const T*>(col_data),
@@ -1681,24 +1708,26 @@ void CPUEngine::legacy_conv2d_wgrad(void*, const void* col_data, const void* gra
   });
 }
 
-void CPUEngine::sdpa_fwd(void* backend_handle, const AttentionStats& stats, const void* q_data,
-                         const void* k_data, const void* v_data, void* o_data, void* stats_data,
-                         void* workspace, DTypeDesc type_desc) {
+void CPUEngine::sdpa_fwd(engine_handle backend_handle, const AttentionStats& stats,
+                         const void* q_data, const void* k_data, const void* v_data, void* o_data,
+                         void* stats_data, void* workspace, DTypeDesc type_desc) {
   throw std::runtime_error("SDPA forward is not yet implemented for CPUEngine");
 }
 
-void CPUEngine::sdpa_bwd(void* backend_handle, const AttentionStats& stats, const void* q_data,
-                         const void* k_data, const void* v_data, const void* o_data,
-                         const void* dO_data, const void* stats_data, void* dQ_data, void* dK_data,
-                         void* dV_data, void* workspace, DTypeDesc type_desc) {
+void CPUEngine::sdpa_bwd(engine_handle backend_handle, const AttentionStats& stats,
+                         const void* q_data, const void* k_data, const void* v_data,
+                         const void* o_data, const void* dO_data, const void* stats_data,
+                         void* dQ_data, void* dK_data, void* dV_data, void* workspace,
+                         DTypeDesc type_desc) {
   throw std::runtime_error("SDPA backward is not yet implemented for CPUEngine");
 }
 
 // --- Legacy APIs ---
 
-void CPUEngine::legacy_conv2d_dgrad(void*, const void* gradient_data, const void* weight_data,
-                                    void* col_grad_data, size_t output_size, size_t kernel_size,
-                                    size_t out_channels, DTypeDesc type_desc) {
+void CPUEngine::legacy_conv2d_dgrad(engine_handle backend_handle, const void* gradient_data,
+                                    const void* weight_data, void* col_grad_data,
+                                    size_t output_size, size_t kernel_size, size_t out_channels,
+                                    DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     cpu::gemm<T>(static_cast<const T*>(weight_data), static_cast<const T*>(gradient_data),
@@ -1707,9 +1736,9 @@ void CPUEngine::legacy_conv2d_dgrad(void*, const void* gradient_data, const void
   });
 }
 
-void CPUEngine::legacy_conv2d_bgrad(void*, const void* gradient_data, void* grad_bias_data,
-                                    size_t batch_size, size_t output_h, size_t output_w,
-                                    size_t out_channels, DTypeDesc type_desc) {
+void CPUEngine::legacy_conv2d_bgrad(engine_handle backend_handle, const void* gradient_data,
+                                    void* grad_bias_data, size_t batch_size, size_t output_h,
+                                    size_t output_w, size_t out_channels, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     conv2d_bgrad_naive_impl<T>(static_cast<const T*>(gradient_data),
@@ -1718,9 +1747,9 @@ void CPUEngine::legacy_conv2d_bgrad(void*, const void* gradient_data, void* grad
   });
 }
 
-void CPUEngine::legacy_conv2d_add_bias(void*, void* output_data, const void* bias_data,
-                                       size_t batch_size, size_t output_h, size_t output_w,
-                                       size_t out_channels, DTypeDesc type_desc) {
+void CPUEngine::legacy_conv2d_add_bias(engine_handle backend_handle, void* output_data,
+                                       const void* bias_data, size_t batch_size, size_t output_h,
+                                       size_t output_w, size_t out_channels, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     add_bias_impl<T>(static_cast<T*>(output_data), static_cast<const T*>(bias_data),
@@ -1728,8 +1757,8 @@ void CPUEngine::legacy_conv2d_add_bias(void*, void* output_data, const void* bia
   });
 }
 
-void CPUEngine::transpose(void* backend_handle, const TransposeStats& stats, const void* input,
-                          void* output, void* workspace, DTypeDesc type_desc) {
+void CPUEngine::transpose(engine_handle backend_handle, const TransposeStats& stats,
+                          const void* input, void* output, void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     transpose_impl<T>(static_cast<const T*>(input), static_cast<T*>(output), stats.shape,

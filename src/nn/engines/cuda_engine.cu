@@ -1,3 +1,6 @@
+#include "device/cuda_device.hpp"
+#include "device/stream.hpp"
+#include "nn/engines/engine_handle.hpp"
 #ifdef TUNX_USE_CUDA
 #include <cublas_v2.h>
 #include <cuda_fp16.h>
@@ -1592,74 +1595,74 @@ __global__ void slice_dgrad_kernel(const T* grad_output, T* grad_input, size_t o
   grad_input[output_idx] = grad_output[idx];
 }
 
-void* CUDAEngine::create_backend_handle() {
-  cudaStream_t stream;
-  cudaStreamCreate(&stream);
-  return stream;
+engine_handle CUDAEngine::create_handle(stream s) {
+  std::shared_ptr<IEngineHandle> handle = std::make_shared<CUDAEngineHandle>(s);
+  return engine_handle(handle);
 }
 
-WorkspaceReq CUDAEngine::query_dense_graph(void* backend_handle, const DenseStats& stats,
+WorkspaceReq CUDAEngine::query_dense_graph(engine_handle backend_handle, const DenseStats& stats,
                                            DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CUDAEngine::query_avgpool_graph(void* backend_handle, const AvgPool2DStats& stats,
-                                             DTypeDesc type_desc) {
+WorkspaceReq CUDAEngine::query_avgpool_graph(engine_handle backend_handle,
+                                             const AvgPool2DStats& stats, DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CUDAEngine::query_maxpool2d_graph(void* backend_handle, const MaxPool2DStats& stats,
-                                               DTypeDesc type_desc) {
+WorkspaceReq CUDAEngine::query_maxpool2d_graph(engine_handle backend_handle,
+                                               const MaxPool2DStats& stats, DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CUDAEngine::query_class_token_graph(void* backend_handle, const ClassTokenStats& stats,
+WorkspaceReq CUDAEngine::query_class_token_graph(engine_handle backend_handle,
+                                                 const ClassTokenStats& stats,
                                                  DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CUDAEngine::query_dropout_graph(void* backend_handle, const DropoutStats& stats,
-                                             DTypeDesc type_desc) {
+WorkspaceReq CUDAEngine::query_dropout_graph(engine_handle backend_handle,
+                                             const DropoutStats& stats, DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CUDAEngine::query_embedding_graph(void* backend_handle, const EmbeddingStats& stats,
-                                               DTypeDesc type_desc) {
+WorkspaceReq CUDAEngine::query_embedding_graph(engine_handle backend_handle,
+                                               const EmbeddingStats& stats, DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CUDAEngine::query_positional_embedding_graph(void* backend_handle,
+WorkspaceReq CUDAEngine::query_positional_embedding_graph(engine_handle backend_handle,
                                                           const PositionalEmbeddingStats& stats,
                                                           DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CUDAEngine::query_relu_graph(void* backend_handle, const ReLUStats& stats,
+WorkspaceReq CUDAEngine::query_relu_graph(engine_handle backend_handle, const ReLUStats& stats,
                                           DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CUDAEngine::query_batchnorm_graph(void* backend_handle, const BatchNormStats& stats,
-                                               DTypeDesc type_desc) {
+WorkspaceReq CUDAEngine::query_batchnorm_graph(engine_handle backend_handle,
+                                               const BatchNormStats& stats, DTypeDesc type_desc) {
   size_t temp = 2 * stats.channels * get_dtype_size(type_desc.param_dtype);
   return {0, temp, 0};
 }
 
-WorkspaceReq CUDAEngine::query_conv2d_graph(void* backend_handle, const Conv2DStats& stats,
+WorkspaceReq CUDAEngine::query_conv2d_graph(engine_handle backend_handle, const Conv2DStats& stats,
                                             DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CUDAEngine::query_layernorm_graph(void* backend_handle, const LayerNormStats& stats,
-                                               DTypeDesc type_desc) {
+WorkspaceReq CUDAEngine::query_layernorm_graph(engine_handle backend_handle,
+                                               const LayerNormStats& stats, DTypeDesc type_desc) {
   size_t temp = 2 * stats.channels * get_dtype_size(type_desc.param_dtype);
   return {0, temp, 0};
 }
 
-void CUDAEngine::dense_fwd(void* backend_handle, const DenseStats& stats, const void* input,
+void CUDAEngine::dense_fwd(engine_handle backend_handle, const DenseStats& stats, const void* input,
                            const void* weight, const void* bias, void* output, void* workspace,
                            DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     cuda::gemm_ex<T, T, T, float>(static_cast<const T*>(input), static_cast<const T*>(weight),
                                   static_cast<T*>(output), stats.batch_size, stats.out_features,
@@ -1676,10 +1679,10 @@ void CUDAEngine::dense_fwd(void* backend_handle, const DenseStats& stats, const 
   });
 }
 
-void CUDAEngine::dense_wgrad(void* backend_handle, const DenseStats& stats, const void* grad_output,
-                             const void* input, void* grad_weight_prev, void* workspace,
-                             DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+void CUDAEngine::dense_wgrad(engine_handle backend_handle, const DenseStats& stats,
+                             const void* grad_output, const void* input, void* grad_weight_prev,
+                             void* workspace, DTypeDesc type_desc) {
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     cuda::gemm_ex<T, T, T, float>(static_cast<const T*>(grad_output), static_cast<const T*>(input),
                                   static_cast<T*>(grad_weight_prev), stats.out_features,
@@ -1688,10 +1691,10 @@ void CUDAEngine::dense_wgrad(void* backend_handle, const DenseStats& stats, cons
   });
 }
 
-void CUDAEngine::dense_dgrad(void* backend_handle, const DenseStats& stats, const void* grad_output,
-                             const void* weight, void* grad_input, void* workspace,
-                             DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+void CUDAEngine::dense_dgrad(engine_handle backend_handle, const DenseStats& stats,
+                             const void* grad_output, const void* weight, void* grad_input,
+                             void* workspace, DTypeDesc type_desc) {
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     cuda::gemm_ex<T, T, T, float>(static_cast<const T*>(grad_output), static_cast<const T*>(weight),
                                   static_cast<T*>(grad_input), stats.batch_size, stats.in_features,
@@ -1700,9 +1703,10 @@ void CUDAEngine::dense_dgrad(void* backend_handle, const DenseStats& stats, cons
   });
 }
 
-void CUDAEngine::dense_bgrad(void* backend_handle, const DenseStats& stats, const void* grad_output,
-                             void* grad_bias_prev, void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+void CUDAEngine::dense_bgrad(engine_handle backend_handle, const DenseStats& stats,
+                             const void* grad_output, void* grad_bias_prev, void* workspace,
+                             DTypeDesc type_desc) {
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     int threads_per_block_b = 256;
     int num_blocks_b = static_cast<int>(stats.out_features);
@@ -1714,9 +1718,10 @@ void CUDAEngine::dense_bgrad(void* backend_handle, const DenseStats& stats, cons
   });
 }
 
-void CUDAEngine::avgpool_fwd(void* backend_handle, const AvgPool2DStats& stats, const void* input,
-                             void* output, void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+void CUDAEngine::avgpool_fwd(engine_handle backend_handle, const AvgPool2DStats& stats,
+                             const void* input, void* output, void* workspace,
+                             DTypeDesc type_desc) {
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1730,10 +1735,10 @@ void CUDAEngine::avgpool_fwd(void* backend_handle, const AvgPool2DStats& stats, 
   });
 }
 
-void CUDAEngine::avgpool_bwd(void* backend_handle, const AvgPool2DStats& stats,
+void CUDAEngine::avgpool_bwd(engine_handle backend_handle, const AvgPool2DStats& stats,
                              const void* grad_output, void* grad_input, void* workspace,
                              DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1747,9 +1752,10 @@ void CUDAEngine::avgpool_bwd(void* backend_handle, const AvgPool2DStats& stats,
   });
 }
 
-void CUDAEngine::maxpool2d_fwd(void* backend_handle, const MaxPool2DStats& stats, const void* input,
-                               void* output, void* mask, void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+void CUDAEngine::maxpool2d_fwd(engine_handle backend_handle, const MaxPool2DStats& stats,
+                               const void* input, void* output, void* mask, void* workspace,
+                               DTypeDesc type_desc) {
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1763,10 +1769,10 @@ void CUDAEngine::maxpool2d_fwd(void* backend_handle, const MaxPool2DStats& stats
   });
 }
 
-void CUDAEngine::maxpool2d_infer(void* backend_handle, const MaxPool2DStats& stats,
+void CUDAEngine::maxpool2d_infer(engine_handle backend_handle, const MaxPool2DStats& stats,
                                  const void* input, void* output, void* workspace,
                                  DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1780,10 +1786,10 @@ void CUDAEngine::maxpool2d_infer(void* backend_handle, const MaxPool2DStats& sta
   });
 }
 
-void CUDAEngine::maxpool2d_bwd(void* backend_handle, const MaxPool2DStats& stats,
+void CUDAEngine::maxpool2d_bwd(engine_handle backend_handle, const MaxPool2DStats& stats,
                                const void* grad_output, void* grad_input, const void* mask,
                                void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
@@ -1798,10 +1804,10 @@ void CUDAEngine::maxpool2d_bwd(void* backend_handle, const MaxPool2DStats& stats
   });
 }
 
-void CUDAEngine::class_token_fwd(void* backend_handle, const ClassTokenStats& stats,
+void CUDAEngine::class_token_fwd(engine_handle backend_handle, const ClassTokenStats& stats,
                                  const void* input, const void* token, void* output,
                                  void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     size_t output_seq_len = stats.seq_len + 1;
     size_t total_elements = stats.batch_size * output_seq_len * stats.embed_dim;
@@ -1813,10 +1819,10 @@ void CUDAEngine::class_token_fwd(void* backend_handle, const ClassTokenStats& st
   });
 }
 
-void CUDAEngine::class_token_bwd(void* backend_handle, const ClassTokenStats& stats,
+void CUDAEngine::class_token_bwd(engine_handle backend_handle, const ClassTokenStats& stats,
                                  const void* grad_output, void* grad_input, void* grad_token_prev,
                                  void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     size_t total_input = stats.batch_size * stats.seq_len * stats.embed_dim;
     int threads = 256;
@@ -1833,9 +1839,10 @@ void CUDAEngine::class_token_bwd(void* backend_handle, const ClassTokenStats& st
   });
 }
 
-void CUDAEngine::dropout_fwd(void* backend_handle, const DropoutStats& stats, const void* input,
-                             void* output, bool* mask, void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+void CUDAEngine::dropout_fwd(engine_handle backend_handle, const DropoutStats& stats,
+                             const void* input, void* output, bool* mask, void* workspace,
+                             DTypeDesc type_desc) {
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     size_t total_elements = stats.batch_size * stats.channels * stats.spatial_size;
     int threads = 256;
@@ -1851,10 +1858,10 @@ void CUDAEngine::dropout_fwd(void* backend_handle, const DropoutStats& stats, co
   });
 }
 
-void CUDAEngine::dropout_bwd(void* backend_handle, const DropoutStats& stats,
+void CUDAEngine::dropout_bwd(engine_handle backend_handle, const DropoutStats& stats,
                              const void* grad_output, void* grad_input, const bool* mask,
                              double scale_in, void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     size_t total_elements = stats.batch_size * stats.channels * stats.spatial_size;
     int threads = 256;
@@ -1867,9 +1874,9 @@ void CUDAEngine::dropout_bwd(void* backend_handle, const DropoutStats& stats,
   });
 }
 
-void CUDAEngine::relu_fwd(void* backend_handle, const ReLUStats& stats, const void* input,
+void CUDAEngine::relu_fwd(engine_handle backend_handle, const ReLUStats& stats, const void* input,
                           void* output, bool* mask, void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t num_elements = stats.batch_size * stats.spatial_size;
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     if (num_elements > 0) {
@@ -1894,9 +1901,9 @@ void CUDAEngine::relu_fwd(void* backend_handle, const ReLUStats& stats, const vo
   });
 }
 
-void CUDAEngine::relu_inf(void* backend_handle, const ReLUStats& stats, const void* input,
+void CUDAEngine::relu_inf(engine_handle backend_handle, const ReLUStats& stats, const void* input,
                           void* output, void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t num_elements = stats.batch_size * stats.spatial_size;
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     if (num_elements > 0) {
@@ -1920,10 +1927,10 @@ void CUDAEngine::relu_inf(void* backend_handle, const ReLUStats& stats, const vo
   });
 }
 
-void CUDAEngine::relu_bwd(void* backend_handle, const ReLUStats& stats, const void* grad_output,
-                          void* grad_input, const bool* mask, void* workspace,
-                          DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+void CUDAEngine::relu_bwd(engine_handle backend_handle, const ReLUStats& stats,
+                          const void* grad_output, void* grad_input, const bool* mask,
+                          void* workspace, DTypeDesc type_desc) {
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t num_elements = stats.batch_size * stats.spatial_size;
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     if (num_elements > 0) {
@@ -1948,10 +1955,10 @@ void CUDAEngine::relu_bwd(void* backend_handle, const ReLUStats& stats, const vo
   });
 }
 
-void CUDAEngine::embedding_fwd(void* backend_handle, const EmbeddingStats& stats, const void* input,
-                               const void* weight, void* output, void* workspace,
+void CUDAEngine::embedding_fwd(engine_handle backend_handle, const EmbeddingStats& stats,
+                               const void* input, const void* weight, void* output, void* workspace,
                                DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     size_t total_elements = stats.num_indices * stats.embed_dim;
     int blockSize = 256;
@@ -1962,10 +1969,10 @@ void CUDAEngine::embedding_fwd(void* backend_handle, const EmbeddingStats& stats
   });
 }
 
-void CUDAEngine::embedding_bwd(void* backend_handle, const EmbeddingStats& stats,
+void CUDAEngine::embedding_bwd(engine_handle backend_handle, const EmbeddingStats& stats,
                                const void* grad_output, const void* input, void* grad_weight_prev,
                                void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     size_t total_elements = stats.num_indices * stats.embed_dim;
     int blockSize = 256;
@@ -2002,11 +2009,11 @@ __global__ void pos_embedding_bwd_kernel(const T_IO* grad_output, T_PARAM* grad_
   }
 }
 
-void CUDAEngine::positional_embedding_fwd(void* backend_handle,
+void CUDAEngine::positional_embedding_fwd(engine_handle backend_handle,
                                           const PositionalEmbeddingStats& stats, const void* input,
                                           const void* pos_embedding, void* output, void* workspace,
                                           DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE3(
       type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, T_IO, T_PARAM, T_COMPUTE,
       {
@@ -2020,11 +2027,11 @@ void CUDAEngine::positional_embedding_fwd(void* backend_handle,
       });
 }
 
-void CUDAEngine::positional_embedding_bwd(void* backend_handle,
+void CUDAEngine::positional_embedding_bwd(engine_handle backend_handle,
                                           const PositionalEmbeddingStats& stats,
                                           const void* grad_output, void* grad_pos_embedding,
                                           void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE3(
       type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, T_IO, T_PARAM, T_COMPUTE,
       {
@@ -2037,13 +2044,13 @@ void CUDAEngine::positional_embedding_bwd(void* backend_handle,
       });
 }
 
-void CUDAEngine::batchnorm_fwd(void* backend_handle, const BatchNormStats& stats, const void* input,
-                               const void* gamma, const void* beta, void* output,
+void CUDAEngine::batchnorm_fwd(engine_handle backend_handle, const BatchNormStats& stats,
+                               const void* input, const void* gamma, const void* beta, void* output,
                                void* prev_running_mean, void* prev_running_var,
                                void* next_running_mean, void* next_running_var, void* batch_mean,
                                void* batch_invar, void* relu_mask, void* workspace,
                                DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     constexpr int vec_size = VectoredTraits<T>::size;
     if ((stats.height * stats.width) % vec_size == 0) {
@@ -2077,11 +2084,11 @@ void CUDAEngine::batchnorm_fwd(void* backend_handle, const BatchNormStats& stats
   });
 }
 
-void CUDAEngine::batchnorm_infer(void* backend_handle, const BatchNormStats& stats,
+void CUDAEngine::batchnorm_infer(engine_handle backend_handle, const BatchNormStats& stats,
                                  const void* input, const void* gamma, const void* beta,
                                  const void* saved_mean, const void* saved_var, void* output,
                                  void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     size_t total_elements = stats.batch_size * stats.channels * (stats.height * stats.width);
     int threads_per_block = 256;
@@ -2095,7 +2102,7 @@ void CUDAEngine::batchnorm_infer(void* backend_handle, const BatchNormStats& sta
   });
 }
 
-void CUDAEngine::batchnorm_bwd(void* backend_handle, const BatchNormStats& stats,
+void CUDAEngine::batchnorm_bwd(engine_handle backend_handle, const BatchNormStats& stats,
                                const void* grad_output, const void* input, const void* relu_mask,
                                const void* gamma, void* grad_input, void* grad_gamma,
                                void* grad_beta, const void* batch_mean, const void* batch_invar,
@@ -2107,7 +2114,7 @@ void CUDAEngine::batchnorm_bwd(void* backend_handle, const BatchNormStats& stats
   void* grad_beta_temp = workspace;
   workspace = static_cast<char*>(workspace) + grad_beta_temp_size;
 
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     constexpr int vec_size = VectoredTraits<T>::size;
     if ((stats.height * stats.width) % vec_size == 0) {
@@ -2152,34 +2159,35 @@ void CUDAEngine::batchnorm_bwd(void* backend_handle, const BatchNormStats& stats
   });
 }
 
-void CUDAEngine::conv2d_fwd(void* backend_handle, const Conv2DStats& stats, const void* input,
-                            const void* weight, const void* bias, void* output, void* workspace,
-                            DTypeDesc type_desc) {
+void CUDAEngine::conv2d_fwd(engine_handle backend_handle, const Conv2DStats& stats,
+                            const void* input, const void* weight, const void* bias, void* output,
+                            void* workspace, DTypeDesc type_desc) {
   throw std::runtime_error("conv2d_fwd not implemented");
 }
 
-void CUDAEngine::conv2d_dgrad(void* backend_handle, const Conv2DStats& stats,
+void CUDAEngine::conv2d_dgrad(engine_handle backend_handle, const Conv2DStats& stats,
                               const void* grad_output, const void* weight, void* grad_input,
                               void* workspace, DTypeDesc type_desc) {
   throw std::runtime_error("conv2d_dgrad not implemented");
 }
 
-void CUDAEngine::conv2d_wgrad(void* backend_handle, const Conv2DStats& stats,
+void CUDAEngine::conv2d_wgrad(engine_handle backend_handle, const Conv2DStats& stats,
                               const void* grad_output, const void* input, void* grad_weight_prev,
                               void* workspace, DTypeDesc type_desc) {
   throw std::runtime_error("conv2d_wgrad not implemented");
 }
 
-void CUDAEngine::conv2d_bgrad(void* backend_handle, const Conv2DStats& stats,
+void CUDAEngine::conv2d_bgrad(engine_handle backend_handle, const Conv2DStats& stats,
                               const void* grad_output, void* grad_bias_prev, void* workspace,
                               DTypeDesc type_desc) {
   throw std::runtime_error("conv2d_bgrad not implemented");
 }
 
-void CUDAEngine::layernorm_fwd(void* backend_handle, const LayerNormStats& stats, const void* input,
-                               const void* gamma, const void* beta, void* output, void* mean,
-                               void* inv_variance, void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+void CUDAEngine::layernorm_fwd(engine_handle backend_handle, const LayerNormStats& stats,
+                               const void* input, const void* gamma, const void* beta, void* output,
+                               void* mean, void* inv_variance, void* workspace,
+                               DTypeDesc type_desc) {
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     if (stats.batch_size == 0 || stats.channels == 0) return;
     dim3 blocks(static_cast<unsigned int>(stats.batch_size));
@@ -2190,10 +2198,10 @@ void CUDAEngine::layernorm_fwd(void* backend_handle, const LayerNormStats& stats
   });
 }
 
-void CUDAEngine::layernorm_infer(void* backend_handle, const LayerNormStats& stats,
+void CUDAEngine::layernorm_infer(engine_handle backend_handle, const LayerNormStats& stats,
                                  const void* input, const void* gamma, const void* beta,
                                  void* output, void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     if (stats.batch_size == 0 || stats.channels == 0) return;
     dim3 blocks(static_cast<unsigned int>(stats.batch_size));
@@ -2204,7 +2212,7 @@ void CUDAEngine::layernorm_infer(void* backend_handle, const LayerNormStats& sta
   });
 }
 
-void CUDAEngine::layernorm_bwd(void* backend_handle, const LayerNormStats& stats,
+void CUDAEngine::layernorm_bwd(engine_handle backend_handle, const LayerNormStats& stats,
                                const void* grad_output, const void* input, const void* gamma,
                                const void* mean, const void* inv_variance, void* grad_input,
                                void* grad_gamma_prev, void* grad_beta_prev, void* workspace,
@@ -2216,7 +2224,7 @@ void CUDAEngine::layernorm_bwd(void* backend_handle, const LayerNormStats& stats
   void* grad_beta_temp = workspace;
   workspace = static_cast<char*>(workspace) + grad_beta_temp_size;
 
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     if (stats.batch_size == 0 || stats.channels == 0) return;
     dim3 blocks(static_cast<unsigned int>(stats.batch_size));
@@ -2274,34 +2282,35 @@ __global__ void transpose_kernel(const T* input, T* output, CudaTransposeParams 
   output[out_idx] = input[idx];
 }
 
-WorkspaceReq CUDAEngine::query_sdpa_graph(void* backend_handle, const AttentionStats& stats,
+WorkspaceReq CUDAEngine::query_sdpa_graph(engine_handle backend_handle, const AttentionStats& stats,
                                           DTypeDesc type_desc) {
   throw std::runtime_error("SDPA is not implemented for generic CUDAEngine. Use CuDNNEngine.");
 }
 
-void CUDAEngine::sdpa_fwd(void* backend_handle, const AttentionStats& stats, const void* q_data,
-                          const void* k_data, const void* v_data, void* o_data, void* stats_data,
-                          void* workspace, DTypeDesc type_desc) {
+void CUDAEngine::sdpa_fwd(engine_handle backend_handle, const AttentionStats& stats,
+                          const void* q_data, const void* k_data, const void* v_data, void* o_data,
+                          void* stats_data, void* workspace, DTypeDesc type_desc) {
   throw std::runtime_error(
       "SDPA forward is not implemented for generic CUDAEngine. Use CuDNNEngine.");
 }
 
-void CUDAEngine::sdpa_bwd(void* backend_handle, const AttentionStats& stats, const void* q_data,
-                          const void* k_data, const void* v_data, const void* o_data,
-                          const void* dO_data, const void* stats_data, void* dQ_data, void* dK_data,
-                          void* dV_data, void* workspace, DTypeDesc type_desc) {
+void CUDAEngine::sdpa_bwd(engine_handle backend_handle, const AttentionStats& stats,
+                          const void* q_data, const void* k_data, const void* v_data,
+                          const void* o_data, const void* dO_data, const void* stats_data,
+                          void* dQ_data, void* dK_data, void* dV_data, void* workspace,
+                          DTypeDesc type_desc) {
   throw std::runtime_error(
       "SDPA backward is not implemented for generic CUDAEngine. Use CuDNNEngine.");
 }
 
-WorkspaceReq CUDAEngine::query_transpose_graph(void* backend_handle, const TransposeStats& stats,
-                                               DTypeDesc type_desc) {
+WorkspaceReq CUDAEngine::query_transpose_graph(engine_handle backend_handle,
+                                               const TransposeStats& stats, DTypeDesc type_desc) {
   return WorkspaceReq{0, 0, 0};
 }
 
-void CUDAEngine::transpose(void* backend_handle, const TransposeStats& stats, const void* input,
-                           void* output, void* workspace, DTypeDesc type_desc) {
-  cudaStream_t stream = static_cast<cudaStream_t>(backend_handle);
+void CUDAEngine::transpose(engine_handle backend_handle, const TransposeStats& stats,
+                           const void* input, void* output, void* workspace, DTypeDesc type_desc) {
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
 
   CudaTransposeParams p;
   p.ndim = stats.ndim;

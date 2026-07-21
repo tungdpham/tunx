@@ -17,12 +17,12 @@ namespace tunx {
 // default allocator
 class DeviceAllocator : public IAllocator {
 public:
-  DeviceAllocator(const Device& device)
+  DeviceAllocator(Device& device)
       : device_(device) {}
 
-  static DeviceAllocator& instance(const Device& device) {
+  static DeviceAllocator& instance(Device& device) {
     static std::mutex registry_mutex;
-    static std::unordered_map<const Device*, std::unique_ptr<DeviceAllocator>> registry;
+    static std::unordered_map<Device*, std::unique_ptr<DeviceAllocator>> registry;
     std::lock_guard<std::mutex> lock(registry_mutex);
     if (registry.find(&device) == registry.end()) {
       registry[&device] = std::make_unique<DeviceAllocator>(device);
@@ -31,7 +31,7 @@ public:
   }
 
   dptr allocate(size_t size) override {
-    void *ptr = device_->allocate_aligned_memory(size, DEFAULT_ALIGNMENT);
+    void* ptr = device_->allocate_aligned_memory(size, DEFAULT_ALIGNMENT);
     device_storage* storage_ptr = new device_storage(*device_, ptr, size, DEFAULT_ALIGNMENT);
     auto storage = std::shared_ptr<device_storage>(storage_ptr, [this](device_storage* storage) {
       if (storage) {
@@ -50,10 +50,10 @@ public:
     // no-op since we don't cache any memory blocks
   }
 
-  const Device& device() const override { return *device_; }
+  Device& device() const override { return *device_; }
 
 private:
-  csref<Device> device_;
+  sref<Device> device_;
 };
 
 inline DeviceAllocator& HostAllocator() { return DeviceAllocator::instance(getHost()); }

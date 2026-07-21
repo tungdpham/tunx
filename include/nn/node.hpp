@@ -62,7 +62,8 @@ public:
     }
     return false;
   }
-  void zero_grads() { grad_.clear(); }
+  // drop refs of all gradients
+  void clear_grads() { grad_.clear(); }
 
 private:
   struct Entry {

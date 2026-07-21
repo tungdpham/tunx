@@ -26,6 +26,6 @@ public:
   // through device allocation path. This is optional and can be a no-op for some allocators.
   virtual void reserve(size_t size) = 0;
 
-  virtual const Device &device() const = 0;
+  virtual Device &device() const = 0;
 };
 }  // namespace tunx

@@ -3,8 +3,8 @@
 
 #include "data_loading/dataset_factory.hpp"
 #include "device/device_manager.hpp"
-#include "device/flow.hpp"
 #include "device/pool_allocator.hpp"
+#include "device/stream.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/batchnorm.hpp"
@@ -14,13 +14,12 @@
 #include "nn/metrics.hpp"
 #include "nn/optimizers.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
 
 using namespace std;
 using namespace tunx;
 
-Graph make_mlp(const Device& device) {
+Graph make_mlp(Device& device) {
   Graph graph;
 
   auto input = graph.input();
@@ -43,13 +42,13 @@ Graph make_mlp(const Device& device) {
   graph.set_io_dtype(DType_t::BF16);
   graph.set_param_dtype(DType_t::BF16);
 
-  auto& allocator = PoolAllocator::instance(device, defaultFlowHandle);
+  auto& allocator = PoolAllocator::instance(device, device.default_stream());
   graph.compile(allocator);
 
   return graph;
 }
 
-Graph make_mnist_model(const Device& device) {
+Graph make_mnist_model(Device& device) {
   Graph graph;
 
   auto input = graph.input("input");
@@ -81,7 +80,7 @@ Graph make_mnist_model(const Device& device) {
   graph.set_io_dtype(DType_t::BF16);
   graph.set_param_dtype(DType_t::BF16);
 
-  auto& allocator = PoolAllocator::instance(device, defaultFlowHandle);
+  auto& allocator = PoolAllocator::instance(device, device.default_stream());
 
   graph.compile(allocator);
 
@@ -91,7 +90,7 @@ Graph make_mnist_model(const Device& device) {
 signed main() {
   cout << "Testing Graph API v2" << endl;
 
-  const Device& device = getGPU();
+  Device& device = getGPU();
   auto graph = make_mnist_model(device);
 
   // auto graph = make_mlp(device);

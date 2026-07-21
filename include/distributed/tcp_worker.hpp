@@ -10,8 +10,8 @@
 #include <memory>
 
 #include "device/device_manager.hpp"
-#include "device/flow.hpp"
 #include "device/pool_allocator.hpp"
+#include "device/stream.hpp"
 #include "distributed/endpoint.hpp"
 #include "tcp_communicator.hpp"
 #include "worker.hpp"
@@ -37,8 +37,8 @@ public:
   explicit TCPWorker(Endpoint endpoint, DeviceID device_id,
                      TCPCommunicator::Config config = TCPCommunicator::Config())
       : Worker(device_id) {
-    const auto &device = DeviceManager::instance().get(device_id);
-    auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
+    auto &device = DeviceManager::instance().get(device_id);
+    auto &allocator = PoolAllocator::instance(device, device.default_stream());
     auto communicator = std::make_unique<TCPCommunicator>(endpoint, allocator, config);
 
     communicator->start_server();

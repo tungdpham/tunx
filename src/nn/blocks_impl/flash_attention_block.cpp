@@ -258,9 +258,9 @@ Vec<Tensor> FlashAttentionBlockImpl::backward_impl(const Vec<Tensor> &grad_outpu
   size_t size = grad_q_in.size();
 
   DISPATCH_IO_DTYPE(ops::add, grad_q_in.data_ptr(), grad_k_in.data_ptr(), grad_input.data_ptr(),
-                    size, defaultFlowHandle);
+                    size, nullptr);
   DISPATCH_IO_DTYPE(ops::add, grad_input.data_ptr(), grad_v_in.data_ptr(), grad_input.data_ptr(),
-                    size, defaultFlowHandle);
+                    size, nullptr);
 
   return {grad_input};
 }

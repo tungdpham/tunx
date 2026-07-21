@@ -1,3 +1,5 @@
+#include "device/stream.hpp"
+#include "nn/engines/engine_handle.hpp"
 #ifdef TUNX_USE_CUDNN
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
@@ -113,10 +115,9 @@ static fe::DataType_t to_fe_compute_type(DType_t data_type) {
   return to_fe_data_type(data_type);
 }
 
-void* CuDNNEngine::create_backend_handle() {
-  cudnnHandle_t handle;
-  cudnnCreate(&handle);
-  return handle;
+engine_handle CuDNNEngine::create_handle(stream s) {
+  std::shared_ptr<IEngineHandle> handle = std::make_shared<CuDNNEngineHandle>(s);
+  return engine_handle(handle);
 }
 
 struct dense_fwd_graph {
@@ -1669,9 +1670,9 @@ struct sdpa_bwd_graph {
   }
 };
 
-WorkspaceReq CuDNNEngine::query_dense_graph(void* backend_handle, const DenseStats& stats,
+WorkspaceReq CuDNNEngine::query_dense_graph(engine_handle backend_handle, const DenseStats& stats,
                                             DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey fwd_key{
       .op_type = OpType::DENSE_FWD,
@@ -1713,9 +1714,9 @@ WorkspaceReq CuDNNEngine::query_dense_graph(void* backend_handle, const DenseSta
   return {fwd_workspace, bwd_workspace, fwd_workspace};
 }
 
-WorkspaceReq CuDNNEngine::query_avgpool_graph(void* backend_handle, const AvgPool2DStats& stats,
-                                              DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+WorkspaceReq CuDNNEngine::query_avgpool_graph(engine_handle backend_handle,
+                                              const AvgPool2DStats& stats, DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey fwd_key{
       .op_type = OpType::AVG_POOL_FWD,
@@ -1737,9 +1738,9 @@ WorkspaceReq CuDNNEngine::query_avgpool_graph(void* backend_handle, const AvgPoo
   return {fwd_graph.workspace_size, 0, fwd_graph.workspace_size};
 }
 
-WorkspaceReq CuDNNEngine::query_maxpool2d_graph(void* backend_handle, const MaxPool2DStats& stats,
-                                                DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+WorkspaceReq CuDNNEngine::query_maxpool2d_graph(engine_handle backend_handle,
+                                                const MaxPool2DStats& stats, DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey fwd_key{
       .op_type = OpType::MAXPOOL2D_FWD,
@@ -1779,38 +1780,38 @@ WorkspaceReq CuDNNEngine::query_maxpool2d_graph(void* backend_handle, const MaxP
   return {fwd_graph.workspace_size, 0, inf_graph.workspace_size};
 }
 
-WorkspaceReq CuDNNEngine::query_class_token_graph(void* backend_handle,
+WorkspaceReq CuDNNEngine::query_class_token_graph(engine_handle backend_handle,
                                                   const ClassTokenStats& stats,
                                                   DTypeDesc type_desc) {
   size_t temp = stats.embed_dim * get_dtype_size(type_desc.param_dtype);
   return {0, temp, 0};
 }
 
-WorkspaceReq CuDNNEngine::query_dropout_graph(void* backend_handle, const DropoutStats& stats,
-                                              DTypeDesc type_desc) {
+WorkspaceReq CuDNNEngine::query_dropout_graph(engine_handle backend_handle,
+                                              const DropoutStats& stats, DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CuDNNEngine::query_embedding_graph(void* backend_handle, const EmbeddingStats& stats,
-                                                DTypeDesc type_desc) {
+WorkspaceReq CuDNNEngine::query_embedding_graph(engine_handle backend_handle,
+                                                const EmbeddingStats& stats, DTypeDesc type_desc) {
   size_t temp = stats.vocab_size * stats.embed_dim * get_dtype_size(type_desc.param_dtype);
   return {0, temp, 0};
 }
 
-WorkspaceReq CuDNNEngine::query_positional_embedding_graph(void* backend_handle,
+WorkspaceReq CuDNNEngine::query_positional_embedding_graph(engine_handle backend_handle,
                                                            const PositionalEmbeddingStats& stats,
                                                            DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CuDNNEngine::query_relu_graph(void* backend_handle, const ReLUStats& stats,
+WorkspaceReq CuDNNEngine::query_relu_graph(engine_handle backend_handle, const ReLUStats& stats,
                                            DTypeDesc type_desc) {
   return {0, 0, 0};
 }
 
-WorkspaceReq CuDNNEngine::query_batchnorm_graph(void* backend_handle, const BatchNormStats& stats,
-                                                DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+WorkspaceReq CuDNNEngine::query_batchnorm_graph(engine_handle backend_handle,
+                                                const BatchNormStats& stats, DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey fwd_key{
       .op_type = OpType::BATCHNORM_FWD,
@@ -1859,9 +1860,9 @@ WorkspaceReq CuDNNEngine::query_batchnorm_graph(void* backend_handle, const Batc
   return {fwd_graph.workspace_size, bwd_graph.workspace_size + temp, inf_graph.workspace_size};
 }
 
-WorkspaceReq CuDNNEngine::query_conv2d_graph(void* backend_handle, const Conv2DStats& stats,
+WorkspaceReq CuDNNEngine::query_conv2d_graph(engine_handle backend_handle, const Conv2DStats& stats,
                                              DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey fwd_key{
       .op_type = OpType::CONV2D_FWD,
@@ -1954,9 +1955,9 @@ WorkspaceReq CuDNNEngine::query_conv2d_graph(void* backend_handle, const Conv2DS
   return {fwd_ws, bwd_ws, fwd_ws};
 }
 
-WorkspaceReq CuDNNEngine::query_sdpa_graph(void* backend_handle, const AttentionStats& stats,
-                                           DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+WorkspaceReq CuDNNEngine::query_sdpa_graph(engine_handle backend_handle,
+                                           const AttentionStats& stats, DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey fwd_key{
       .op_type = OpType::SDPA_FWD,
@@ -1993,10 +1994,10 @@ WorkspaceReq CuDNNEngine::query_sdpa_graph(void* backend_handle, const Attention
                       static_cast<size_t>(fwd_workspace_size)};
 }
 
-void CuDNNEngine::sdpa_fwd(void* backend_handle, const AttentionStats& stats, const void* q_data,
-                           const void* k_data, const void* v_data, void* o_data, void* stats_data,
-                           void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+void CuDNNEngine::sdpa_fwd(engine_handle backend_handle, const AttentionStats& stats,
+                           const void* q_data, const void* k_data, const void* v_data, void* o_data,
+                           void* stats_data, void* workspace, DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey key{
       .op_type = OpType::SDPA_FWD,
@@ -2022,11 +2023,12 @@ void CuDNNEngine::sdpa_fwd(void* backend_handle, const AttentionStats& stats, co
   ensure_ok(status, "sdpa_fwd execute");
 }
 
-void CuDNNEngine::sdpa_bwd(void* backend_handle, const AttentionStats& stats, const void* q_data,
-                           const void* k_data, const void* v_data, const void* o_data,
-                           const void* dO_data, const void* stats_data, void* dQ_data,
-                           void* dK_data, void* dV_data, void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+void CuDNNEngine::sdpa_bwd(engine_handle backend_handle, const AttentionStats& stats,
+                           const void* q_data, const void* k_data, const void* v_data,
+                           const void* o_data, const void* dO_data, const void* stats_data,
+                           void* dQ_data, void* dK_data, void* dV_data, void* workspace,
+                           DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey key{
       .op_type = OpType::SDPA_BWD,
@@ -2056,9 +2058,9 @@ void CuDNNEngine::sdpa_bwd(void* backend_handle, const AttentionStats& stats, co
   ensure_ok(status, "sdpa_bwd execute");
 }
 
-WorkspaceReq CuDNNEngine::query_layernorm_graph(void* backend_handle, const LayerNormStats& stats,
-                                                DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+WorkspaceReq CuDNNEngine::query_layernorm_graph(engine_handle backend_handle,
+                                                const LayerNormStats& stats, DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey fwd_key{
       .op_type = OpType::LAYERNORM_FWD,
@@ -2101,10 +2103,10 @@ WorkspaceReq CuDNNEngine::query_layernorm_graph(void* backend_handle, const Laye
   return {fwd_graph.workspace_size, bwd_graph.workspace_size + temp, inf_graph.workspace_size};
 }
 
-void CuDNNEngine::dense_fwd(void* backend_handle, const DenseStats& stats, const void* input,
-                            const void* weight, const void* bias, void* output, void* workspace,
-                            DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+void CuDNNEngine::dense_fwd(engine_handle backend_handle, const DenseStats& stats,
+                            const void* input, const void* weight, const void* bias, void* output,
+                            void* workspace, DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::DENSE_FWD,
       .dtype_desc = type_desc,
@@ -2127,10 +2129,10 @@ void CuDNNEngine::dense_fwd(void* backend_handle, const DenseStats& stats, const
   ensure_ok(status, "dense_fwd execute");
 }
 
-void CuDNNEngine::dense_wgrad(void* backend_handle, const DenseStats& stats,
+void CuDNNEngine::dense_wgrad(engine_handle backend_handle, const DenseStats& stats,
                               const void* grad_output, const void* input, void* grad_weight,
                               void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::DENSE_WGRAD,
       .dtype_desc = type_desc,
@@ -2154,10 +2156,10 @@ void CuDNNEngine::dense_wgrad(void* backend_handle, const DenseStats& stats,
   ensure_ok(status, "dense_wgrad execute");
 }
 
-void CuDNNEngine::dense_dgrad(void* backend_handle, const DenseStats& stats,
+void CuDNNEngine::dense_dgrad(engine_handle backend_handle, const DenseStats& stats,
                               const void* grad_output, const void* weight, void* grad_input,
                               void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::DENSE_DGRAD,
       .dtype_desc = type_desc,
@@ -2178,10 +2180,10 @@ void CuDNNEngine::dense_dgrad(void* backend_handle, const DenseStats& stats,
   ensure_ok(status, "dense_dgrad execute");
 }
 
-void CuDNNEngine::dense_bgrad(void* backend_handle, const DenseStats& stats,
+void CuDNNEngine::dense_bgrad(engine_handle backend_handle, const DenseStats& stats,
                               const void* grad_output, void* grad_bias, void* workspace,
                               DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream = nullptr;
   cudnnGetStream(handle, &stream);
 
@@ -2203,9 +2205,10 @@ void CuDNNEngine::dense_bgrad(void* backend_handle, const DenseStats& stats,
   }
 }
 
-void CuDNNEngine::avgpool_fwd(void* backend_handle, const AvgPool2DStats& stats, const void* input,
-                              void* output, void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+void CuDNNEngine::avgpool_fwd(engine_handle backend_handle, const AvgPool2DStats& stats,
+                              const void* input, void* output, void* workspace,
+                              DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::AVG_POOL_FWD,
       .dtype_desc = type_desc,
@@ -2228,10 +2231,10 @@ void CuDNNEngine::avgpool_fwd(void* backend_handle, const AvgPool2DStats& stats,
   ensure_ok(status, "avgpool fwd execute");
 }
 
-void CuDNNEngine::avgpool_bwd(void* backend_handle, const AvgPool2DStats& stats,
+void CuDNNEngine::avgpool_bwd(engine_handle backend_handle, const AvgPool2DStats& stats,
                               const void* grad_output, void* grad_input, void* workspace,
                               DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
 
@@ -2251,10 +2254,10 @@ void CuDNNEngine::avgpool_bwd(void* backend_handle, const AvgPool2DStats& stats,
   });
 }
 
-void CuDNNEngine::maxpool2d_fwd(void* backend_handle, const MaxPool2DStats& stats,
+void CuDNNEngine::maxpool2d_fwd(engine_handle backend_handle, const MaxPool2DStats& stats,
                                 const void* input, void* output, void* mask, void* workspace,
                                 DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::MAXPOOL2D_FWD,
       .dtype_desc = type_desc,
@@ -2280,10 +2283,10 @@ void CuDNNEngine::maxpool2d_fwd(void* backend_handle, const MaxPool2DStats& stat
   ensure_ok(status, "avgpool fwd execute");
 }
 
-void CuDNNEngine::maxpool2d_infer(void* backend_handle, const MaxPool2DStats& stats,
+void CuDNNEngine::maxpool2d_infer(engine_handle backend_handle, const MaxPool2DStats& stats,
                                   const void* input, void* output, void* workspace,
                                   DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::MAXPOOL2D_INFER,
       .dtype_desc = type_desc,
@@ -2309,11 +2312,11 @@ void CuDNNEngine::maxpool2d_infer(void* backend_handle, const MaxPool2DStats& st
   ensure_ok(status, "maxpool2d infer execute");
 }
 
-void CuDNNEngine::maxpool2d_bwd(void* backend_handle, const MaxPool2DStats& stats,
+void CuDNNEngine::maxpool2d_bwd(engine_handle backend_handle, const MaxPool2DStats& stats,
                                 const void* grad_output, void* grad_input, const void* mask,
                                 void* workspace, DTypeDesc type_desc) {
   cudaStream_t stream;
-  cudnnGetStream(static_cast<cudnnHandle_t>(backend_handle), &stream);
+  cudnnGetStream(backend_handle.as<CuDNNEngineHandle>()->handle(), &stream);
 
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
@@ -2333,10 +2336,10 @@ void CuDNNEngine::maxpool2d_bwd(void* backend_handle, const MaxPool2DStats& stat
   });
 }
 
-void CuDNNEngine::class_token_fwd(void* backend_handle, const ClassTokenStats& stats,
+void CuDNNEngine::class_token_fwd(engine_handle backend_handle, const ClassTokenStats& stats,
                                   const void* input, const void* token, void* output,
                                   void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
 
@@ -2352,10 +2355,10 @@ void CuDNNEngine::class_token_fwd(void* backend_handle, const ClassTokenStats& s
   });
 }
 
-void CuDNNEngine::class_token_bwd(void* backend_handle, const ClassTokenStats& stats,
+void CuDNNEngine::class_token_bwd(engine_handle backend_handle, const ClassTokenStats& stats,
                                   const void* grad_output, void* grad_input, void* grad_token,
                                   void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
 
@@ -2371,9 +2374,10 @@ void CuDNNEngine::class_token_bwd(void* backend_handle, const ClassTokenStats& s
   });
 }
 
-void CuDNNEngine::dropout_fwd(void* backend_handle, const DropoutStats& stats, const void* input,
-                              void* output, bool* mask, void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+void CuDNNEngine::dropout_fwd(engine_handle backend_handle, const DropoutStats& stats,
+                              const void* input, void* output, bool* mask, void* workspace,
+                              DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
 
@@ -2390,10 +2394,10 @@ void CuDNNEngine::dropout_fwd(void* backend_handle, const DropoutStats& stats, c
   });
 }
 
-void CuDNNEngine::dropout_bwd(void* backend_handle, const DropoutStats& stats,
+void CuDNNEngine::dropout_bwd(engine_handle backend_handle, const DropoutStats& stats,
                               const void* grad_output, void* grad_input, const bool* mask,
                               double scale, void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
 
@@ -2408,9 +2412,9 @@ void CuDNNEngine::dropout_bwd(void* backend_handle, const DropoutStats& stats,
   });
 }
 
-void CuDNNEngine::relu_fwd(void* backend_handle, const ReLUStats& stats, const void* input,
+void CuDNNEngine::relu_fwd(engine_handle backend_handle, const ReLUStats& stats, const void* input,
                            void* output, bool* mask, void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
 
@@ -2424,9 +2428,9 @@ void CuDNNEngine::relu_fwd(void* backend_handle, const ReLUStats& stats, const v
   });
 }
 
-void CuDNNEngine::relu_inf(void* backend_handle, const ReLUStats& stats, const void* input,
+void CuDNNEngine::relu_inf(engine_handle backend_handle, const ReLUStats& stats, const void* input,
                            void* output, void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
 
@@ -2440,10 +2444,10 @@ void CuDNNEngine::relu_inf(void* backend_handle, const ReLUStats& stats, const v
   });
 }
 
-void CuDNNEngine::relu_bwd(void* backend_handle, const ReLUStats& stats, const void* grad_output,
-                           void* grad_input, const bool* mask, void* workspace,
-                           DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+void CuDNNEngine::relu_bwd(engine_handle backend_handle, const ReLUStats& stats,
+                           const void* grad_output, void* grad_input, const bool* mask,
+                           void* workspace, DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
 
@@ -2457,10 +2461,10 @@ void CuDNNEngine::relu_bwd(void* backend_handle, const ReLUStats& stats, const v
   });
 }
 
-void CuDNNEngine::embedding_fwd(void* backend_handle, const EmbeddingStats& stats,
+void CuDNNEngine::embedding_fwd(engine_handle backend_handle, const EmbeddingStats& stats,
                                 const void* input, const void* weight, void* output,
                                 void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
 
@@ -2475,10 +2479,10 @@ void CuDNNEngine::embedding_fwd(void* backend_handle, const EmbeddingStats& stat
   });
 }
 
-void CuDNNEngine::embedding_bwd(void* backend_handle, const EmbeddingStats& stats,
+void CuDNNEngine::embedding_bwd(engine_handle backend_handle, const EmbeddingStats& stats,
                                 const void* grad_output, const void* input, void* grad_weight,
                                 void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
 
@@ -2519,11 +2523,11 @@ __global__ void pos_embedding_bwd_kernel(const T_IO* grad_output, T_PARAM* grad_
   }
 }
 
-void CuDNNEngine::positional_embedding_fwd(void* backend_handle,
+void CuDNNEngine::positional_embedding_fwd(engine_handle backend_handle,
                                            const PositionalEmbeddingStats& stats, const void* input,
                                            const void* pos_embedding, void* output, void* workspace,
                                            DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
   DISPATCH_DTYPE3(
@@ -2539,11 +2543,11 @@ void CuDNNEngine::positional_embedding_fwd(void* backend_handle,
       });
 }
 
-void CuDNNEngine::positional_embedding_bwd(void* backend_handle,
+void CuDNNEngine::positional_embedding_bwd(engine_handle backend_handle,
                                            const PositionalEmbeddingStats& stats,
                                            const void* grad_output, void* grad_pos_embedding,
                                            void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
   DISPATCH_DTYPE3(
@@ -2558,13 +2562,13 @@ void CuDNNEngine::positional_embedding_bwd(void* backend_handle,
       });
 }
 
-void CuDNNEngine::batchnorm_fwd(void* backend_handle, const BatchNormStats& stats,
+void CuDNNEngine::batchnorm_fwd(engine_handle backend_handle, const BatchNormStats& stats,
                                 const void* input, const void* gamma, const void* beta,
                                 void* output, void* prev_running_mean, void* prev_running_var,
                                 void* next_running_mean, void* next_running_var, void* batch_mean,
                                 void* batch_invar, void* relu_mask, void* workspace,
                                 DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::BATCHNORM_FWD,
       .dtype_desc = type_desc,
@@ -2598,11 +2602,11 @@ void CuDNNEngine::batchnorm_fwd(void* backend_handle, const BatchNormStats& stat
   ensure_ok(status, "batchnorm fwd execute");
 }
 
-void CuDNNEngine::batchnorm_infer(void* backend_handle, const BatchNormStats& stats,
+void CuDNNEngine::batchnorm_infer(engine_handle backend_handle, const BatchNormStats& stats,
                                   const void* input, const void* gamma, const void* beta,
                                   const void* saved_mean, const void* saved_var, void* output,
                                   void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::BATCHNORM_INFER,
       .dtype_desc = type_desc,
@@ -2628,7 +2632,7 @@ void CuDNNEngine::batchnorm_infer(void* backend_handle, const BatchNormStats& st
   ensure_ok(status, "batchnorm infer execute");
 }
 
-void CuDNNEngine::batchnorm_bwd(void* backend_handle, const BatchNormStats& stats,
+void CuDNNEngine::batchnorm_bwd(engine_handle backend_handle, const BatchNormStats& stats,
                                 const void* grad_output, const void* input, const void* relu_mask,
                                 const void* gamma, void* grad_input, void* grad_gamma,
                                 void* grad_beta, const void* batch_mean, const void* batch_invar,
@@ -2642,7 +2646,7 @@ void CuDNNEngine::batchnorm_bwd(void* backend_handle, const BatchNormStats& stat
 
   assert(grad_gamma != grad_gamma_temp && "grad_gamma should be different from grad_gamma_temp");
   assert(grad_beta != grad_beta_temp && "grad_beta should be different from grad_beta_temp");
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::BATCHNORM_BWD,
       .dtype_desc = type_desc,
@@ -2681,10 +2685,10 @@ void CuDNNEngine::batchnorm_bwd(void* backend_handle, const BatchNormStats& stat
   tunx::cuda::axpy(grad_beta_temp, grad_beta, num_elements, type_desc.param_dtype, stream);
 }
 
-void CuDNNEngine::conv2d_fwd(void* backend_handle, const Conv2DStats& stats, const void* input,
-                             const void* weight, const void* bias, void* output, void* workspace,
-                             DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+void CuDNNEngine::conv2d_fwd(engine_handle backend_handle, const Conv2DStats& stats,
+                             const void* input, const void* weight, const void* bias, void* output,
+                             void* workspace, DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::CONV2D_FWD,
       .dtype_desc = type_desc,
@@ -2717,10 +2721,10 @@ void CuDNNEngine::conv2d_fwd(void* backend_handle, const Conv2DStats& stats, con
   ensure_ok(status, "conv2d fwd execute");
 }
 
-void CuDNNEngine::conv2d_dgrad(void* backend_handle, const Conv2DStats& stats,
+void CuDNNEngine::conv2d_dgrad(engine_handle backend_handle, const Conv2DStats& stats,
                                const void* grad_output, const void* weight, void* grad_input,
                                void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::CONV2D_DGRAD,
       .dtype_desc = type_desc,
@@ -2748,7 +2752,7 @@ void CuDNNEngine::conv2d_dgrad(void* backend_handle, const Conv2DStats& stats,
   ensure_ok(status, "conv2d dgrad execute");
 }
 
-void CuDNNEngine::conv2d_wgrad(void* backend_handle, const Conv2DStats& stats,
+void CuDNNEngine::conv2d_wgrad(engine_handle backend_handle, const Conv2DStats& stats,
                                const void* grad_output, const void* input, void* grad_weight,
                                void* workspace, DTypeDesc type_desc) {
   size_t grad_weight_temp_size = stats.out_channels * stats.kernel_h * stats.kernel_w *
@@ -2756,7 +2760,7 @@ void CuDNNEngine::conv2d_wgrad(void* backend_handle, const Conv2DStats& stats,
   void* grad_weight_temp = workspace;
   workspace = static_cast<char*>(workspace) + grad_weight_temp_size;
 
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::CONV2D_WGRAD,
       .dtype_desc = type_desc,
@@ -2791,14 +2795,14 @@ void CuDNNEngine::conv2d_wgrad(void* backend_handle, const Conv2DStats& stats,
   tunx::cuda::axpy(grad_weight_temp, grad_weight, num_elements, type_desc.param_dtype, stream);
 }
 
-void CuDNNEngine::conv2d_bgrad(void* backend_handle, const Conv2DStats& stats,
+void CuDNNEngine::conv2d_bgrad(engine_handle backend_handle, const Conv2DStats& stats,
                                const void* grad_output, void* grad_bias, void* workspace,
                                DTypeDesc type_desc) {
   size_t grad_bias_temp_size = stats.out_channels * get_dtype_size(type_desc.param_dtype);
   void* grad_bias_temp = workspace;
   workspace = static_cast<char*>(workspace) + grad_bias_temp_size;
 
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::CONV2D_BGRAD,
       .dtype_desc = type_desc,
@@ -2833,11 +2837,11 @@ void CuDNNEngine::conv2d_bgrad(void* backend_handle, const Conv2DStats& stats,
   tunx::cuda::axpy(grad_bias_temp, grad_bias, num_elements, type_desc.param_dtype, stream);
 }
 
-void CuDNNEngine::layernorm_fwd(void* backend_handle, const LayerNormStats& stats,
+void CuDNNEngine::layernorm_fwd(engine_handle backend_handle, const LayerNormStats& stats,
                                 const void* input, const void* gamma, const void* beta,
                                 void* output, void* mean, void* inv_variance, void* workspace,
                                 DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::LAYERNORM_FWD,
       .dtype_desc = type_desc,
@@ -2862,10 +2866,10 @@ void CuDNNEngine::layernorm_fwd(void* backend_handle, const LayerNormStats& stat
   ensure_ok(status, "layernorm fwd execute");
 }
 
-void CuDNNEngine::layernorm_infer(void* backend_handle, const LayerNormStats& stats,
+void CuDNNEngine::layernorm_infer(engine_handle backend_handle, const LayerNormStats& stats,
                                   const void* input, const void* gamma, const void* beta,
                                   void* output, void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::LAYERNORM_INFER,
       .dtype_desc = type_desc,
@@ -2889,7 +2893,7 @@ void CuDNNEngine::layernorm_infer(void* backend_handle, const LayerNormStats& st
   ensure_ok(status, "layernorm infer execute");
 }
 
-void CuDNNEngine::layernorm_bwd(void* backend_handle, const LayerNormStats& stats,
+void CuDNNEngine::layernorm_bwd(engine_handle backend_handle, const LayerNormStats& stats,
                                 const void* grad_output, const void* input, const void* gamma,
                                 const void* mean, const void* inv_variance, void* grad_input,
                                 void* grad_gamma, void* grad_beta, void* workspace,
@@ -2903,7 +2907,7 @@ void CuDNNEngine::layernorm_bwd(void* backend_handle, const LayerNormStats& stat
 
   assert(grad_gamma != grad_gamma_temp && "grad_gamma should be different from grad_gamma_temp");
   assert(grad_beta != grad_beta_temp && "grad_beta should be different from grad_beta_temp");
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::LAYERNORM_BWD,
       .dtype_desc = type_desc,
@@ -2937,8 +2941,8 @@ void CuDNNEngine::layernorm_bwd(void* backend_handle, const LayerNormStats& stat
   tunx::cuda::axpy(grad_beta_temp, grad_beta, num_elements, type_desc.param_dtype, stream);
 }
 
-WorkspaceReq CuDNNEngine::query_transpose_graph(void* backend_handle, const TransposeStats& stats,
-                                                DTypeDesc type_desc) {
+WorkspaceReq CuDNNEngine::query_transpose_graph(engine_handle backend_handle,
+                                                const TransposeStats& stats, DTypeDesc type_desc) {
   return WorkspaceReq{0, 0, 0};
 }
 
@@ -2979,9 +2983,9 @@ __global__ void cudnn_transpose_kernel(const T* input, T* output, CuDNNTranspose
 }
 }  // namespace
 
-void CuDNNEngine::transpose(void* backend_handle, const TransposeStats& stats, const void* input,
-                            void* output, void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = static_cast<cudnnHandle_t>(backend_handle);
+void CuDNNEngine::transpose(engine_handle backend_handle, const TransposeStats& stats,
+                            const void* input, void* output, void* workspace, DTypeDesc type_desc) {
+  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   cudaStream_t stream;
   cudnnGetStream(handle, &stream);
 

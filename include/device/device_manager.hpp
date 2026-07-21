@@ -6,6 +6,7 @@
  */
 #pragma once
 
+#include <iostream>
 #include <map>
 #include <memory>
 #include <ostream>
@@ -16,16 +17,18 @@
 
 namespace tunx {
 
-inline Vec<std::string> split(const std::string &str, char delim) {
-  Vec<std::string> res;
+inline std::vector<std::string> split(const std::string &str, char delim) {
+  std::vector<std::string> res;
   auto left = str.begin();
+
   for (auto it = str.begin(); it != str.end(); ++it) {
     if (*it == delim) {
       res.emplace_back(left, it);
       left = it + 1;
     }
   }
-  if (left != str.end()) res.emplace_back(&*left, str.end() - left);
+  res.emplace_back(left, str.end());
+
   return res;
 }
 
@@ -42,6 +45,11 @@ struct DeviceID {
 
   static DeviceID from_string(const std::string &str) {
     Vec<std::string> parts = split(str, ':');
+    std::cout << "Parts: ";
+    for (auto s : parts) {
+      std::cout << s << " ";
+    }
+    std::cout << std::endl;
     int id = std::stoi(parts[1]);
     return DeviceID{device_type_from_string(parts[0]), id};
   }
@@ -86,8 +94,8 @@ public:
    * @param id The ID of the device to retrieve.
    * @return The device with the specified ID.
    */
-  const Device &get(DeviceType type, int id) const;
-  const Device &get(DeviceID device_id) const;
+  Device &get(DeviceType type, int id) const;
+  Device &get(DeviceID device_id) const;
 
   /**
    * Get all available device ids.
@@ -105,8 +113,8 @@ private:
 };
 
 void initializeDefaultDevices();
-const Device &getGPU(size_t gpu_index = 0);
-const Device &getHost();
+Device &getGPU(size_t gpu_index = 0);
+Device &getHost();
 
 inline std::ostream &operator<<(std::ostream &os, const tunx::DeviceID &device_id) {
   os << tunx::device_type_to_string(device_id.type) << ":" << device_id.id;

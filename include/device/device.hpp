@@ -10,7 +10,7 @@
 #include <string>
 
 #include "common/endian.hpp"
-#include "device/flow.hpp"
+#include "device/stream.hpp"
 #include "device_type.hpp"
 
 namespace tunx {
@@ -21,8 +21,8 @@ public:
   virtual ~Device();
   Device(Device &&other) noexcept;
   Device &operator=(Device &&other) noexcept;
-  Device(const Device &) = delete;
-  Device &operator=(const Device &) = delete;
+  Device(Device &) = delete;
+  Device &operator=(Device &) = delete;
 
   bool operator==(const Device &other) const;
 
@@ -37,8 +37,8 @@ public:
   virtual void *allocate_aligned_memory(size_t size, size_t alignment) const = 0;
   virtual void deallocate_aligned_memory(void *ptr) const = 0;
   virtual Endianness get_endianness() const = 0;
-  virtual void create_flow(flowHandle_t handle) const = 0;
-  virtual Flow *get_flow(flowHandle_t handle) const = 0;
+  virtual void create_stream(stream &s) = 0;
+  virtual stream default_stream() const = 0;
 
 private:
   int id_;

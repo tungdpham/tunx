@@ -12,11 +12,41 @@ using namespace tunx;
 
 class FP16Test : public ::testing::Test {
 protected:
+  static void SetUpTestSuite() {
+    initializeDefaultDevices();
+    DeviceManager &manager = DeviceManager::instance();
+    Vec<DeviceID> device_ids = manager.get_all();
+
+    has_gpu_ = false;
+    for (const DeviceID &id : device_ids) {
+      Device &device = manager.get(id);
+      if (device.device_type() == DeviceType::CUDA) {
+        has_gpu_ = true;
+        device_ = device;
+        break;
+      }
+    }
+
+    if (!has_gpu_) {
+      GTEST_SKIP() << "No CUDA device available, skipping CuDNN engine tests";
+    }
+
+    stream_ = device_->default_stream();
+  }
+
   void SetUp() override {}
+
+  static bool has_gpu_;
+  static sref<Device> device_;
+  static stream stream_;
 };
 
+bool FP16Test::has_gpu_ = false;
+sref<Device> FP16Test::device_;
+stream FP16Test::stream_ = nullptr;
+
 TEST_F(FP16Test, Dense) {
-  auto &allocator = PoolAllocator::instance(getGPU(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
 
   auto fp32_dense_layer = Dense(128, 64, false, "fp32_dense");
   fp32_dense_layer.set_io_dtype(DType_t::FP32);
@@ -56,8 +86,8 @@ TEST_F(FP16Test, Dense) {
     input_data_fp32[i] = static_cast<float>(input_data[i]);
   }
 
-  Tensor input_fp32 = fp32_input.to_device(getGPU());
-  Tensor input_fp16 = fp16_input.to_device(getGPU());
+  Tensor input_fp32 = fp32_input.to_device(device_);
+  Tensor input_fp16 = fp16_input.to_device(device_);
 
   Tensor output_fp32 = fp32_dense_layer.forward({input_fp32})[0];
   Tensor output_fp16 = fp16_dense_layer.forward({input_fp16})[0];

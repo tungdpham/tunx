@@ -7,13 +7,14 @@
 #pragma once
 
 namespace tunx {
-// strong ref (pointer that cannot be null)
+// strong ref (pointer that cannot be assigned to null reference)
 template <typename T>
 class sref {
 private:
   T* ptr;
 
 public:
+  sref() = default;
   sref(T& val) noexcept
       : ptr(&val) {}
 
@@ -23,13 +24,14 @@ public:
   T& operator*() const noexcept { return *ptr; }
 };
 
-// strong const ref (const pointer that cannot be null)
+// strong const ref (const pointer that cannot be assigned to null reference)
 template <typename T>
 class csref {
 private:
   const T* ptr;
 
 public:
+  csref() = default;
   csref(const T& val) noexcept
       : ptr(&val) {}
 

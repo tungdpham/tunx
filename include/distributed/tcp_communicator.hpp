@@ -7,6 +7,7 @@
 #pragma once
 
 #include <asio.hpp>
+#include <device/stream.hpp>
 #include <asio/awaitable.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
@@ -93,7 +94,7 @@ public:
   explicit TCPCommunicator(const Endpoint &endpoint, IAllocator &out_allocator,
                            TCPCommunicator::Config config)
       : Communicator(endpoint, config.num_io_threads),
-        int_allocator_(PoolAllocator::instance(getHost(), defaultFlowHandle)),
+        int_allocator_(PoolAllocator::instance(getHost(), nullptr)),
         out_allocator_(out_allocator),
         serializer_(int_allocator_),
         config_(config),

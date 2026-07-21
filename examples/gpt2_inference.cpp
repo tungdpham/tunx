@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "data_loading/open_webtext_dataset.hpp"
+#include "device/device_manager.hpp"
 #include "nn/example_graphs.hpp"
 #include "tensor/tensor.hpp"
 #include "tokenizer/tokenizer.hpp"
@@ -27,14 +28,12 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  string device_str = "CPU";
-  Env::get("DEVICE_TYPE", device_str);
-  DeviceType device_type = (device_str == "CUDA") ? DeviceType::CUDA : DeviceType::CPU;
-  cout << "Using device: " << (device_type == DeviceType::CUDA ? "CUDA" : "CPU") << endl;
+  string device_str = "CPU:0";
+  Env::get("DEVICE_ID", device_str);
+  DeviceID device_id = DeviceID::from_string(device_str);
+  Device &device = DeviceManager::instance().get(device_id);
 
-  // Create model using ExampleGraphs or load from file
-  const Device &device = device_type == DeviceType::CUDA ? getGPU() : getHost();
-  auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device, device.default_stream());
   Graph graph = load_or_create_graph("gpt2", model_path, allocator);
 
   size_t seq_len = 512;

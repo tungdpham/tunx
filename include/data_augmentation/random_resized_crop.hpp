@@ -5,8 +5,8 @@
 #include <vector>
 
 #include "augmentation.hpp"
-#include "device/flow.hpp"
 #include "device/pool_allocator.hpp"
+#include "device/stream.hpp"
 #include "tensor/tensor.hpp"
 #include "threading/thread_handler.hpp"
 
@@ -168,7 +168,7 @@ private:
       params[b] = sample_crop(static_cast<int>(in_w), static_cast<int>(in_h));
     }
 
-    PoolAllocator &allocator = PoolAllocator::instance(data.device(), defaultFlowHandle);
+    PoolAllocator &allocator = PoolAllocator::instance(data.device(), nullptr);
     Tensor output(Vec<size_t>{batch_size, out_h_, out_w_, channels}, data.dtype(), allocator);
 
     parallel_for<size_t>(0, batch_size, [&](size_t b) {

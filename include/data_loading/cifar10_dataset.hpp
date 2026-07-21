@@ -7,6 +7,7 @@
 #pragma once
 
 #include <fcntl.h>
+#include <device/stream.hpp>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -183,7 +184,7 @@ private:
 public:
   explicit CIFAR10(DType_t dtype = DType_t::FP32)
       : Dataset(),
-        allocator_(PoolAllocator::instance(getHost(), defaultFlowHandle)),
+        allocator_(PoolAllocator::instance(getHost(), nullptr)),
         dtype_(dtype) {}
 
   virtual ~CIFAR10() { cleanup_maps(); }

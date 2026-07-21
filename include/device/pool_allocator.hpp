@@ -11,8 +11,8 @@
 #include <mutex>
 
 #include "device/dptr.hpp"
-#include "device/flow.hpp"
 #include "device/iallocator.hpp"
+#include "device/stream.hpp"
 
 namespace tunx {
 
@@ -23,22 +23,21 @@ namespace tunx {
 // the same device and flow, but not across different devices or flows.
 class PoolAllocator : public IAllocator {
 public:
-  PoolAllocator(const Device &device, flowHandle_t flow = defaultFlowHandle)
+  PoolAllocator(Device &device, stream s)
       : device_(device),
-        flow_(flow) {}
+        stream_(s) {}
   ~PoolAllocator() { clear(); }
 
   PoolAllocator(const PoolAllocator &) = delete;
   PoolAllocator &operator=(const PoolAllocator &) = delete;
 
-  static PoolAllocator &instance(const Device &device, flowHandle_t flow) {
+  static PoolAllocator &instance(Device &device, stream s) {
     static std::mutex registry_mutex;
-    static std::map<std::pair<const Device *, flowHandle_t>, std::unique_ptr<PoolAllocator>>
-        instances;
+    static std::map<stream, std::unique_ptr<PoolAllocator>> instances;
     std::lock_guard<std::mutex> lock(registry_mutex);
-    auto &pool = instances[{&device, flow}];
+    auto &pool = instances[s];
     if (!pool) {
-      pool = std::make_unique<PoolAllocator>(device, flow);
+      pool = std::make_unique<PoolAllocator>(device, s);
     }
     return *pool;
   }
@@ -82,12 +81,12 @@ public:
     return total;
   }
 
-  const Device &device() const override { return device_; }
+  Device &device() const override { return device_; }
 
 private:
   std::multimap<size_t, device_storage *> free_blocks_;
-  const Device &device_;
-  flowHandle_t flow_;
+  Device &device_;
+  stream stream_;
   mutable std::mutex mutex_;
 
   device_storage *allocate_storage(size_t size) {

@@ -52,8 +52,8 @@ signed main(int argc, char *argv[]) {
   train_config.print_config();
 
   // Prioritize loading existing model, else create from available ones
-  const auto &device = DeviceManager::instance().get(train_config.device_id);
-  auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
+  tunx::Device &device = DeviceManager::instance().get(train_config.device_id);
+  auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
   if (train_config.dataset_name.empty()) {
     throw std::runtime_error("DATASET_NAME environment variable is not set!");

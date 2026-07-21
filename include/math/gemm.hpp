@@ -11,7 +11,10 @@
  */
 #include "cpu/gemm.hpp"
 #include "cuda/gemm.hpp"
+#include "device/device.hpp"
+#include "device/device_manager.hpp"
 #include "device/dptr.hpp"
+#include "device/stream.hpp"
 #include "device/task.hpp"
 
 namespace tunx {
@@ -19,7 +22,7 @@ namespace tunx {
 template <typename IO_T, typename Param_T = IO_T, typename Compute_T = IO_T>
 void gemm(const dptr &A, const dptr &B, const dptr &C, size_t M, size_t N, size_t K,
           const bool trans_A, const bool trans_B, const IO_T alpha, const IO_T beta, size_t lda,
-          size_t ldb, size_t ldc) {
+          size_t ldb, size_t ldc, Device &device = getHost(), stream stream = nullptr) {
   if (A.device_type() != B.device_type() || A.device_type() != C.device_type()) {
     throw std::runtime_error("All device pointers must be on the same device type for gemm.");
   }
@@ -28,12 +31,12 @@ void gemm(const dptr &A, const dptr &B, const dptr &C, size_t M, size_t N, size_
       throw std::runtime_error(
           "gemm mixed dtype dispatch not implemented for CPU (io/param/compute must match).");
     }
-    create_cpu_task(defaultFlowHandle, cpu::gemm<IO_T>, A.get<IO_T>(), B.get<Param_T>(),
-                    C.get<IO_T>(), M, N, K, trans_A, trans_B, alpha, beta, lda, ldb, ldc);
+    create_cpu_task(device, stream, cpu::gemm<IO_T>, A.get<IO_T>(), B.get<Param_T>(), C.get<IO_T>(),
+                    M, N, K, trans_A, trans_B, alpha, beta, lda, ldb, ldc);
   }
 #ifdef TUNX_USE_CUDA
   else if (A.device_type() == DeviceType::CUDA) {
-    create_cuda_task(defaultFlowHandle, cuda::gemm_ex<IO_T, Param_T, Compute_T>, A.get<IO_T>(),
+    create_cuda_task(device, stream, cuda::gemm_ex<IO_T, Param_T, Compute_T>, A.get<IO_T>(),
                      B.get<Param_T>(), C.get<IO_T>(), M, N, K, trans_A, trans_B, alpha, beta, lda,
                      ldb, ldc);
   }

@@ -6,7 +6,6 @@ namespace tunx {
 struct WorkspaceReq {
   size_t fwd_workspace;
   size_t bwd_workspace;
-  // TODO: implement inf in engines
   size_t inf_workspace;
 };
 

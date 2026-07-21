@@ -119,7 +119,7 @@ Vec<Tensor> ResidualBlockImpl::backward_impl(const Vec<Tensor> &grad_outputs,
   for (size_t i = 0; i < grad_inputs.size(); ++i) {
     grad_inputs[i] = this->get_tensor(main_grad_inputs[i].shape(), main_grad_inputs[i].dtype());
     DISPATCH_IO_DTYPE(ops::add, main_grad_inputs[i].data_ptr(), shortcut_grad_inputs[i].data_ptr(),
-                      grad_inputs[i].data_ptr(), grad_inputs[i].size(), defaultFlowHandle);
+                      grad_inputs[i].data_ptr(), grad_inputs[i].size(), nullptr);
   }
   return grad_inputs;
 }

@@ -21,10 +21,9 @@
 namespace tunx {
 namespace internal {
 
-LegacyConv2DImpl::LegacyConv2DImpl(size_t in_channels, size_t out_channels,
-                                             size_t kernel_h, size_t kernel_w, size_t stride_h,
-                                             size_t stride_w, size_t pad_h, size_t pad_w,
-                                             bool use_bias, const std::string &name)
+LegacyConv2DImpl::LegacyConv2DImpl(size_t in_channels, size_t out_channels, size_t kernel_h,
+                                   size_t kernel_w, size_t stride_h, size_t stride_w, size_t pad_h,
+                                   size_t pad_w, bool use_bias, const std::string &name)
     : SISOLayerImpl(name),
       in_channels_(in_channels),
       out_channels_(out_channels),
@@ -122,7 +121,7 @@ Tensor LegacyConv2DImpl::def_forward(const Tensor &input, Residuals &residuals) 
   Tensor temp_output_buffer = get_tensor({output_buffer_size}, io_dtype_);
 
   im2col(input, col_buffer, kernel_h_, kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_,
-         this->flow_handle_);
+         backend_handle_.get_stream());
 
   DTypeDesc type_desc{
       .io_dtype = io_dtype_,
@@ -135,7 +134,7 @@ Tensor LegacyConv2DImpl::def_forward(const Tensor &input, Residuals &residuals) 
                              out_channels_, type_desc);
 
   cnhw_to_nchw(temp_output_buffer, output, batch_size, out_channels_, output_h, output_w,
-               this->flow_handle_);
+               backend_handle_.get_stream());
 
   if (use_bias_) {
     engine_->legacy_conv2d_add_bias(backend_handle_, output.data_as<void>(), bias_.data_as<void>(),
@@ -168,7 +167,7 @@ Tensor LegacyConv2DImpl::def_backward(const Tensor &grad_output, Residuals &resi
   Tensor temp_col_grad_matrix_buffer = get_tensor({col_grad_matrix_size}, io_dtype_);
 
   nchw_to_cnhw(grad_output, temp_gradient_buffer, batch_size, out_channels_, output_h, output_w,
-               this->flow_handle_);
+               backend_handle_.get_stream());
 
   DTypeDesc type_desc{
       .io_dtype = io_dtype_,
@@ -181,11 +180,12 @@ Tensor LegacyConv2DImpl::def_backward(const Tensor &grad_output, Residuals &resi
                                output_size, kernel_size, out_channels_, type_desc);
 
   engine_->legacy_conv2d_dgrad(backend_handle_, temp_gradient_buffer.data_as<void>(),
-                               weights_.data_as<void>(), temp_col_grad_matrix_buffer.data_as<void>(),
-                               output_size, kernel_size, out_channels_, type_desc);
+                               weights_.data_as<void>(),
+                               temp_col_grad_matrix_buffer.data_as<void>(), output_size,
+                               kernel_size, out_channels_, type_desc);
 
   col2im(temp_col_grad_matrix_buffer, grad_input, batch_size, in_channels_, input_h, input_w,
-         kernel_h_, kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_, this->flow_handle_);
+         kernel_h_, kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_, backend_handle_.get_stream());
 
   if (use_bias_) {
     engine_->legacy_conv2d_bgrad(backend_handle_, grad_output.data_as<void>(),
@@ -195,8 +195,6 @@ Tensor LegacyConv2DImpl::def_backward(const Tensor &grad_output, Residuals &resi
 
   return grad_input;
 }
-
-
 
 LayerConfig LegacyConv2DImpl::get_config() const {
   LayerConfig config;
@@ -227,8 +225,7 @@ Vec<size_t> LegacyConv2DImpl::compute_output_shape(const Vec<size_t> &input_shap
   return {batch_size, out_channels_, output_h, output_w};
 }
 
-std::shared_ptr<LegacyConv2DImpl> LegacyConv2DImpl::create_from_config(
-    const LayerConfig &config) {
+std::shared_ptr<LegacyConv2DImpl> LegacyConv2DImpl::create_from_config(const LayerConfig &config) {
   size_t in_channels = config.get<size_t>("in_channels");
   size_t out_channels = config.get<size_t>("out_channels");
   size_t kernel_h = config.get<size_t>("kernel_h");
@@ -238,9 +235,8 @@ std::shared_ptr<LegacyConv2DImpl> LegacyConv2DImpl::create_from_config(
   size_t pad_h = config.get<size_t>("pad_h", 0);
   size_t pad_w = config.get<size_t>("pad_w", 0);
   bool use_bias = config.get<bool>("use_bias", true);
-  return std::make_shared<LegacyConv2DImpl>(in_channels, out_channels, kernel_h, kernel_w,
-                                                 stride_h, stride_w, pad_h, pad_w, use_bias,
-                                                 config.name);
+  return std::make_shared<LegacyConv2DImpl>(in_channels, out_channels, kernel_h, kernel_w, stride_h,
+                                            stride_w, pad_h, pad_w, use_bias, config.name);
 }
 
 }  // namespace internal

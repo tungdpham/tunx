@@ -3,6 +3,7 @@
 
 #include <cmath>
 
+#include "device/device.hpp"
 #include "device/device_manager.hpp"
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
@@ -11,29 +12,33 @@ using namespace tunx;
 
 class GPUTensorTest : public ::testing::Test {
 protected:
-  static void SetUpTestSuite() { initializeDefaultDevices(); }
-
-  void SetUp() override {
+  static void SetUpTestSuite() {
+    initializeDefaultDevices();
     DeviceManager &manager = DeviceManager::instance();
     Vec<DeviceID> device_ids = manager.get_all();
 
     has_gpu_ = false;
     for (const DeviceID &id : device_ids) {
-      const Device &device = manager.get(id);
+      Device &device = manager.get(id);
       if (device.device_type() == DeviceType::CUDA) {
         has_gpu_ = true;
+        device_ = device;
         break;
       }
     }
 
     if (!has_gpu_) {
-      GTEST_SKIP() << "No CUDA device available, skipping CUDA tensor tests";
+      GTEST_SKIP() << "No CUDA device available, skipping CuDNN engine tests";
     }
 
-    small_tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+    stream_ = device_->default_stream();
+  }
+
+  void SetUp() override {
+    small_tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
     fill(small_tensor, 1.0);
 
-    large_tensor = Tensor({2, 3, 4, 4}, DType_t::FP32, getGPU());
+    large_tensor = Tensor({2, 3, 4, 4}, DType_t::FP32, device_);
     fill(large_tensor, 2.0);
   }
 
@@ -44,13 +49,19 @@ protected:
 
   static void TearDownTestSuite() {}
 
-  bool has_gpu_;
+  static bool has_gpu_;
+  static sref<Device> device_;
+  static stream stream_;
   Tensor small_tensor;
   Tensor large_tensor;
 };
 
+bool GPUTensorTest::has_gpu_ = false;
+sref<Device> GPUTensorTest::device_;
+stream GPUTensorTest::stream_ = nullptr;
+
 TEST_F(GPUTensorTest, Constructor4D) {
-  Tensor tensor = Tensor({2, 3, 4, 4}, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor({2, 3, 4, 4}, DType_t::FP32, device_);
 
   auto shape = tensor.shape();
   EXPECT_EQ(shape[0], 2);
@@ -64,7 +75,7 @@ TEST_F(GPUTensorTest, Constructor4D) {
 
 TEST_F(GPUTensorTest, ConstructorWithShape) {
   Vec<size_t> shape = {2, 3, 4, 4};
-  Tensor tensor = Tensor(shape, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor(shape, DType_t::FP32, device_);
 
   EXPECT_EQ(tensor.shape(), shape);
   EXPECT_EQ(tensor.size(), 96);
@@ -77,7 +88,7 @@ TEST_F(GPUTensorTest, ConstructorWithShape) {
 }
 
 TEST_F(GPUTensorTest, DeviceTypeCheck) {
-  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
 
   EXPECT_EQ(tensor.device_type(), DeviceType::CUDA);
   EXPECT_TRUE(tensor.device_type() == DeviceType::CUDA);
@@ -85,8 +96,8 @@ TEST_F(GPUTensorTest, DeviceTypeCheck) {
 }
 
 TEST_F(GPUTensorTest, TensorAddition) {
-  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
-  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
+  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
 
   fill(tensor1, 2.0);
   fill(tensor2, 3.0);
@@ -102,8 +113,8 @@ TEST_F(GPUTensorTest, TensorAddition) {
 }
 
 TEST_F(GPUTensorTest, TensorSubtraction) {
-  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
-  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
+  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
 
   fill(tensor1, 5.0);
   fill(tensor2, 2.0);
@@ -119,8 +130,8 @@ TEST_F(GPUTensorTest, TensorSubtraction) {
 }
 
 TEST_F(GPUTensorTest, TensorMultiplication) {
-  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
-  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
+  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
 
   fill(tensor1, 3.0);
   fill(tensor2, 4.0);
@@ -136,8 +147,8 @@ TEST_F(GPUTensorTest, TensorMultiplication) {
 }
 
 TEST_F(GPUTensorTest, TensorDivision) {
-  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
-  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
+  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
 
   fill(tensor1, 12.0);
   fill(tensor2, 4.0);
@@ -153,7 +164,7 @@ TEST_F(GPUTensorTest, TensorDivision) {
 }
 
 TEST_F(GPUTensorTest, ScalarMultiplication) {
-  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(tensor, 3.0);
 
   Tensor result = tensor * 2.0;
@@ -167,7 +178,7 @@ TEST_F(GPUTensorTest, ScalarMultiplication) {
 }
 
 TEST_F(GPUTensorTest, ScalarDivision) {
-  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(tensor, 8.0);
 
   Tensor result = tensor / 2.0;
@@ -181,8 +192,8 @@ TEST_F(GPUTensorTest, ScalarDivision) {
 }
 
 TEST_F(GPUTensorTest, InPlaceAddition) {
-  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
-  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
+  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
 
   fill(tensor1, 2.0);
   fill(tensor2, 3.0);
@@ -198,8 +209,8 @@ TEST_F(GPUTensorTest, InPlaceAddition) {
 }
 
 TEST_F(GPUTensorTest, InPlaceSubtraction) {
-  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
-  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
+  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
 
   fill(tensor1, 5.0);
   fill(tensor2, 2.0);
@@ -215,8 +226,8 @@ TEST_F(GPUTensorTest, InPlaceSubtraction) {
 }
 
 TEST_F(GPUTensorTest, InPlaceMultiplication) {
-  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
-  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
+  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
 
   fill(tensor1, 3.0);
   fill(tensor2, 4.0);
@@ -232,7 +243,7 @@ TEST_F(GPUTensorTest, InPlaceMultiplication) {
 }
 
 TEST_F(GPUTensorTest, InPlaceScalarMultiplication) {
-  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(tensor, 3.0);
 
   tensor *= 2.0;
@@ -246,7 +257,7 @@ TEST_F(GPUTensorTest, InPlaceScalarMultiplication) {
 }
 
 TEST_F(GPUTensorTest, InPlaceScalarDivision) {
-  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(tensor, 8.0);
 
   tensor /= 2.0;
@@ -260,29 +271,29 @@ TEST_F(GPUTensorTest, InPlaceScalarDivision) {
 }
 
 TEST_F(GPUTensorTest, SameShapeComparison) {
-  Tensor tensor1 = Tensor({2, 3, 4, 5}, DType_t::FP32, getGPU());
-  Tensor tensor2 = Tensor({2, 3, 4, 5}, DType_t::FP32, getGPU());
-  Tensor tensor3 = Tensor({2, 3, 4, 6}, DType_t::FP32, getGPU());
+  Tensor tensor1 = Tensor({2, 3, 4, 5}, DType_t::FP32, device_);
+  Tensor tensor2 = Tensor({2, 3, 4, 5}, DType_t::FP32, device_);
+  Tensor tensor3 = Tensor({2, 3, 4, 6}, DType_t::FP32, device_);
 
   EXPECT_TRUE(tensor1.shape() == tensor2.shape());
   EXPECT_FALSE(tensor1.shape() == tensor3.shape());
 }
 
 TEST_F(GPUTensorTest, AdditionShapeMismatch) {
-  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
-  Tensor tensor2 = Tensor({1, 1, 3, 3}, DType_t::FP32, getGPU());
+  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
+  Tensor tensor2 = Tensor({1, 1, 3, 3}, DType_t::FP32, device_);
 
   EXPECT_THROW(tensor1 + tensor2, std::invalid_argument);
 }
 
 TEST_F(GPUTensorTest, DivisionByZero) {
-  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
 
   EXPECT_THROW(tensor / 0.0, std::invalid_argument);
 }
 
 TEST_F(GPUTensorTest, FillOperation) {
-  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(tensor, 42.0);
 
   Tensor cpu_result = tensor.to_host();
@@ -294,7 +305,7 @@ TEST_F(GPUTensorTest, FillOperation) {
 }
 
 TEST_F(GPUTensorTest, CloneOperation) {
-  Tensor original = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor original = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(original, 5.0);
 
   Tensor cloned = original.clone();
@@ -311,7 +322,7 @@ TEST_F(GPUTensorTest, CloneOperation) {
 }
 
 TEST_F(GPUTensorTest, MoveConstructor) {
-  Tensor original = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor original = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(original, 42.0);
 
   Tensor moved(std::move(original));
@@ -325,10 +336,10 @@ TEST_F(GPUTensorTest, MoveConstructor) {
 }
 
 TEST_F(GPUTensorTest, MoveAssignment) {
-  Tensor original = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor original = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(original, 42.0);
 
-  Tensor moved = Tensor({1, 1, 1, 1}, DType_t::FP32, getGPU());
+  Tensor moved = Tensor({1, 1, 1, 1}, DType_t::FP32, device_);
   moved = std::move(original);
 
   EXPECT_EQ(moved.size(), 4);
@@ -344,7 +355,7 @@ TEST_F(GPUTensorTest, MultiBatchAccess) {
   cpu_tensor.at<float>({0, 0, 0, 0}) = 1.0f;
   cpu_tensor.at<float>({1, 0, 0, 0}) = 2.0f;
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = cpu_tensor.to_device(device_);
   Tensor result = gpu_tensor.to_host();
 
   EXPECT_FLOAT_EQ(result.at<float>({0, 0, 0, 0}), 1.0f);
@@ -358,7 +369,7 @@ TEST_F(GPUTensorTest, MultiChannelAccess) {
   cpu_tensor.at<float>({0, 1, 0, 0}) = 2.0f;
   cpu_tensor.at<float>({0, 2, 0, 0}) = 3.0f;
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = cpu_tensor.to_device(device_);
   Tensor result = gpu_tensor.to_host();
 
   EXPECT_FLOAT_EQ(result.at<float>({0, 0, 0, 0}), 1.0f);
@@ -367,7 +378,7 @@ TEST_F(GPUTensorTest, MultiChannelAccess) {
 }
 
 TEST_F(GPUTensorTest, CopyConstructor) {
-  Tensor original = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor original = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(original, 42.0);
 
   Tensor copy = original.clone();
@@ -381,7 +392,7 @@ TEST_F(GPUTensorTest, CopyConstructor) {
 }
 
 TEST_F(GPUTensorTest, ToCPU) {
-  Tensor gpu_tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor gpu_tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(gpu_tensor, 42.0);
 
   Tensor cpu_tensor = gpu_tensor.to_host();
@@ -403,7 +414,7 @@ TEST_F(GPUTensorTest, ToGPUFromCPU) {
   cpu_tensor.at<float>({0, 0, 1, 0}) = 3.0f;
   cpu_tensor.at<float>({0, 0, 1, 1}) = 4.0f;
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = cpu_tensor.to_device(device_);
 
   EXPECT_TRUE(gpu_tensor.device_type() == DeviceType::CUDA);
   EXPECT_FALSE(gpu_tensor.device_type() == DeviceType::CPU);
@@ -417,10 +428,10 @@ TEST_F(GPUTensorTest, ToGPUFromCPU) {
 }
 
 TEST_F(GPUTensorTest, ToGPUIdempotent) {
-  Tensor gpu_tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, getGPU());
+  Tensor gpu_tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(gpu_tensor, 42.0);
 
-  Tensor still_gpu = gpu_tensor.to_device(getGPU());
+  Tensor still_gpu = gpu_tensor.to_device(device_);
 
   EXPECT_TRUE(still_gpu.device_type() == DeviceType::CUDA);
 
@@ -439,7 +450,7 @@ TEST_F(GPUTensorTest, ToCPUIdempotent) {
 }
 
 TEST_F(GPUTensorTest, FillRandomUniform) {
-  Tensor tensor = Tensor({1, 10, 10, 10}, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor({1, 10, 10, 10}, DType_t::FP32, device_);
 
   fill_uniform(tensor, 0.0, 1.0);
 
@@ -467,7 +478,7 @@ TEST_F(GPUTensorTest, FillRandomUniform) {
 }
 
 TEST_F(GPUTensorTest, FillRandomNormal) {
-  Tensor tensor = Tensor({1, 10, 10, 10}, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor({1, 10, 10, 10}, DType_t::FP32, device_);
   fill_normal(tensor, 0.0, 1.0);
 
   Tensor cpu_result = tensor.to_host();
@@ -499,17 +510,15 @@ protected:
     if (manager.get_all().empty()) {
       initializeDefaultDevices();
     }
-  }
-
-  void SetUp() override {
-    DeviceManager &manager = DeviceManager::instance();
     Vec<DeviceID> device_ids = manager.get_all();
 
     has_gpu_ = false;
     for (const DeviceID &id : device_ids) {
-      const Device &device = manager.get(id);
+      Device &device = manager.get(id);
       if (device.device_type() == DeviceType::CUDA) {
         has_gpu_ = true;
+        device_ = device;
+        stream_ = device.default_stream();
         break;
       }
     }
@@ -521,12 +530,18 @@ protected:
 
   static void TearDownTestSuite() {}
 
-  bool has_gpu_;
+  static bool has_gpu_;
+  static sref<Device> device_;
+  static stream stream_;
 };
+
+bool GPUTensorSizeTest::has_gpu_ = false;
+sref<Device> GPUTensorSizeTest::device_;
+stream GPUTensorSizeTest::stream_ = nullptr;
 
 TEST_P(GPUTensorSizeTest, ConstructorAndSize) {
   auto [batch, channels, height, width] = GetParam();
-  Tensor tensor = Tensor({batch, channels, height, width}, DType_t::FP32, getGPU());
+  Tensor tensor = Tensor({batch, channels, height, width}, DType_t::FP32, device_);
 
   auto tensor_shape = tensor.shape();
   EXPECT_EQ(tensor_shape[0], batch);
@@ -544,8 +559,8 @@ INSTANTIATE_TEST_SUITE_P(DifferentShapes, GPUTensorSizeTest,
                                            std::make_tuple(32, 128, 14, 14)));
 
 TEST_F(GPUTensorTest, LargeTensorOperations) {
-  Tensor tensor1 = Tensor({4, 16, 64, 64}, DType_t::FP32, getGPU());
-  Tensor tensor2 = Tensor({4, 16, 64, 64}, DType_t::FP32, getGPU());
+  Tensor tensor1 = Tensor({4, 16, 64, 64}, DType_t::FP32, device_);
+  Tensor tensor2 = Tensor({4, 16, 64, 64}, DType_t::FP32, device_);
 
   fill(tensor1, 1.5);
   fill(tensor2, 2.5);
@@ -561,21 +576,9 @@ TEST_F(GPUTensorTest, LargeTensorOperations) {
   EXPECT_FLOAT_EQ(cpu_result.at<float>({3, 15, 63, 63}), 4.0f);
 }
 
-TEST(GPUTensorFloatingPointTest, FloatingPointComparisons) {
-  initializeDefaultDevices();
-
-  DeviceManager &manager = DeviceManager::instance();
-  Vec<DeviceID> device_ids = manager.get_all();
-
-  bool has_gpu = false;
-  csref<Device> gpu_device = getGPU();
-
-  if (!has_gpu) {
-    GTEST_SKIP() << "No CUDA device available";
-  }
-
-  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, gpu_device);
-  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, gpu_device);
+TEST_F(GPUTensorTest, FloatingPointComparisons) {
+  Tensor tensor1 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
+  Tensor tensor2 = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
 
   fill(tensor1, 0.1 + 0.2);
   fill(tensor2, 0.3);

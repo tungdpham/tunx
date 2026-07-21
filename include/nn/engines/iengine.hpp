@@ -3,6 +3,7 @@
 #include <functional>
 #include <vector>
 
+#include "nn/engines/engine_handle.hpp"
 #include "nn/stats/stats.hpp"
 #include "type/type.hpp"
 
@@ -96,8 +97,7 @@ class IEngine {
 public:
   virtual ~IEngine() = default;
 
-  // create a backend handle
-  virtual void* create_backend_handle() = 0;
+  virtual engine_handle create_handle(stream s) = 0;
 
   // Query graph will build the graph from stats and type_desc if not yet exists.
   // In both cases, will return workspace requirement.
@@ -109,7 +109,7 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_dense_graph(void* backend_handle, const DenseStats& stats,
+  virtual WorkspaceReq query_dense_graph(engine_handle backend_handle, const DenseStats& stats,
                                          DTypeDesc type_desc) = 0;
 
   /**
@@ -119,8 +119,8 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_avgpool_graph(void* backend_handle, const AvgPool2DStats& stats,
-                                           DTypeDesc type_desc) = 0;
+  virtual WorkspaceReq query_avgpool_graph(engine_handle backend_handle,
+                                           const AvgPool2DStats& stats, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Queries the workspace memory requirement for MaxPool2D graphs.
@@ -129,8 +129,8 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_maxpool2d_graph(void* backend_handle, const MaxPool2DStats& stats,
-                                             DTypeDesc type_desc) = 0;
+  virtual WorkspaceReq query_maxpool2d_graph(engine_handle backend_handle,
+                                             const MaxPool2DStats& stats, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Queries the workspace memory requirement for ClassToken graphs.
@@ -139,7 +139,8 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_class_token_graph(void* backend_handle, const ClassTokenStats& stats,
+  virtual WorkspaceReq query_class_token_graph(engine_handle backend_handle,
+                                               const ClassTokenStats& stats,
                                                DTypeDesc type_desc) = 0;
 
   /**
@@ -149,7 +150,7 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_dropout_graph(void* backend_handle, const DropoutStats& stats,
+  virtual WorkspaceReq query_dropout_graph(engine_handle backend_handle, const DropoutStats& stats,
                                            DTypeDesc type_desc) = 0;
 
   /**
@@ -159,8 +160,8 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_embedding_graph(void* backend_handle, const EmbeddingStats& stats,
-                                             DTypeDesc type_desc) = 0;
+  virtual WorkspaceReq query_embedding_graph(engine_handle backend_handle,
+                                             const EmbeddingStats& stats, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Queries the workspace memory requirement for Positional Embedding graphs.
@@ -169,17 +170,18 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_positional_embedding_graph(void* backend_handle, const PositionalEmbeddingStats& stats,
+  virtual WorkspaceReq query_positional_embedding_graph(engine_handle backend_handle,
+                                                        const PositionalEmbeddingStats& stats,
                                                         DTypeDesc type_desc) = 0;
 
   /**
-   * @brief Queries the workspace memory requirement for function::ReLU graphs.
+   * @brief Queries the workspace memory requirement for ReLU graphs.
    * @param backend_handle Opaque handle to the backend context.
-   * @param stats function::ReLU layer configuration.
+   * @param stats ReLU layer configuration.
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_relu_graph(void* backend_handle, const ReLUStats& stats,
+  virtual WorkspaceReq query_relu_graph(engine_handle backend_handle, const ReLUStats& stats,
                                         DTypeDesc type_desc) = 0;
 
   /**
@@ -189,8 +191,8 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward, backward, and inference workspace size in bytes.
    */
-  virtual WorkspaceReq query_batchnorm_graph(void* backend_handle, const BatchNormStats& stats,
-                                             DTypeDesc type_desc) = 0;
+  virtual WorkspaceReq query_batchnorm_graph(engine_handle backend_handle,
+                                             const BatchNormStats& stats, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Queries the workspace memory requirement for Conv2D graphs.
@@ -199,7 +201,7 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_conv2d_graph(void* backend_handle, const Conv2DStats& stats,
+  virtual WorkspaceReq query_conv2d_graph(engine_handle backend_handle, const Conv2DStats& stats,
                                           DTypeDesc type_desc) = 0;
 
   /**
@@ -209,8 +211,8 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_layernorm_graph(void* backend_handle, const LayerNormStats& stats,
-                                             DTypeDesc type_desc) = 0;
+  virtual WorkspaceReq query_layernorm_graph(engine_handle backend_handle,
+                                             const LayerNormStats& stats, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Queries the workspace memory requirement for SDPA graphs.
@@ -219,7 +221,7 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_sdpa_graph(void* backend_handle, const AttentionStats& stats,
+  virtual WorkspaceReq query_sdpa_graph(engine_handle backend_handle, const AttentionStats& stats,
                                         DTypeDesc type_desc) = 0;
 
   /**
@@ -229,11 +231,11 @@ public:
    * @param type_desc Data type descriptors.
    * @return WorkspaceReq specifying forward and backward workspace size in bytes.
    */
-  virtual WorkspaceReq query_transpose_graph(void* backend_handle, const TransposeStats& stats,
-                                             DTypeDesc type_desc) = 0;
+  virtual WorkspaceReq query_transpose_graph(engine_handle backend_handle,
+                                             const TransposeStats& stats, DTypeDesc type_desc) = 0;
 
   /**
-   * @brief Forward pass for a Dense (function::Linear) layer.
+   * @brief Forward pass for a Dense (Linear) layer.
    * @param backend_handle Opaque handle to the backend context.
    * @param stats Dense layer configuration.
    * @param input Input tensor. Shape: [batch_size, in_features], DType: io_dtype.
@@ -243,7 +245,7 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void dense_fwd(void* backend_handle, const DenseStats& stats, const void* input,
+  virtual void dense_fwd(engine_handle backend_handle, const DenseStats& stats, const void* input,
                          const void* weight, const void* bias, void* output, void* workspace,
                          DTypeDesc type_desc) = 0;
 
@@ -259,9 +261,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void dense_wgrad(void* backend_handle, const DenseStats& stats, const void* grad_output,
-                           const void* input, void* grad_weight, void* workspace,
-                           DTypeDesc type_desc) = 0;
+  virtual void dense_wgrad(engine_handle backend_handle, const DenseStats& stats,
+                           const void* grad_output, const void* input, void* grad_weight,
+                           void* workspace, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Computes data gradients for a Dense layer.
@@ -274,9 +276,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void dense_dgrad(void* backend_handle, const DenseStats& stats, const void* grad_output,
-                           const void* weight, void* grad_input, void* workspace,
-                           DTypeDesc type_desc) = 0;
+  virtual void dense_dgrad(engine_handle backend_handle, const DenseStats& stats,
+                           const void* grad_output, const void* weight, void* grad_input,
+                           void* workspace, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Computes bias gradients for a Dense layer.
@@ -289,8 +291,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void dense_bgrad(void* backend_handle, const DenseStats& stats, const void* grad_output,
-                           void* grad_bias, void* workspace, DTypeDesc type_desc) = 0;
+  virtual void dense_bgrad(engine_handle backend_handle, const DenseStats& stats,
+                           const void* grad_output, void* grad_bias, void* workspace,
+                           DTypeDesc type_desc) = 0;
 
   /**
    * @brief Forward pass for an AvgPool layer.
@@ -302,8 +305,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void avgpool_fwd(void* backend_handle, const AvgPool2DStats& stats, const void* input,
-                           void* output, void* workspace, DTypeDesc type_desc) = 0;
+  virtual void avgpool_fwd(engine_handle backend_handle, const AvgPool2DStats& stats,
+                           const void* input, void* output, void* workspace,
+                           DTypeDesc type_desc) = 0;
 
   /**
    * @brief Backward pass for an AvgPool layer.
@@ -316,7 +320,7 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void avgpool_bwd(void* backend_handle, const AvgPool2DStats& stats,
+  virtual void avgpool_bwd(engine_handle backend_handle, const AvgPool2DStats& stats,
                            const void* grad_output, void* grad_input, void* workspace,
                            DTypeDesc type_desc) = 0;
 
@@ -332,8 +336,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void maxpool2d_fwd(void* backend_handle, const MaxPool2DStats& stats, const void* input,
-                             void* output, void* mask, void* workspace, DTypeDesc type_desc) = 0;
+  virtual void maxpool2d_fwd(engine_handle backend_handle, const MaxPool2DStats& stats,
+                             const void* input, void* output, void* mask, void* workspace,
+                             DTypeDesc type_desc) = 0;
 
   /**
    * @brief Forward pass for a MaxPool2D layer (inference mode, no mask output).
@@ -345,8 +350,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void maxpool2d_infer(void* backend_handle, const MaxPool2DStats& stats, const void* input,
-                               void* output, void* workspace, DTypeDesc type_desc) = 0;
+  virtual void maxpool2d_infer(engine_handle backend_handle, const MaxPool2DStats& stats,
+                               const void* input, void* output, void* workspace,
+                               DTypeDesc type_desc) = 0;
 
   /**
    * @brief Backward pass for a MaxPool2D layer.
@@ -361,7 +367,7 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void maxpool2d_bwd(void* backend_handle, const MaxPool2DStats& stats,
+  virtual void maxpool2d_bwd(engine_handle backend_handle, const MaxPool2DStats& stats,
                              const void* grad_output, void* grad_input, const void* mask,
                              void* workspace, DTypeDesc type_desc) = 0;
 
@@ -375,7 +381,7 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void class_token_fwd(void* backend_handle, const ClassTokenStats& stats,
+  virtual void class_token_fwd(engine_handle backend_handle, const ClassTokenStats& stats,
                                const void* input, const void* token, void* output, void* workspace,
                                DTypeDesc type_desc) = 0;
 
@@ -393,7 +399,7 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void class_token_bwd(void* backend_handle, const ClassTokenStats& stats,
+  virtual void class_token_bwd(engine_handle backend_handle, const ClassTokenStats& stats,
                                const void* grad_output, void* grad_input, void* grad_token,
                                void* workspace, DTypeDesc type_desc) = 0;
 
@@ -407,8 +413,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void dropout_fwd(void* backend_handle, const DropoutStats& stats, const void* input,
-                           void* output, bool* mask, void* workspace, DTypeDesc type_desc) = 0;
+  virtual void dropout_fwd(engine_handle backend_handle, const DropoutStats& stats,
+                           const void* input, void* output, bool* mask, void* workspace,
+                           DTypeDesc type_desc) = 0;
 
   /**
    * @brief Backward pass for a Dropout layer.
@@ -422,9 +429,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void dropout_bwd(void* backend_handle, const DropoutStats& stats, const void* grad_output,
-                           void* grad_input, const bool* mask, double scale, void* workspace,
-                           DTypeDesc type_desc) = 0;
+  virtual void dropout_bwd(engine_handle backend_handle, const DropoutStats& stats,
+                           const void* grad_output, void* grad_input, const bool* mask,
+                           double scale, void* workspace, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Forward pass for an Embedding layer.
@@ -436,8 +443,8 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void embedding_fwd(void* backend_handle, const EmbeddingStats& stats, const void* input,
-                             const void* weight, void* output, void* workspace,
+  virtual void embedding_fwd(engine_handle backend_handle, const EmbeddingStats& stats,
+                             const void* input, const void* weight, void* output, void* workspace,
                              DTypeDesc type_desc) = 0;
 
   /**
@@ -453,7 +460,7 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void embedding_bwd(void* backend_handle, const EmbeddingStats& stats,
+  virtual void embedding_bwd(engine_handle backend_handle, const EmbeddingStats& stats,
                              const void* grad_output, const void* input, void* grad_weight,
                              void* workspace, DTypeDesc type_desc) = 0;
 
@@ -462,12 +469,14 @@ public:
    * @param backend_handle Opaque handle to the backend context.
    * @param stats Positional Embedding layer configuration.
    * @param input Input tensor. Shape: [batch_size, seq_len, embed_dim], DType: io_dtype.
-   * @param pos_embedding Positional embedding tensor. Shape: [seq_len, embed_dim], DType: param_dtype.
+   * @param pos_embedding Positional embedding tensor. Shape: [seq_len, embed_dim], DType:
+   * param_dtype.
    * @param output Output tensor. Shape: [batch_size, seq_len, embed_dim], DType: io_dtype.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void positional_embedding_fwd(void* backend_handle, const PositionalEmbeddingStats& stats, const void* input,
+  virtual void positional_embedding_fwd(engine_handle backend_handle,
+                                        const PositionalEmbeddingStats& stats, const void* input,
                                         const void* pos_embedding, void* output, void* workspace,
                                         DTypeDesc type_desc) = 0;
 
@@ -475,44 +484,47 @@ public:
    * @brief Backward pass for a Positional Embedding layer.
    * @param backend_handle Opaque handle to the backend context.
    * @param stats Positional Embedding layer configuration.
-   * @param grad_output Gradient w.r.t output. Shape: [batch_size, seq_len, embed_dim], DType: io_dtype.
-   * @param grad_pos_embedding Computed gradient w.r.t positional embedding. Shape: [seq_len, embed_dim], DType: param_dtype.
+   * @param grad_output Gradient w.r.t output. Shape: [batch_size, seq_len, embed_dim], DType:
+   * io_dtype.
+   * @param grad_pos_embedding Computed gradient w.r.t positional embedding. Shape: [seq_len,
+   * embed_dim], DType: param_dtype.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void positional_embedding_bwd(void* backend_handle, const PositionalEmbeddingStats& stats,
-                                        const void* grad_output, void* grad_pos_embedding, void* workspace,
-                                        DTypeDesc type_desc) = 0;
+  virtual void positional_embedding_bwd(engine_handle backend_handle,
+                                        const PositionalEmbeddingStats& stats,
+                                        const void* grad_output, void* grad_pos_embedding,
+                                        void* workspace, DTypeDesc type_desc) = 0;
 
   /**
-   * @brief Forward pass for a function::ReLU activation.
+   * @brief Forward pass for a ReLU activation.
    * @param backend_handle Opaque handle to the backend context.
-   * @param stats function::ReLU layer configuration.
+   * @param stats ReLU layer configuration.
    * @param input Input tensor. Shape: Total elements flattened, DType: io_dtype.
    * @param output Output tensor. Shape: Total elements flattened, DType: io_dtype.
    * @param mask Mask tensor (bitmask or bool) for backward pass.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void relu_fwd(void* backend_handle, const ReLUStats& stats, const void* input,
+  virtual void relu_fwd(engine_handle backend_handle, const ReLUStats& stats, const void* input,
                         void* output, bool* mask, void* workspace, DTypeDesc type_desc) = 0;
 
   /**
-   * @brief Forward pass for a function::ReLU activation (inference mode).
+   * @brief Forward pass for a ReLU activation (inference mode).
    * @param backend_handle Opaque handle to the backend context.
-   * @param stats function::ReLU layer configuration.
+   * @param stats ReLU layer configuration.
    * @param input Input tensor. Shape: Total elements flattened, DType: io_dtype.
    * @param output Output tensor. Shape: Total elements flattened, DType: io_dtype.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void relu_inf(void* backend_handle, const ReLUStats& stats, const void* input,
+  virtual void relu_inf(engine_handle backend_handle, const ReLUStats& stats, const void* input,
                         void* output, void* workspace, DTypeDesc type_desc) = 0;
 
   /**
-   * @brief Backward pass for a function::ReLU activation.
+   * @brief Backward pass for a ReLU activation.
    * @param backend_handle Opaque handle to the backend context.
-   * @param stats function::ReLU layer configuration.
+   * @param stats ReLU layer configuration.
    * @param grad_output Gradient w.r.t output. Shape: Total elements flattened, DType: io_dtype.
    * @param grad_input Computed gradient w.r.t input. Shape: Total elements flattened, DType:
    * io_dtype.
@@ -520,9 +532,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void relu_bwd(void* backend_handle, const ReLUStats& stats, const void* grad_output,
-                        void* grad_input, const bool* mask, void* workspace,
-                        DTypeDesc type_desc) = 0;
+  virtual void relu_bwd(engine_handle backend_handle, const ReLUStats& stats,
+                        const void* grad_output, void* grad_input, const bool* mask,
+                        void* workspace, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Forward pass for a BatchNorm layer (training mode).
@@ -545,12 +557,12 @@ public:
    * compute_dtype.
    * @param batch_invar Computed batch inverse variance (for backward pass). Shape: [1, 1, 1,
    * channels], DType: compute_dtype.
-   * @param relu_mask Optional bitmask if fused with function::ReLU.
+   * @param relu_mask Optional bitmask if fused with ReLU.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void batchnorm_fwd(void* backend_handle, const BatchNormStats& stats, const void* input,
-                             const void* gamma, const void* beta, void* output,
+  virtual void batchnorm_fwd(engine_handle backend_handle, const BatchNormStats& stats,
+                             const void* input, const void* gamma, const void* beta, void* output,
                              void* prev_running_mean, void* prev_running_var,
                              void* next_running_mean, void* next_running_var, void* batch_mean,
                              void* batch_invar, void* relu_mask, void* workspace,
@@ -570,10 +582,10 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void batchnorm_infer(void* backend_handle, const BatchNormStats& stats, const void* input,
-                               const void* gamma, const void* beta, const void* saved_mean,
-                               const void* saved_var, void* output, void* workspace,
-                               DTypeDesc type_desc) = 0;
+  virtual void batchnorm_infer(engine_handle backend_handle, const BatchNormStats& stats,
+                               const void* input, const void* gamma, const void* beta,
+                               const void* saved_mean, const void* saved_var, void* output,
+                               void* workspace, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Backward pass for a BatchNorm layer.
@@ -582,7 +594,7 @@ public:
    * @param grad_output Gradient w.r.t output. NHWC Shape: [batch_size, height, width, channels],
    * DType: io_dtype.
    * @param input Input tensor. NHWC Shape: [batch_size, height, width, channels], DType: io_dtype.
-   * @param relu_mask Optional bitmask if fused with function::ReLU.
+   * @param relu_mask Optional bitmask if fused with ReLU.
    * @param gamma Scale parameter tensor. Shape: [1, 1, 1, channels], DType: param_dtype.
    * @param grad_input Computed gradient w.r.t input. NHWC Shape: [batch_size, height, width,
    * channels], DType: io_dtype.
@@ -599,7 +611,7 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void batchnorm_bwd(void* backend_handle, const BatchNormStats& stats,
+  virtual void batchnorm_bwd(engine_handle backend_handle, const BatchNormStats& stats,
                              const void* grad_output, const void* input, const void* relu_mask,
                              const void* gamma, void* grad_input, void* grad_gamma, void* grad_beta,
                              const void* batch_mean, const void* batch_invar, void* workspace,
@@ -619,7 +631,7 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void conv2d_fwd(void* backend_handle, const Conv2DStats& stats, const void* input,
+  virtual void conv2d_fwd(engine_handle backend_handle, const Conv2DStats& stats, const void* input,
                           const void* weight, const void* bias, void* output, void* workspace,
                           DTypeDesc type_desc) = 0;
 
@@ -636,9 +648,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void conv2d_dgrad(void* backend_handle, const Conv2DStats& stats, const void* grad_output,
-                            const void* weight, void* grad_input, void* workspace,
-                            DTypeDesc type_desc) = 0;
+  virtual void conv2d_dgrad(engine_handle backend_handle, const Conv2DStats& stats,
+                            const void* grad_output, const void* weight, void* grad_input,
+                            void* workspace, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Computes weight gradients for a Conv2D layer.
@@ -654,9 +666,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void conv2d_wgrad(void* backend_handle, const Conv2DStats& stats, const void* grad_output,
-                            const void* input, void* grad_weight, void* workspace,
-                            DTypeDesc type_desc) = 0;
+  virtual void conv2d_wgrad(engine_handle backend_handle, const Conv2DStats& stats,
+                            const void* grad_output, const void* input, void* grad_weight,
+                            void* workspace, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Computes bias gradients for a Conv2D layer.
@@ -670,8 +682,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void conv2d_bgrad(void* backend_handle, const Conv2DStats& stats, const void* grad_output,
-                            void* grad_bias, void* workspace, DTypeDesc type_desc) = 0;
+  virtual void conv2d_bgrad(engine_handle backend_handle, const Conv2DStats& stats,
+                            const void* grad_output, void* grad_bias, void* workspace,
+                            DTypeDesc type_desc) = 0;
 
   /**
    * @brief Forward pass for a LayerNorm layer.
@@ -687,9 +700,10 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void layernorm_fwd(void* backend_handle, const LayerNormStats& stats, const void* input,
-                             const void* gamma, const void* beta, void* output, void* mean,
-                             void* inv_variance, void* workspace, DTypeDesc type_desc) = 0;
+  virtual void layernorm_fwd(engine_handle backend_handle, const LayerNormStats& stats,
+                             const void* input, const void* gamma, const void* beta, void* output,
+                             void* mean, void* inv_variance, void* workspace,
+                             DTypeDesc type_desc) = 0;
 
   /**
    * @brief Forward pass for a LayerNorm layer (inference mode).
@@ -702,9 +716,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void layernorm_infer(void* backend_handle, const LayerNormStats& stats, const void* input,
-                               const void* gamma, const void* beta, void* output, void* workspace,
-                               DTypeDesc type_desc) = 0;
+  virtual void layernorm_infer(engine_handle backend_handle, const LayerNormStats& stats,
+                               const void* input, const void* gamma, const void* beta, void* output,
+                               void* workspace, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Backward pass for a LayerNorm layer.
@@ -727,7 +741,7 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void layernorm_bwd(void* backend_handle, const LayerNormStats& stats,
+  virtual void layernorm_bwd(engine_handle backend_handle, const LayerNormStats& stats,
                              const void* grad_output, const void* input, const void* gamma,
                              const void* mean, const void* inv_variance, void* grad_input,
                              void* grad_gamma, void* grad_beta, void* workspace,
@@ -746,9 +760,9 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void sdpa_fwd(void* backend_handle, const AttentionStats& stats, const void* q_data,
-                        const void* k_data, const void* v_data, void* o_data, void* stats_data,
-                        void* workspace, DTypeDesc type_desc) = 0;
+  virtual void sdpa_fwd(engine_handle backend_handle, const AttentionStats& stats,
+                        const void* q_data, const void* k_data, const void* v_data, void* o_data,
+                        void* stats_data, void* workspace, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Backward pass for SDPA (Scaled Dot-Product Attention) layer.
@@ -771,10 +785,11 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void sdpa_bwd(void* backend_handle, const AttentionStats& stats, const void* q_data,
-                        const void* k_data, const void* v_data, const void* o_data,
-                        const void* dO_data, const void* stats_data, void* dQ_data, void* dK_data,
-                        void* dV_data, void* workspace, DTypeDesc type_desc) = 0;
+  virtual void sdpa_bwd(engine_handle backend_handle, const AttentionStats& stats,
+                        const void* q_data, const void* k_data, const void* v_data,
+                        const void* o_data, const void* dO_data, const void* stats_data,
+                        void* dQ_data, void* dK_data, void* dV_data, void* workspace,
+                        DTypeDesc type_desc) = 0;
 
   /**
    * @brief Generic transposition of any 2 axes.
@@ -785,40 +800,41 @@ public:
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
-  virtual void transpose(void* backend_handle, const TransposeStats& stats, const void* input,
-                         void* output, void* workspace, DTypeDesc type_desc) = 0;
+  virtual void transpose(engine_handle backend_handle, const TransposeStats& stats,
+                         const void* input, void* output, void* workspace, DTypeDesc type_desc) = 0;
 
   // --- Legacy APIs ---
 
-  virtual void legacy_dense_fwd(void* backend_handle, const void* input, const void* weight,
+  virtual void legacy_dense_fwd(engine_handle backend_handle, const void* input, const void* weight,
                                 void* output, size_t batch_size, size_t in_features,
                                 size_t out_features, DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_dense_wgrad(void* backend_handle, const void* input, const void* grad_output,
-                                  void* grad_weight, size_t batch_size, size_t in_features,
-                                  size_t out_features, DTypeDesc type_desc) {
+  virtual void legacy_dense_wgrad(engine_handle backend_handle, const void* input,
+                                  const void* grad_output, void* grad_weight, size_t batch_size,
+                                  size_t in_features, size_t out_features, DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_dense_dgrad(void* backend_handle, const void* grad_output, const void* weight,
-                                  void* grad_input, size_t batch_size, size_t in_features,
-                                  size_t out_features, DTypeDesc type_desc) {
+  virtual void legacy_dense_dgrad(engine_handle backend_handle, const void* grad_output,
+                                  const void* weight, void* grad_input, size_t batch_size,
+                                  size_t in_features, size_t out_features, DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_dense_bgrad(void* backend_handle, const void* grad_output, void* grad_bias,
-                                  size_t batch_size, size_t out_features, DTypeDesc type_desc) {
+  virtual void legacy_dense_bgrad(engine_handle backend_handle, const void* grad_output,
+                                  void* grad_bias, size_t batch_size, size_t out_features,
+                                  DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_dense_add_bias(void* backend_handle, void* output, const void* bias,
+  virtual void legacy_dense_add_bias(engine_handle backend_handle, void* output, const void* bias,
                                      size_t batch_size, size_t out_features, DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_avgpool2d_fwd(void* backend_handle, const void* input, void* output,
+  virtual void legacy_avgpool2d_fwd(engine_handle backend_handle, const void* input, void* output,
                                     size_t batch_size, size_t channels, size_t input_h,
                                     size_t input_w, size_t output_h, size_t output_w, size_t pool_h,
                                     size_t pool_w, size_t stride_h, size_t stride_w, size_t pad_h,
@@ -826,15 +842,16 @@ public:
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_avgpool2d_bwd(void* backend_handle, const void* grad_output, void* grad_input,
-                                    size_t batch_size, size_t channels, size_t input_h,
-                                    size_t input_w, size_t output_h, size_t output_w, size_t pool_h,
-                                    size_t pool_w, size_t stride_h, size_t stride_w, size_t pad_h,
-                                    size_t pad_w, DTypeDesc type_desc) {
+  virtual void legacy_avgpool2d_bwd(engine_handle backend_handle, const void* grad_output,
+                                    void* grad_input, size_t batch_size, size_t channels,
+                                    size_t input_h, size_t input_w, size_t output_h,
+                                    size_t output_w, size_t pool_h, size_t pool_w, size_t stride_h,
+                                    size_t stride_w, size_t pad_h, size_t pad_w,
+                                    DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_maxpool2d_fwd(void* backend_handle, const void* input, void* output,
+  virtual void legacy_maxpool2d_fwd(engine_handle backend_handle, const void* input, void* output,
                                     size_t batch_size, size_t channels, size_t input_h,
                                     size_t input_w, size_t output_h, size_t output_w, size_t pool_h,
                                     size_t pool_w, size_t stride_h, size_t stride_w, size_t pad_h,
@@ -842,23 +859,23 @@ public:
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_maxpool2d_bwd(void* backend_handle, const void* grad_output, void* grad_input,
-                                    size_t batch_size, size_t channels, size_t output_h,
-                                    size_t output_w, const void* mask_indices,
+  virtual void legacy_maxpool2d_bwd(engine_handle backend_handle, const void* grad_output,
+                                    void* grad_input, size_t batch_size, size_t channels,
+                                    size_t output_h, size_t output_w, const void* mask_indices,
                                     DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_batchnorm_fwd(void* backend_handle, const void* input, void* batch_mean,
-                                    void* batch_inv_std, void* running_mean, void* running_var,
-                                    const void* gamma, const void* beta, void* output, void* norm,
-                                    size_t batch_size, size_t channels, size_t spatial_size,
-                                    float momentum, float epsilon, bool affine,
+  virtual void legacy_batchnorm_fwd(engine_handle backend_handle, const void* input,
+                                    void* batch_mean, void* batch_inv_std, void* running_mean,
+                                    void* running_var, const void* gamma, const void* beta,
+                                    void* output, void* norm, size_t batch_size, size_t channels,
+                                    size_t spatial_size, float momentum, float epsilon, bool affine,
                                     DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_batchnorm_infer(void* backend_handle, const void* input,
+  virtual void legacy_batchnorm_infer(engine_handle backend_handle, const void* input,
                                       const void* running_mean, const void* running_var,
                                       const void* gamma, const void* beta, void* output,
                                       size_t batch_size, size_t channels, size_t spatial_size,
@@ -866,7 +883,7 @@ public:
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_batchnorm_bwd(void* backend_handle, const void* grad_output,
+  virtual void legacy_batchnorm_bwd(engine_handle backend_handle, const void* grad_output,
                                     const void* norm_input, const void* inv_std, const void* gamma,
                                     void* d_gamma, void* d_beta, void* grad_input,
                                     size_t batch_size, size_t channels, size_t spatial_size,
@@ -874,32 +891,32 @@ public:
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_conv2d_fwd(void* backend_handle, const void* col_data,
+  virtual void legacy_conv2d_fwd(engine_handle backend_handle, const void* col_data,
                                  const void* weight_data, void* output_data, size_t output_size,
                                  size_t kernel_size, size_t out_channels, DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_conv2d_wgrad(void* backend_handle, const void* col_data,
+  virtual void legacy_conv2d_wgrad(engine_handle backend_handle, const void* col_data,
                                    const void* gradient_data, void* grad_weight_data,
                                    size_t output_size, size_t kernel_size, size_t out_channels,
                                    DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_conv2d_dgrad(void* backend_handle, const void* gradient_data,
+  virtual void legacy_conv2d_dgrad(engine_handle backend_handle, const void* gradient_data,
                                    const void* weight_data, void* col_grad_data, size_t output_size,
                                    size_t kernel_size, size_t out_channels, DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_conv2d_bgrad(void* backend_handle, const void* gradient_data,
+  virtual void legacy_conv2d_bgrad(engine_handle backend_handle, const void* gradient_data,
                                    void* grad_bias_data, size_t batch_size, size_t output_h,
                                    size_t output_w, size_t out_channels, DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");
   }
 
-  virtual void legacy_conv2d_add_bias(void* backend_handle, void* output_data,
+  virtual void legacy_conv2d_add_bias(engine_handle backend_handle, void* output_data,
                                       const void* bias_data, size_t batch_size, size_t output_h,
                                       size_t output_w, size_t out_channels, DTypeDesc type_desc) {
     throw std::runtime_error("Not implemented");

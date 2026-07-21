@@ -1,6 +1,6 @@
 #include "device/device_manager.hpp"
-#include "device/flow.hpp"
 #include "device/pool_allocator.hpp"
+#include "device/stream.hpp"
 #include "nn/blocks_impl/flash_attention_block.hpp"
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
@@ -21,7 +21,7 @@ signed main() {
   auto flash_block = FlashAttentionBlock(EMBED_DIM, 8, true, "flash_attention_test");
   auto output_flash = flash_block(input);
 
-  graph.compile(PoolAllocator::instance(device, defaultFlowHandle));
+  graph.compile(PoolAllocator::instance(device, device.default_stream()));
 
   Tensor input_data = Tensor({BATCH_SIZE, SEQ_LEN, EMBED_DIM}, DType_t::FP32, getGPU());
   fill_normal(input_data, 0.5f, 0.2f, 676767);
@@ -33,7 +33,7 @@ signed main() {
   for (int i = 0; i < 10; ++i) {
     auto flash_start = std::chrono::high_resolution_clock::now();
     flash_attn_output = flash_block.forward({input_data}, legacy_residuals)[0];
-    flash_block.device().get_flow(defaultFlowHandle)->synchronize();
+    device.default_stream().sync();
     auto flash_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> flash_duration = flash_end - flash_start;
     printf("Flash Attention Forward Pass Time: %.3f ms\n", flash_duration.count());

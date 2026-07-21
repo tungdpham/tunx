@@ -2,6 +2,7 @@
 
 #include <cstddef>
 
+#include "device/device.hpp"
 #include "device/device_manager.hpp"
 #include "device/pool_allocator.hpp"
 #include "nn/example_graphs.hpp"
@@ -16,14 +17,44 @@ using namespace tunx;
 
 class BF16Test : public ::testing::Test {
 protected:
+  static void SetUpTestSuite() {
+    initializeDefaultDevices();
+    DeviceManager &manager = DeviceManager::instance();
+    Vec<DeviceID> device_ids = manager.get_all();
+
+    has_gpu_ = false;
+    for (const DeviceID &id : device_ids) {
+      Device &device = manager.get(id);
+      if (device.device_type() == DeviceType::CUDA) {
+        has_gpu_ = true;
+        device_ = device;
+        break;
+      }
+    }
+
+    if (!has_gpu_) {
+      GTEST_SKIP() << "No CUDA device available, skipping CuDNN engine tests";
+    }
+
+    stream_ = device_->default_stream();
+  }
+
   void SetUp() override { ExampleGraphs::register_defaults(); }
+
+  static bool has_gpu_;
+  static sref<Device> device_;
+  static stream stream_;
 };
+
+bool BF16Test::has_gpu_ = false;
+sref<Device> BF16Test::device_;
+stream BF16Test::stream_ = nullptr;
 
 TEST_F(BF16Test, Dense) {
   constexpr size_t batch_size = 8;
   constexpr size_t input_dim = 32;
   constexpr size_t output_dim = 16;
-  auto &allocator = PoolAllocator::instance(getGPU(), defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device_, stream_);
 
   auto fp32_dense_layer = Dense(input_dim, output_dim, false, "fp32_dense");
   fp32_dense_layer.set_io_dtype(DType_t::FP32);
@@ -56,8 +87,8 @@ TEST_F(BF16Test, Dense) {
     input_data_fp32[i] = static_cast<float>(input_data[i]);
   }
 
-  Tensor input_fp32 = fp32_input.to_device(getGPU());
-  Tensor input_bf16 = bf16_input.to_device(getGPU());
+  Tensor input_fp32 = fp32_input.to_device(device_);
+  Tensor input_bf16 = bf16_input.to_device(device_);
 
   Residuals fp32_residuals, bf16_residuals;
   Tensor output_fp32 = fp32_dense_layer.forward({input_fp32}, fp32_residuals)[0];
@@ -93,8 +124,8 @@ TEST_F(BF16Test, Dense) {
   criterion->compute_gradient(cpu_output_fp32, target_fp32, gradient_fp32);
   criterion->compute_gradient(cpu_output_bf16, target_bf16, gradient_bf16);
 
-  auto gpu_gradient_fp32 = gradient_fp32.to_device(getGPU());
-  auto gpu_gradient_bf16 = gradient_bf16.to_device(getGPU());
+  auto gpu_gradient_fp32 = gradient_fp32.to_device(device_);
+  auto gpu_gradient_bf16 = gradient_bf16.to_device(device_);
 
   Tensor grad_input_bf16 = bf16_dense_layer.backward({gpu_gradient_bf16}, bf16_residuals)[0];
   Tensor grad_input_fp32 = fp32_dense_layer.backward({gpu_gradient_fp32}, fp32_residuals)[0];

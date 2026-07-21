@@ -6,7 +6,8 @@
 using namespace tunx;
 
 int main() {
-  auto allocator = DELAllocatorV2::create(getGPU(), defaultFlowHandle);
+  auto &device = getGPU();
+  auto allocator = DELAllocatorV2::create(device, device.default_stream());
   allocator->reserve(100);
 
   auto ptr1 = allocator->allocate(10);

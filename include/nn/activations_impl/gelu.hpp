@@ -12,20 +12,20 @@ namespace tunx {
 namespace func {
 class GELU : public ActivationFunction {
 public:
-  std::unique_ptr<Task> apply(const Tensor &input, Tensor &output) const override;
-  std::unique_ptr<Task> compute_gradient(const Tensor &input, const Tensor &grad_output,
-                                         Tensor &grad_input) const override;
+  void apply(const Tensor &input, Tensor &output, stream s = nullptr) const override;
+  void compute_gradient(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
+                        stream s = nullptr) const override;
 
   std::string name() const override { return "gelu"; }
   std::unique_ptr<ActivationFunction> clone() const override { return std::make_unique<GELU>(); }
 
 private:
   template <typename Compute_T>
-  std::unique_ptr<Task> apply_impl(const Tensor &input, Tensor &output, flowHandle_t handle) const;
+  void apply_impl(const Tensor &input, Tensor &output, stream s) const;
 
   template <typename Compute_T>
-  std::unique_ptr<Task> compute_gradient_impl(const Tensor &input, const Tensor &grad_output,
-                                              Tensor &grad_input, flowHandle_t handle) const;
+  void compute_gradient_impl(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
+                             stream s) const;
 };
 }  // namespace func
 }  // namespace tunx

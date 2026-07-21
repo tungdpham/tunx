@@ -1,32 +1,36 @@
-#ifdef TUNX_USE_CUDA
+#include <memory>
 
-#include "device/cuda_device.hpp"
+#include "device/stream.hpp"
+#ifdef TUNX_USE_CUDA
 
 #include <cuda_runtime.h>
 #include <cudnn_graph.h>
 #include <nvml.h>
 
-#include <iostream>
 #include <stdexcept>
 #include <string>
+
+#include "device/cuda_device.hpp"
 
 namespace tunx {
 
 CUDADevice::CUDADevice(int id)
-    : Device(id), id_(id) {
+    : Device(id),
+      id_(id) {
   cudaError_t err = cudaSetDevice(id);
   if (err != cudaSuccess) {
     throw std::runtime_error("Failed to set CUDA device " + std::to_string(id) + ": " +
                              cudaGetErrorString(err));
   }
   nvmlInit_v2();
-  create_flow(defaultFlowHandle);
+  create_stream(default_stream_);
 }
 
 CUDADevice::~CUDADevice() = default;
 
 CUDADevice::CUDADevice(CUDADevice &&other) noexcept
-    : Device(std::move(other)), id_(other.id_), flows_(std::move(other.flows_)) {
+    : Device(std::move(other)),
+      id_(other.id_) {
   other.id_ = -1;
 }
 
@@ -34,15 +38,12 @@ CUDADevice &CUDADevice::operator=(CUDADevice &&other) noexcept {
   if (this != &other) {
     Device::operator=(std::move(other));
     id_ = other.id_;
-    flows_ = std::move(other.flows_);
     other.id_ = -1;
   }
   return *this;
 }
 
-DeviceType CUDADevice::device_type() const {
-  return DeviceType::CUDA;
-}
+DeviceType CUDADevice::device_type() const { return DeviceType::CUDA; }
 
 std::string CUDADevice::get_name() const {
   cudaDeviceProp prop;
@@ -95,30 +96,20 @@ void *CUDADevice::allocate_aligned_memory(size_t size, size_t alignment) const {
   return allocate_memory(size);
 }
 
-void CUDADevice::deallocate_aligned_memory(void *ptr) const {
-  deallocate_memory(ptr);
+void CUDADevice::deallocate_aligned_memory(void *ptr) const { deallocate_memory(ptr); }
+
+Endianness CUDADevice::get_endianness() const { return Endianness::LITTLE; }
+
+void CUDADevice::create_stream(stream &s) {
+  auto impl = std::make_shared<cuda_stream>(*this);
+  s = stream(impl);
 }
 
-Endianness CUDADevice::get_endianness() const {
-  return Endianness::LITTLE;
-}
+stream CUDADevice::default_stream() const { return default_stream_; }
 
-void CUDADevice::create_flow(flowHandle_t handle) const {
-  if (flows_.find(handle) == flows_.end()) {
-    flows_[handle] = std::make_unique<CUDAFlow>();
-  }
-}
-
-Flow *CUDADevice::get_flow(flowHandle_t handle) const {
-  auto it = flows_.find(handle);
-  if (it == flows_.end()) {
-    std::cerr << "WARN: Creating new CUDAFlow with ID: " << handle
-              << ". Are we using the right flow?" << std::endl;
-    flows_[handle] = std::make_unique<CUDAFlow>();
-    return flows_[handle].get();
-  } else {
-    return it->second.get();
-  }
+void CUDADevice::launch(Device &device, stream s, std::function<void(cudaStream_t)> func) {
+  cudaStream_t cu_stream = *s.as<cuda_stream>();
+  func(cu_stream);
 }
 
 }  // namespace tunx

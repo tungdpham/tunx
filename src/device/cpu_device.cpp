@@ -4,7 +4,10 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <sstream>
+
+#include "device/stream.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -22,22 +25,10 @@ namespace tunx {
 
 CPUDevice::CPUDevice(int id)
     : Device(id) {
-  create_flow(defaultFlowHandle);
+  create_stream(default_stream_);
 }
 
 CPUDevice::~CPUDevice() {}
-
-CPUDevice::CPUDevice(CPUDevice &&other) noexcept
-    : Device(std::move(other)),
-      flows_(std::move(other.flows_)) {}
-
-CPUDevice &CPUDevice::operator=(CPUDevice &&other) noexcept {
-  if (this != &other) {
-    Device::operator=(std::move(other));
-    flows_ = std::move(other.flows_);
-  }
-  return *this;
-}
 
 DeviceType CPUDevice::device_type() const { return DeviceType::CPU; }
 
@@ -182,19 +173,13 @@ Endianness CPUDevice::get_endianness() const {
   return (numPtr[0] == 1) ? Endianness::LITTLE : Endianness::BIG;
 }
 
-void CPUDevice::create_flow(flowHandle_t handle) const {
-  if (flows_.find(handle) == flows_.end()) {
-    flows_[handle] = std::make_unique<CPUFlow>();
-  }
+void CPUDevice::create_stream(stream &s) {
+  auto impl = std::make_shared<cpu_stream>(*this);
+  s = stream(impl);
 }
 
-Flow *CPUDevice::get_flow(flowHandle_t handle) const {
-  if (flows_.find(handle) == flows_.end()) {
-    std::cerr << "WARN: Creating new CPUFlow with ID: " << handle
-              << ". Are we using the right flow?" << std::endl;
-    flows_[handle] = std::make_unique<CPUFlow>();
-  }
-  return flows_[handle].get();
-}
+stream CPUDevice::default_stream() const { return default_stream_; }
+
+void CPUDevice::launch(Device &device, stream s, std::function<void()> func) { func(); }
 
 }  // namespace tunx

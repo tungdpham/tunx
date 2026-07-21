@@ -21,19 +21,19 @@ constexpr size_t DEFAULT_ALIGNMENT = 256;
 
 struct device_storage {
 private:
-  csref<Device> device_;
+  sref<Device> device_;
   void *ptr_;
   size_t capacity_;
   size_t alignment_;
 
 public:
-  device_storage(csref<Device> device, void *ptr, size_t capacity, size_t alignment)
+  device_storage(sref<Device> device, void *ptr, size_t capacity, size_t alignment)
       : device_(device),
         ptr_(ptr),
         capacity_(capacity),
         alignment_(alignment) {}
 
-  csref<Device> device() const { return device_; }
+  sref<Device> device() const { return device_; }
   void *data() const { return ptr_; }
   size_t capacity() const { return capacity_; }
   size_t alignment() const { return alignment_; }
@@ -56,7 +56,7 @@ public:
     }
   }
 
-  dptr(void *ptr, size_t byte_size, const Device &device) {
+  dptr(void *ptr, size_t byte_size, Device &device) {
     if (ptr == nullptr && byte_size > 0) {
       throw std::invalid_argument("Cannot create dptr with null pointer and non-zero size");
     }
@@ -73,7 +73,7 @@ public:
 
   operator bool() const { return storage_ != nullptr && storage_->data() != nullptr; }
 
-  const Device &device() const { return storage_->device(); }
+  Device &device() const { return storage_->device(); }
 
   DeviceType device_type() const {
     if (!storage_) {
@@ -137,8 +137,7 @@ void archive(Archiver &archiver, const dptr &dptr) {
   archiver(make_blob(dptr.get<unsigned char>(), dptr.capacity(), dptr.device()));
 }
 
-inline dptr make_dptr(csref<Device> device, size_t byte_size,
-                      size_t alignment = DEFAULT_ALIGNMENT) {
+inline dptr make_dptr(sref<Device> device, size_t byte_size, size_t alignment = DEFAULT_ALIGNMENT) {
   if (byte_size == 0) {
     return dptr(nullptr);
   }
@@ -155,7 +154,7 @@ inline dptr make_dptr(csref<Device> device, size_t byte_size,
 }
 
 template <typename T>
-inline dptr make_dptr_t(csref<Device> device, size_t count, size_t alignment = DEFAULT_ALIGNMENT) {
+inline dptr make_dptr_t(sref<Device> device, size_t count, size_t alignment = DEFAULT_ALIGNMENT) {
   return make_dptr(device, count * sizeof(T), alignment);
 }
 

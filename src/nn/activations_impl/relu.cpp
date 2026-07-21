@@ -18,7 +18,7 @@ namespace tunx {
 namespace func {
 ReLU::ReLU() {}
 
-std::unique_ptr<Task> ReLU::apply(const Tensor &input, Tensor &output) const {
+void ReLU::apply(const Tensor &input, Tensor &output, stream s) const {
   if (input.shape() != output.shape()) {
     throw std::runtime_error("Input and output shapes must match for ReLU");
   }
@@ -26,19 +26,18 @@ std::unique_ptr<Task> ReLU::apply(const Tensor &input, Tensor &output) const {
     throw std::runtime_error("Input and output must be on the same device for ReLU");
   }
 
-  DISPATCH_DTYPE(input.dtype(), T, return apply_impl<T>(input, output, defaultFlowHandle));
+  DISPATCH_DTYPE(input.dtype(), T, return apply_impl<T>(input, output, s));
 }
 
-std::unique_ptr<Task> ReLU::compute_gradient(const Tensor &input, const Tensor &grad_output,
-                                             Tensor &grad_input) const {
+void ReLU::compute_gradient(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
+                            stream s) const {
   assert(grad_output.shape() == grad_input.shape() &&
          "Shapes must match for in-place grad_output computation");
   if (grad_output.device() != grad_input.device()) {
     throw std::runtime_error("Input and upstream grad_output must be on the same device for RELU");
   }
-  DISPATCH_DTYPE(
-      input.dtype(), T,
-      return compute_gradient_impl<T>(input, grad_output, grad_input, defaultFlowHandle));
+  DISPATCH_DTYPE(input.dtype(), T,
+                 return compute_gradient_impl<T>(input, grad_output, grad_input, s));
 }
 
 std::string ReLU::name() const { return "relu"; }
@@ -46,53 +45,51 @@ std::string ReLU::name() const { return "relu"; }
 std::unique_ptr<ActivationFunction> ReLU::clone() const { return std::make_unique<ReLU>(*this); }
 
 template <typename Compute_T>
-std::unique_ptr<Task> ReLU::apply_impl(const Tensor &input, Tensor &output,
-                                       flowHandle_t handle) const {
+void ReLU::apply_impl(const Tensor &input, Tensor &output, stream handle) const {
   if (input.dtype() != dtype_of<Compute_T>() || output.dtype() != dtype_of<Compute_T>()) {
     throw std::runtime_error("ReLU tensor dtype mismatch with dispatch type");
   }
 
   size_t size = input.size();
+  auto &device = input.device();
   if (input.device_type() == DeviceType::CPU) {
-    return create_cpu_task(handle, cpu::relu<Compute_T>, input.data_as<Compute_T>(),
-                           output.data_as<Compute_T>(), size);
+    create_cpu_task(device, handle, cpu::relu<Compute_T>, input.data_as<Compute_T>(),
+                    output.data_as<Compute_T>(), size);
   }
 #ifdef TUNX_USE_CUDA
   else if (input.device_type() == DeviceType::CUDA) {
-    return create_cuda_task(handle, cuda::relu<Compute_T>, input.data_as<Compute_T>(),
-                            output.data_as<Compute_T>(), size);
+    create_cuda_task(device, handle, cuda::relu<Compute_T>, input.data_as<Compute_T>(),
+                     output.data_as<Compute_T>(), size);
   }
 #endif
   else {
     throw std::runtime_error("Unsupported device type for ReLU apply");
   }
-  return nullptr;
 }
 
 template <typename Compute_T>
-std::unique_ptr<Task> ReLU::compute_gradient_impl(const Tensor &input, const Tensor &grad_output,
-                                                  Tensor &grad_input, flowHandle_t handle) const {
+void ReLU::compute_gradient_impl(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
+                                 stream handle) const {
   if (input.dtype() != dtype_of<Compute_T>() || grad_output.dtype() != dtype_of<Compute_T>() ||
       grad_input.dtype() != dtype_of<Compute_T>()) {
     throw std::runtime_error("ReLU tensor dtype mismatch with dispatch type");
   }
 
   size_t size = grad_output.size();
+  auto &device = grad_output.device();
   if (grad_output.device_type() == DeviceType::CPU) {
-    return create_cpu_task(handle, cpu::relu_gradient<Compute_T>, input.data_as<Compute_T>(),
-                           grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size);
+    create_cpu_task(device, handle, cpu::relu_gradient<Compute_T>, input.data_as<Compute_T>(),
+                    grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size);
   }
 #ifdef TUNX_USE_CUDA
   else if (grad_output.device_type() == DeviceType::CUDA) {
-    return create_cuda_task(handle, cuda::relu_gradient<Compute_T>, input.data_as<Compute_T>(),
-                            grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(),
-                            size);
+    create_cuda_task(device, handle, cuda::relu_gradient<Compute_T>, input.data_as<Compute_T>(),
+                     grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size);
   }
 #endif
   else {
     throw std::runtime_error("Unsupported device type for ReLU compute_gradient");
   }
-  return nullptr;
 }
 
 }  // namespace func

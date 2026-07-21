@@ -2,7 +2,6 @@
 #include "device/pool_allocator.hpp"
 #include "nn/example_graphs.hpp"
 #include "nn/graph.hpp"
-#include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
 
 using namespace tunx;
@@ -10,7 +9,8 @@ using namespace std;
 
 signed main() {
   ExampleGraphs::register_defaults();
-  auto &allocator = PoolAllocator::instance(getGPU(), defaultFlowHandle);
+  auto &device = getGPU();
+  auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
   Graph graph = ExampleGraphs::create("gpt2_small", allocator);
 
@@ -22,8 +22,7 @@ signed main() {
     for (auto &param : params) {
       fill(param.grad(), 0.0f);
     }
-    auto flow = getGPU().get_flow(defaultFlowHandle);
-    flow->synchronize();
+    device.default_stream().sync();
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(pass_end - pass_start);
@@ -39,8 +38,7 @@ signed main() {
   for (int i = 0; i < passes; ++i) {
     auto pass_start = std::chrono::high_resolution_clock::now();
     graph.zero_grads();
-    Flow *flow = getGPU().get_flow(defaultFlowHandle);
-    flow->synchronize();
+    device.default_stream().sync();
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(pass_end - pass_start);

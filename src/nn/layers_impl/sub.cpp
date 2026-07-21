@@ -39,7 +39,7 @@ Vec<Tensor> SubImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residual
   size_t n = a.size();
 
   DISPATCH_DTYPE(a.dtype(), T, {
-    ops::sub<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n, this->flow_handle_);
+    ops::sub<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n, backend_handle_.get_stream());
   });
 
   return {output};
@@ -57,9 +57,9 @@ Vec<Tensor> SubImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &r
   Tensor grad_b = get_tensor(grad_out.shape(), this->io_dtype_);
 
   DISPATCH_DTYPE(grad_out.dtype(), T, {
-    ops::copy<T>(grad_out.data_ptr(), grad_a.data_ptr(), n, this->flow_handle_);
+    ops::copy<T>(grad_out.data_ptr(), grad_a.data_ptr(), n, backend_handle_.get_stream());
     ops::mul_scalar<T>(grad_out.data_ptr(), static_cast<T>(-1), grad_b.data_ptr(), n,
-                       this->flow_handle_);
+                       backend_handle_.get_stream());
   });
 
   return {grad_a, grad_b};

@@ -20,26 +20,28 @@ using namespace tunx;
 
 #ifdef TUNX_USE_CUDA
 
-class GPUopsTest : public ::testing::Test {
+class GPUOpsTest : public ::testing::Test {
 protected:
-  static void SetUpTestSuite() { initializeDefaultDevices(); }
-
-  void SetUp() override {
+  static void SetUpTestSuite() {
+    initializeDefaultDevices();
     DeviceManager &manager = DeviceManager::instance();
     Vec<DeviceID> device_ids = manager.get_all();
 
     has_gpu_ = false;
-    for (DeviceID &id : device_ids) {
-      const Device &device = manager.get(id);
+    for (const DeviceID &id : device_ids) {
+      Device &device = manager.get(id);
       if (device.device_type() == DeviceType::CUDA) {
         has_gpu_ = true;
+        device_ = device;
         break;
       }
     }
 
     if (!has_gpu_) {
-      GTEST_SKIP() << "No CUDA device available, skipping CUDA tensor ops tests";
+      GTEST_SKIP() << "No CUDA device available, skipping CuDNN engine tests";
     }
+
+    stream_ = device_->default_stream();
   }
 
   void TearDown() override {}
@@ -72,10 +74,16 @@ protected:
     }
   }
 
-  bool has_gpu_;
+  static bool has_gpu_;
+  static sref<Device> device_;
+  static stream stream_;
 };
 
-TEST_F(GPUopsTest, PadBasic) {
+bool GPUOpsTest::has_gpu_ = false;
+sref<Device> GPUOpsTest::device_;
+stream GPUOpsTest::stream_ = nullptr;
+
+TEST_F(GPUOpsTest, PadBasic) {
   Tensor cpu_tensor = Tensor({1, 1, 3, 3}, DType_t::FP32);
   auto cpu_data = cpu_tensor.data_as<float>();
   for (size_t i = 0; i < 9; ++i) {
@@ -92,7 +100,7 @@ TEST_F(GPUopsTest, PadBasic) {
   compareTensors<float>(cpu_padded, gpu_padded);
 }
 
-TEST_F(GPUopsTest, PadMultiChannel) {
+TEST_F(GPUOpsTest, PadMultiChannel) {
   Tensor cpu_tensor = Tensor({2, 3, 4, 4}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 10.0f);
 
@@ -106,7 +114,7 @@ TEST_F(GPUopsTest, PadMultiChannel) {
   compareTensors<float>(cpu_padded, gpu_padded);
 }
 
-TEST_F(GPUopsTest, PadAsymmetric) {
+TEST_F(GPUOpsTest, PadAsymmetric) {
   Tensor cpu_tensor = Tensor({1, 2, 5, 7}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 5.0f);
 
@@ -120,7 +128,7 @@ TEST_F(GPUopsTest, PadAsymmetric) {
   compareTensors<float>(cpu_padded, gpu_padded);
 }
 
-TEST_F(GPUopsTest, UnpadBasic) {
+TEST_F(GPUOpsTest, UnpadBasic) {
   Tensor cpu_tensor = Tensor({1, 1, 5, 5}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 10.0f);
 
@@ -134,7 +142,7 @@ TEST_F(GPUopsTest, UnpadBasic) {
   compareTensors<float>(cpu_unpadded, gpu_unpadded);
 }
 
-TEST_F(GPUopsTest, UnpadMultiChannel) {
+TEST_F(GPUOpsTest, UnpadMultiChannel) {
   Tensor cpu_tensor = Tensor({2, 3, 8, 8}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 15.0f);
 
@@ -148,7 +156,7 @@ TEST_F(GPUopsTest, UnpadMultiChannel) {
   compareTensors<float>(cpu_unpadded, gpu_unpadded);
 }
 
-TEST_F(GPUopsTest, PadUnpadRoundTrip) {
+TEST_F(GPUOpsTest, PadUnpadRoundTrip) {
   Tensor cpu_original = Tensor({1, 2, 4, 4}, DType_t::FP32);
   fill_normal(cpu_original, 0.0, 8.0f);
 
@@ -168,7 +176,7 @@ TEST_F(GPUopsTest, PadUnpadRoundTrip) {
   compareTensors<float>(cpu_restored, gpu_restored);
 }
 
-TEST_F(GPUopsTest, CropBasic) {
+TEST_F(GPUOpsTest, CropBasic) {
   Tensor cpu_tensor = Tensor({1, 1, 5, 5}, DType_t::FP32);
   auto cpu_data = cpu_tensor.data_as<float>();
   for (size_t i = 0; i < 25; ++i) {
@@ -185,7 +193,7 @@ TEST_F(GPUopsTest, CropBasic) {
   compareTensors<float>(cpu_cropped, gpu_cropped);
 }
 
-TEST_F(GPUopsTest, CropMultiChannel) {
+TEST_F(GPUOpsTest, CropMultiChannel) {
   Tensor cpu_tensor = Tensor({2, 3, 10, 10}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 20.0f);
 
@@ -199,7 +207,7 @@ TEST_F(GPUopsTest, CropMultiChannel) {
   compareTensors<float>(cpu_cropped, gpu_cropped);
 }
 
-TEST_F(GPUopsTest, CropCorner) {
+TEST_F(GPUOpsTest, CropCorner) {
   Tensor cpu_tensor = Tensor({1, 2, 8, 8}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 12.0f);
 
@@ -213,7 +221,7 @@ TEST_F(GPUopsTest, CropCorner) {
   compareTensors<float>(cpu_cropped, gpu_cropped);
 }
 
-TEST_F(GPUopsTest, CropBottomRight) {
+TEST_F(GPUOpsTest, CropBottomRight) {
   Tensor cpu_tensor = Tensor({1, 1, 6, 6}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 10.0f);
 
@@ -227,7 +235,7 @@ TEST_F(GPUopsTest, CropBottomRight) {
   compareTensors<float>(cpu_cropped, gpu_cropped);
 }
 
-TEST_F(GPUopsTest, SliceBatchBasic) {
+TEST_F(GPUOpsTest, SliceBatchBasic) {
   Tensor cpu_tensor = Tensor({4, 2, 3, 3}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 15.0f);
 
@@ -241,7 +249,7 @@ TEST_F(GPUopsTest, SliceBatchBasic) {
   compareTensors<float>(cpu_sliced, gpu_sliced);
 }
 
-TEST_F(GPUopsTest, SliceBatchSingle) {
+TEST_F(GPUOpsTest, SliceBatchSingle) {
   Tensor cpu_tensor = Tensor({5, 3, 4, 4}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 10.0f);
 
@@ -255,7 +263,7 @@ TEST_F(GPUopsTest, SliceBatchSingle) {
   compareTensors<float>(cpu_sliced, gpu_sliced);
 }
 
-TEST_F(GPUopsTest, SliceBatchFirstBatch) {
+TEST_F(GPUOpsTest, SliceBatchFirstBatch) {
   Tensor cpu_tensor = Tensor({3, 2, 5, 5}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 8.0f);
 
@@ -269,7 +277,7 @@ TEST_F(GPUopsTest, SliceBatchFirstBatch) {
   compareTensors<float>(cpu_sliced, gpu_sliced);
 }
 
-TEST_F(GPUopsTest, SplitBasic) {
+TEST_F(GPUOpsTest, SplitBasic) {
   Tensor cpu_tensor = Tensor({4, 2, 3, 3}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 10.0f);
 
@@ -285,7 +293,7 @@ TEST_F(GPUopsTest, SplitBasic) {
   }
 }
 
-TEST_F(GPUopsTest, SplitMultiple) {
+TEST_F(GPUOpsTest, SplitMultiple) {
   Tensor cpu_tensor = Tensor({8, 3, 4, 4}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 15.0f);
   Vec<Tensor> cpu_splits;
@@ -314,7 +322,7 @@ TEST_F(GPUopsTest, SplitMultiple) {
   }
 }
 
-TEST_F(GPUopsTest, SplitSingleBatch) {
+TEST_F(GPUOpsTest, SplitSingleBatch) {
   Tensor cpu_tensor = Tensor({6, 2, 5, 5}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 12.0f);
 
@@ -331,7 +339,7 @@ TEST_F(GPUopsTest, SplitSingleBatch) {
   }
 }
 
-TEST_F(GPUopsTest, Im2colBasicKernel3x3) {
+TEST_F(GPUOpsTest, Im2colBasicKernel3x3) {
   Tensor cpu_input = Tensor({1, 1, 5, 5}, DType_t::FP32);
   auto cpu_input_data = cpu_input.data_as<float>();
   for (size_t i = 0; i < 25; ++i) {
@@ -363,7 +371,7 @@ TEST_F(GPUopsTest, Im2colBasicKernel3x3) {
   }
 }
 
-TEST_F(GPUopsTest, Im2colWithPadding) {
+TEST_F(GPUOpsTest, Im2colWithPadding) {
   Tensor cpu_input = Tensor({1, 2, 4, 4}, DType_t::FP32);
   fill_normal(cpu_input, 0.0, 10.0f);
 
@@ -394,7 +402,7 @@ TEST_F(GPUopsTest, Im2colWithPadding) {
   }
 }
 
-TEST_F(GPUopsTest, Im2colWithStride) {
+TEST_F(GPUOpsTest, Im2colWithStride) {
   Tensor cpu_input = Tensor({1, 1, 8, 8}, DType_t::FP32);
   fill_normal(cpu_input, 0.0, 15.0f);
 
@@ -423,7 +431,7 @@ TEST_F(GPUopsTest, Im2colWithStride) {
   }
 }
 
-TEST_F(GPUopsTest, Im2colMultiBatch) {
+TEST_F(GPUOpsTest, Im2colMultiBatch) {
   Tensor cpu_input = Tensor({4, 3, 6, 6}, DType_t::FP32);
   fill_normal(cpu_input, 0.0, 12.0f);
 
@@ -454,7 +462,7 @@ TEST_F(GPUopsTest, Im2colMultiBatch) {
   }
 }
 
-TEST_F(GPUopsTest, Col2imBasic) {
+TEST_F(GPUOpsTest, Col2imBasic) {
   size_t batch_size = 1, channels = 1, height = 5, width = 5;
   size_t kernel_h = 3, kernel_w = 3;
   size_t stride_h = 1, stride_w = 1;
@@ -492,7 +500,7 @@ TEST_F(GPUopsTest, Col2imBasic) {
   }
 }
 
-TEST_F(GPUopsTest, Col2imWithPadding) {
+TEST_F(GPUOpsTest, Col2imWithPadding) {
   size_t batch_size = 1, channels = 2, height = 4, width = 4;
   size_t kernel_h = 3, kernel_w = 3;
   size_t stride_h = 1, stride_w = 1;
@@ -532,7 +540,7 @@ TEST_F(GPUopsTest, Col2imWithPadding) {
   }
 }
 
-TEST_F(GPUopsTest, Im2colCol2imRoundTrip) {
+TEST_F(GPUOpsTest, Im2colCol2imRoundTrip) {
   Tensor cpu_input = Tensor({1, 1, 6, 6}, DType_t::FP32);
   fill_normal(cpu_input, 0.0, 10.0f);
 
@@ -567,7 +575,7 @@ TEST_F(GPUopsTest, Im2colCol2imRoundTrip) {
   compareTensors<float>(cpu_reconstructed, gpu_reconstructed, 1e-4f);
 }
 
-TEST_F(GPUopsTest, CombinedPadCropSlice) {
+TEST_F(GPUOpsTest, CombinedPadCropSlice) {
   Tensor cpu_original = Tensor({4, 3, 8, 8}, DType_t::FP32);
   fill_normal(cpu_original, 0.0, 15.0f);
 
@@ -589,7 +597,7 @@ TEST_F(GPUopsTest, CombinedPadCropSlice) {
   compareTensors<float>(cpu_sliced, gpu_sliced);
 }
 
-TEST_F(GPUopsTest, LargeTensorOperations) {
+TEST_F(GPUOpsTest, LargeTensorOperations) {
   Tensor cpu_tensor = Tensor({8, 16, 32, 32}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 20.0f);
 
@@ -613,7 +621,7 @@ TEST_F(GPUopsTest, LargeTensorOperations) {
   compareTensors<float>(cpu_sliced, gpu_sliced);
 }
 
-TEST_F(GPUopsTest, MinimalTensor) {
+TEST_F(GPUOpsTest, MinimalTensor) {
   Tensor cpu_tensor = Tensor({1, 1, 1, 1}, DType_t::FP32);
   auto cpu_data = cpu_tensor.data_as<float>();
   cpu_data[0] = 42.0f;
@@ -627,7 +635,7 @@ TEST_F(GPUopsTest, MinimalTensor) {
   compareTensors<float>(cpu_padded, gpu_padded);
 }
 
-TEST_F(GPUopsTest, SinglePixelPadding) {
+TEST_F(GPUOpsTest, SinglePixelPadding) {
   Tensor cpu_tensor = Tensor({1, 1, 3, 3}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 5.0f);
 
@@ -640,7 +648,7 @@ TEST_F(GPUopsTest, SinglePixelPadding) {
   compareTensors<float>(cpu_padded, gpu_padded);
 }
 
-TEST_F(GPUopsTest, AsymmetricDimensions) {
+TEST_F(GPUOpsTest, AsymmetricDimensions) {
   Tensor cpu_tensor = Tensor({1, 1, 20, 3}, DType_t::FP32);
   fill_normal(cpu_tensor, 0.0, 10.0f);
 

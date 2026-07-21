@@ -15,7 +15,9 @@
 #include <unordered_map>
 
 #include "device/device_type.hpp"
+#include "device/stream.hpp"
 #include "nn/engines/cpu_engine.hpp"
+#include "nn/engines/engine_handle.hpp"
 #ifdef TUNX_USE_CUDA
 #include "nn/engines/cuda_engine.hpp"
 #include "nn/engines/cudnn_engine.hpp"
@@ -26,7 +28,7 @@
 
 namespace tunx {
 
-static Engine get_default_engine(const Device &device) {
+static Engine get_default_engine(Device &device) {
   switch (device.device_type()) {
     case tunx::DeviceType::CPU:
       return make_engine<CPUEngine>();
@@ -42,7 +44,7 @@ static Engine get_default_engine(const Device &device) {
   }
 }
 
-void Graph::compile(IAllocator &allocator) {
+void Graph::compile(IAllocator &allocator, stream s) {
   sort();
   std::set<LayerImpl *> unique_layers;
   for (const auto &edge : edges_) {
@@ -51,13 +53,20 @@ void Graph::compile(IAllocator &allocator) {
       unique_layers.insert(layer_ptr);
     }
   }
-  Engine engine = get_default_engine(allocator.device());
+
+  // if stream not provided or invalid, take device's default stream
+  Device &device = allocator.device();
+  s = s ? s : device.default_stream();
+
+  engine_ = get_default_engine(allocator.device());
   param_allocator_ = &allocator;
-  workspace_allocator_ = DELAllocatorV2::create(allocator.device(), defaultFlowHandle);
-  void *backend_handle = engine->create_backend_handle();
+
+  workspace_allocator_ = DELAllocatorV2::create(allocator.device(), s);
+  engine_handle_ = engine_->create_handle(s);
+
   for (LayerImpl *layer_ptr : unique_layers) {
-    layer_ptr->set_engine(engine);
-    layer_ptr->set_backend_handle(backend_handle);
+    layer_ptr->set_engine(engine_);
+    layer_ptr->set_backend_handle(engine_handle_);
     layer_ptr->set_allocator(*workspace_allocator_);
     layer_ptr->init();
   }
@@ -335,7 +344,7 @@ Node Graph::input(const std::string &uid) {
 
 void Graph::zero_grads() {
   for (const auto &node : nodes_) {
-    node->zero_grads();
+    node->clear_grads();
   }
   for (const auto &edge : edges_) {
     edge->layer()->zero_grads();

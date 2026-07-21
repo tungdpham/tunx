@@ -64,19 +64,21 @@ Vec<Tensor> DivImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &r
 
   DISPATCH_DTYPE(grad_out.dtype(), T, {
     // grad_a = grad_out / b
-    ops::div<T>(grad_out.data_ptr(), b.data_ptr(), grad_a.data_ptr(), n, this->flow_handle_);
+    ops::div<T>(grad_out.data_ptr(), b.data_ptr(), grad_a.data_ptr(), n,
+                backend_handle_.get_stream());
 
     Tensor b_sq = get_tensor(grad_out.shape(), this->io_dtype_);
-    ops::mul<T>(b.data_ptr(), b.data_ptr(), b_sq.data_ptr(), n, this->flow_handle_);
+    ops::mul<T>(b.data_ptr(), b.data_ptr(), b_sq.data_ptr(), n, backend_handle_.get_stream());
 
     Tensor numerator = get_tensor(grad_out.shape(), this->io_dtype_);
-    ops::mul<T>(grad_out.data_ptr(), a.data_ptr(), numerator.data_ptr(), n, this->flow_handle_);
+    ops::mul<T>(grad_out.data_ptr(), a.data_ptr(), numerator.data_ptr(), n,
+                backend_handle_.get_stream());
 
-    ops::div<T>(numerator.data_ptr(), b_sq.data_ptr(), grad_b.data_ptr(), n, this->flow_handle_);
+    ops::div<T>(numerator.data_ptr(), b_sq.data_ptr(), grad_b.data_ptr(), n,
+                backend_handle_.get_stream());
 
-    // Step 4: negate
     ops::mul_scalar<T>(grad_b.data_ptr(), static_cast<T>(-1), grad_b.data_ptr(), n,
-                       this->flow_handle_);
+                       backend_handle_.get_stream());
   });
 
   return {grad_a, grad_b};

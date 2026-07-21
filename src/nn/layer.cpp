@@ -9,7 +9,7 @@
 
 #include <fmt/ranges.h>
 
-#include "device/flow.hpp"
+#include "device/stream.hpp"
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
@@ -42,7 +42,7 @@ Vec<Tensor> LayerImpl::forward(const Vec<Tensor> &inputs, Residuals &residuals) 
   }
   Vec<Tensor> outputs = forward_impl(current_inputs, residuals);
 #ifndef NDEBUG
-  this->device().get_flow(flow_handle_)->synchronize();
+  backend_handle_.get_stream().sync();
 #endif
   return outputs;
 }
@@ -60,7 +60,7 @@ Vec<Tensor> LayerImpl::backward(const Vec<Tensor> &grad_outputs, Residuals &resi
   }
   auto grad_inputs = backward_impl(current_grad_outputs, residuals);
 #ifndef NDEBUG
-  this->device().get_flow(flow_handle_)->synchronize();
+  backend_handle_.get_stream().sync();
 #endif
   return grad_inputs;
 }
@@ -72,14 +72,6 @@ LayerImpl &LayerImpl::set_allocator(DELAllocatorV2 &allocator) {
 }
 
 DELAllocatorV2 *LayerImpl::get_allocator() const { return allocator_; }
-
-LayerImpl &LayerImpl::set_flow_handle(flowHandle_t handle) {
-  flow_handle_ = handle;
-  on_set_flow_handle(handle);
-  return *this;
-}
-
-flowHandle_t LayerImpl::get_flow_handle() const { return flow_handle_; }
 
 LayerImpl &LayerImpl::set_io_dtype(DType_t dtype) {
   io_dtype_ = dtype;
@@ -133,12 +125,12 @@ Engine LayerImpl::get_engine() {
   return engine_;
 }
 
-void LayerImpl::set_backend_handle(void *backend_handle) {
+void LayerImpl::set_backend_handle(engine_handle backend_handle) {
   backend_handle_ = backend_handle;
   on_set_backend_handle(backend_handle);
 }
 
-void *LayerImpl::get_backend_handle() const { return backend_handle_; }
+engine_handle LayerImpl::get_backend_handle() const { return backend_handle_; }
 
 void LayerImpl::save_state(std::ostream &out) const {
   auto config = get_config();

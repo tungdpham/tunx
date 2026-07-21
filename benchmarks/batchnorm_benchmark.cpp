@@ -21,7 +21,7 @@ constexpr float EPSILON = 2e-2f;
 
 signed main() {
   auto &device = getGPU();
-  auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
+  auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
   Graph graph;
   auto input = graph.make_node("input");
@@ -33,7 +33,7 @@ signed main() {
   auto legacy_batchnorm_layer =
       LegacyBatchNorm(NUM_FEATURES, 1e-5f, 0.1f, true, "legacy_batchnorm_test");
   auto legacy_bn_output = legacy_batchnorm_layer(input);
-  auto relu_layer = Activation(std::make_unique<tunx::func::ReLU>(), "relu_activation");
+  auto relu_layer = Activation(std::make_unique<func::ReLU>(), "relu_activation");
   auto legacy_relu_output_node = relu_layer(legacy_bn_output);
 
   graph.compile(allocator);
@@ -55,8 +55,7 @@ signed main() {
   for (int i = 0; i < passes; ++i) {
     auto pass_start = std::chrono::high_resolution_clock::now();
     output = bn_layer.forward({input_data}, residuals)[0];
-    Flow *flow = getGPU().get_flow(defaultFlowHandle);
-    flow->synchronize();
+    device.default_stream().sync();
 
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =
@@ -76,8 +75,7 @@ signed main() {
     auto pass_start = std::chrono::high_resolution_clock::now();
     legacy_output = legacy_batchnorm_layer.forward({input_data}, legacy_residuals)[0];
     legacy_relu_output = relu_layer.forward({legacy_output}, relu_residuals)[0];
-    Flow *flow = getGPU().get_flow(defaultFlowHandle);
-    flow->synchronize();
+    device.default_stream().sync();
     auto pass_end = std::chrono::high_resolution_clock::now();
     auto pass_duration =
         std::chrono::duration_cast<std::chrono::milliseconds>(pass_end - pass_start);

@@ -25,13 +25,6 @@ protected:
     }
   }
 
-  void on_set_flow_handle(flowHandle_t handle) override {
-    Vec<Layer> layers = this->layers();
-    for (Layer &layer : layers) {
-      layer.set_flow_handle(handle);
-    }
-  }
-
   void on_set_seed(unsigned long long seed) override {
     Vec<Layer> layers = this->layers();
     for (Layer &layer : layers) {

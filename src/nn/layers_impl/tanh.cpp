@@ -17,41 +17,25 @@ TanhImpl::TanhImpl(const std::string &name)
       activation_(std::make_unique<func::Tanh>()) {}
 
 Tensor TanhImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  Tensor output = get_tensor(input.shape(), io_dtype_);
-  activation_->apply(input, output);
-
   if (this->is_training_) {
-    // tanh'(x) = 1 - tanh(x)^2
-    residuals["output"] = output;
+    residuals["input"] = input;
   }
+
+  Tensor output = get_tensor(input.shape(), io_dtype_);
+  activation_->apply(input, output, backend_handle_.get_stream());
 
   return output;
 }
 
 Tensor TanhImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  Tensor &output = residuals["output"];
-  if (!output) {
-    throw std::runtime_error("No cached output found for backward pass in TanhImpl");
+  Tensor &input = residuals["input"];
+  if (!input) {
+    throw std::runtime_error("No cached input found for backward pass in TanhImpl");
   }
 
   Tensor grad_input = get_tensor(grad_output.shape(), io_dtype_);
 
-  // Gradient: grad_input = grad_output * (1 - output^2)
-  size_t num_elements = grad_output.size();
-  if (grad_output.device_type() == DeviceType::CPU) {
-    const float *grad_out_data = grad_output.data_as<float>();
-    const float *output_data = output.data_as<float>();
-    float *grad_in_data = grad_input.data_as<float>();
-    for (size_t i = 0; i < num_elements; ++i) {
-      float tanh_val = output_data[i];
-      grad_in_data[i] = grad_out_data[i] * (1.0f - tanh_val * tanh_val);
-    }
-  }
-#ifdef TUNX_USE_CUDA
-  else if (grad_output.device_type() == DeviceType::CUDA) {
-    throw std::runtime_error("TanhImpl: CUDA backward not yet implemented");
-  }
-#endif
+  activation_->compute_gradient(input, grad_output, grad_input, backend_handle_.get_stream());
 
   return grad_input;
 }

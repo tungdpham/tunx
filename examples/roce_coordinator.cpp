@@ -59,8 +59,8 @@ int main(int argc, char *argv[]) {
   RoCEConfig roce_config;
   roce_config.load_from_json(config_path);
 
-  const auto &device = DeviceManager::instance().get(train_config.device_id);
-  auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
+  auto &device = DeviceManager::instance().get(train_config.device_id);
+  auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
   Graph graph = load_or_create_graph(train_config.model_name, train_config.model_path, allocator);
 

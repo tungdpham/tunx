@@ -21,8 +21,8 @@
 
 #include "communicator.hpp"
 #include "device/device_manager.hpp"
-#include "device/flow.hpp"
 #include "device/pool_allocator.hpp"
+#include "device/stream.hpp"
 #include "distributed/command_type.hpp"
 #include "job.hpp"
 #include "message.hpp"
@@ -40,14 +40,14 @@ namespace tunx {
 class Worker {
 public:
   explicit Worker(Sequential model, std::unique_ptr<Communicator> communicator,
-                  const Device &device = getHost())
+                  Device &device = getHost())
       : communicator_(std::move(communicator)),
         should_stop_(true) {
     graph_ = std::make_unique<Graph>();
     auto input = graph_->make_node("input");
     auto output = model(input);
 
-    auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
+    auto &allocator = PoolAllocator::instance(device, nullptr);
     graph_->compile(allocator);
   }
 
@@ -96,7 +96,7 @@ public:
 
   void set_config(const StageConfig &config) {
     auto &device = DeviceManager::instance().get(device_id_);
-    auto &allocator = PoolAllocator::instance(device, defaultFlowHandle);
+    auto &allocator = PoolAllocator::instance(device, nullptr);
     std::istringstream graph_stream(config.graph_state, std::ios::binary);
     graph_ = std::make_unique<Graph>(Graph::load_state(graph_stream, allocator));
     for (const Edge &edge : graph_->edges()) {
@@ -174,7 +174,6 @@ protected:
         }
         this->optimizer_->update();
         this->optimizer_->zero_grads();
-        this->graph_->device().get_flow(defaultFlowHandle)->synchronize();
 
         Message response(CommandType::PARAMETERS_UPDATED, std::monostate{});
         communicator_->send_message(std::move(response), coordinator_endpoint_);

@@ -46,7 +46,7 @@ concept IsBlob = is_blob<std::remove_cvref_t<T>>::value;
 template <typename T>
 concept always_false = false;
 
-// Derived class should implement archive_impl(const T* data, size_t count, const Device& device)
+// Derived class should implement archive_impl(const T* data, size_t count, Device& device)
 // Archivable types should implement archive(Archiver& archiver, const Derived& obj) method outside
 // of the class definition for read only archivers and possibly archive(Archiver& archiver, Derived&
 // obj) for write archivers.

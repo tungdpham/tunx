@@ -1,13 +1,13 @@
 #pragma once
 
+#include <functional>
 #ifdef TUNX_USE_CUDA
 
-#include <memory>
-#include <unordered_map>
-
 #include "device/device.hpp"
-#include "device/flow.hpp"
+#include "device/stream.hpp"
+
 namespace tunx {
+
 class CUDADevice : public Device {
 public:
   CUDADevice(int id);
@@ -28,12 +28,44 @@ public:
   virtual void *allocate_aligned_memory(size_t size, size_t alignment) const override;
   virtual void deallocate_aligned_memory(void *ptr) const override;
   virtual Endianness get_endianness() const override;
-  virtual void create_flow(flowHandle_t handle) const override;
-  virtual Flow *get_flow(flowHandle_t handle) const override;
+  virtual void create_stream(stream &s) override;
+  virtual stream default_stream() const override;
+  static void launch(Device &device, stream s, std::function<void(cudaStream_t)> func);
 
 private:
   int id_;
-  mutable std::unordered_map<flowHandle_t, std::unique_ptr<CUDAFlow>> flows_;
+  stream default_stream_;
+};
+
+class cuda_stream : public stream_impl {
+private:
+  CUDADevice *device_;
+  cudaStream_t stream_;
+
+public:
+  cuda_stream() = default;
+  explicit cuda_stream(CUDADevice &device)
+      : device_(&device) {
+    cudaError_t err = cudaStreamCreate(&stream_);
+    if (err != cudaSuccess) {
+      throw std::runtime_error("Failed to create CUDA stream: " +
+                               std::string(cudaGetErrorString(err)));
+    }
+  }
+
+  ~cuda_stream() { cudaStreamDestroy(stream_); }
+
+  operator cudaStream_t() { return stream_; }
+
+  void sync() override {
+    cudaError_t err = cudaStreamSynchronize(stream_);
+    if (err != cudaSuccess) {
+      throw std::runtime_error("Failed to synchronize CUDA stream: " +
+                               std::string(cudaGetErrorString(err)));
+    }
+  }
+
+  Device *device() const override { return device_; }
 };
 
 }  // namespace tunx

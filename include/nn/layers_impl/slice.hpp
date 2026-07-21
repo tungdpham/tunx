@@ -6,6 +6,7 @@
  */
 #pragma once
 
+#include <device/stream.hpp>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -24,13 +25,11 @@ private:
   size_t length_;
 
   template <typename IO_T, typename Param_T, typename Compute_T>
-  std::unique_ptr<Task> slice_forward(const Tensor &input, Tensor &output,
-                                      flowHandle_t handle) const;
+  void slice_forward(const Tensor &input, Tensor &output, stream handle) const;
 
   template <typename IO_T, typename Param_T, typename Compute_T>
-  std::unique_ptr<Task> slice_backward(const Tensor &grad_output, Tensor &grad_input,
-                                       const Vec<size_t> &original_shape,
-                                       flowHandle_t handle) const;
+  void slice_backward(const Tensor &grad_output, Tensor &grad_input,
+                      const Vec<size_t> &original_shape, stream handle) const;
 
   Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
   Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;

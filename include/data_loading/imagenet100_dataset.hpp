@@ -7,6 +7,7 @@
 #pragma once
 
 #include <algorithm>
+#include <device/stream.hpp>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -384,7 +385,7 @@ private:
 public:
   explicit ImageNet100(DType_t dtype = DType_t::FP32)
       : Dataset(),
-        allocator_(PoolAllocator::instance(getHost(), defaultFlowHandle)),
+        allocator_(PoolAllocator::instance(getHost(), nullptr)),
         dtype_(dtype) {
     sample_list_.reserve(150000);  // ImageNet-100 has ~130k training images
   }

@@ -13,12 +13,12 @@ struct Blob {
   using value_type = T;
   T* ptr;
   uint64_t count;
-  const Device& device;
+  Device& device;
 };
 
 template <typename T>
   requires(!std::is_same_v<T, void>)
-Blob<T> make_blob(T* data, uint64_t count, const Device& device = getHost()) {
+Blob<T> make_blob(T* data, uint64_t count, Device& device = getHost()) {
   return Blob<T>{data, count, device};
 }
 

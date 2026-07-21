@@ -4,8 +4,8 @@
 #include <memory>
 #include <stdexcept>
 
-#include "device/flow.hpp"
 #include "device/iallocator.hpp"
+#include "device/stream.hpp"
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
@@ -24,7 +24,7 @@ private:
     Impl(const Vec<size_t> &shape, DType_t dtype, IAllocator &allocator) {
       data_ = Tensor(shape, dtype, allocator);
       grad_ = Tensor(shape, dtype, allocator);
-      fill(grad_, 0.0, defaultFlowHandle);
+      fill(grad_, 0.0);
     }
   };
 
@@ -105,14 +105,14 @@ public:
     return impl_->data_.size();
   }
 
-  const Device &device() const {
+  Device &device() const {
     check_valid("device");
     return impl_->data_.device();
   }
 
-  void zero_grad(flowHandle_t flow_handle) {
+  void zero_grad(stream s = nullptr) {
     check_valid("zero_grad");
-    fill(impl_->grad_, 0.0, flow_handle);
+    fill(impl_->grad_, 0.0, s);
   }
 
   bool is_same(const Param &other) const { return impl_ == other.impl_; }

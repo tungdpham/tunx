@@ -9,11 +9,11 @@
 #include <mutex>
 #include <string>
 
+#include "device/device.hpp"
 #include "device/device_manager.hpp"
 #include "device/pool_allocator.hpp"
 #include "distributed/message.hpp"
 #include "distributed/tcp_communicator.hpp"
-#include "nn/graph.hpp"
 #include "tensor/tensor.hpp"
 #include "threading/thread_wrapper.hpp"
 
@@ -149,7 +149,8 @@ int main(int argc, char *argv[]) {
   cout << "Peer port: " << cfg.peer_port << endl;
   cout << "Worker threads: " << cfg.num_threads << endl;
 
-  auto &allocator = PoolAllocator::instance(getHost(), defaultFlowHandle);
+  auto &device = getHost();
+  auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
   TCPCommunicator::Config tcp_config;
   tcp_config.num_io_threads = cfg.num_threads;
