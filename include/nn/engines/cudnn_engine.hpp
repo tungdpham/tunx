@@ -1,12 +1,12 @@
 #pragma once
 
-#include "device/cuda_device.hpp"
 #ifdef TUNX_USE_CUDNN
 #include <cudnn_graph.h>
 
 #include <any>
 #include <unordered_map>
 
+#include "device/cuda_device.hpp"
 #include "device/stream.hpp"
 #include "nn/engines/engine_handle.hpp"
 #include "nn/engines/iengine.hpp"
