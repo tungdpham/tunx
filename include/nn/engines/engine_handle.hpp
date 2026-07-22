@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
 #include <memory>
 
 #include "device/stream.hpp"
@@ -16,6 +17,8 @@ public:
 class engine_handle {
 public:
   engine_handle() = default;
+  engine_handle(std::nullptr_t)
+      : impl_(nullptr) {}
 
   engine_handle(std::shared_ptr<IEngineHandle> impl)
       : impl_(std::move(impl)) {}

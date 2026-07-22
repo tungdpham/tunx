@@ -6,8 +6,8 @@
 
 namespace tunx::test {
 
-template <typename LayerRefT>
-Graph compile_single_layer(LayerRefT &layer, IAllocator &allocator,
+template <typename LayerType>
+Graph compile_single_layer(LayerType &layer, IAllocator &allocator,
                            const std::string &input_uid = "input",
                            const std::string &output_uid = "output") {
   Graph graph;
@@ -20,8 +20,8 @@ Graph compile_single_layer(LayerRefT &layer, IAllocator &allocator,
   return graph;
 }
 
-template <typename FirstLayerRefT, typename SecondLayerRefT>
-Graph compile_two_layer_chain(FirstLayerRefT &first_layer, SecondLayerRefT &second_layer,
+template <typename FirstLayerType, typename SecondLayerType>
+Graph compile_two_layer_chain(FirstLayerType &first_layer, SecondLayerType &second_layer,
                               IAllocator &allocator, const std::string &input_uid = "input",
                               const std::string &output_uid = "output") {
   Graph graph;

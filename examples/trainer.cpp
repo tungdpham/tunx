@@ -51,8 +51,7 @@ signed main(int argc, char *argv[]) {
 
   train_config.print_config();
 
-  // Prioritize loading existing model, else create from available ones
-  tunx::Device &device = DeviceManager::instance().get(train_config.device_id);
+  Device &device = DeviceManager::instance().get(train_config.device_id);
   auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
   if (train_config.dataset_name.empty()) {
@@ -66,7 +65,15 @@ signed main(int argc, char *argv[]) {
   }
   train_dataset->set_seed(123456);
 
-  Graph graph = load_or_create_graph(train_config.model_name, train_config.model_path, allocator);
+  GraphOpts opts{
+      .s = device.default_stream(),
+      .io_dtype = train_config.io_dtype,
+      .param_dtype = train_config.param_dtype,
+      .compute_dtype = train_config.compute_dtype,
+  };
+
+  Graph graph =
+      load_or_create_graph(train_config.model_name, train_config.model_path, allocator, opts);
 
   auto criterion = LossFactory::create_from_config(train_config.loss_config);
 

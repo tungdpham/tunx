@@ -7,6 +7,7 @@
 #include "data_loading/open_webtext_dataset.hpp"
 #include "device/device_manager.hpp"
 #include "nn/example_graphs.hpp"
+#include "nn/graph.hpp"
 #include "tensor/tensor.hpp"
 #include "tokenizer/tokenizer.hpp"
 #include "utils/env.hpp"
@@ -34,7 +35,9 @@ int main(int argc, char **argv) {
   Device &device = DeviceManager::instance().get(device_id);
 
   auto &allocator = PoolAllocator::instance(device, device.default_stream());
-  Graph graph = load_or_create_graph("gpt2", model_path, allocator);
+  GraphOpts opts{};
+
+  Graph graph = load_or_create_graph("gpt2", model_path, allocator, opts);
 
   size_t seq_len = 512;
 

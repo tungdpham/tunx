@@ -21,8 +21,9 @@
 
 #include "common/config.hpp"
 #include "device/del_allocator_v2.hpp"
-#include "device/engine.hpp"
+#include "device/iallocator.hpp"
 #include "nn/engine.hpp"
+#include "nn/engines/engine_handle.hpp"
 #include "nn/param.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
@@ -90,6 +91,16 @@ public:
 
 using Residuals = detail::ResidualObject;
 
+struct InitOptions {
+  DELAllocatorV2 *ws_allocator = nullptr;
+  Engine engine = nullptr;
+  engine_handle handle = nullptr;
+  unsigned long long seed;
+  DType_t io_dtype = DType_t::FP32;
+  DType_t param_dtype = DType_t::FP32;
+  DType_t compute_dtype = DType_t::FP32;
+};
+
 class LayerImpl : public virtual std::enable_shared_from_this<LayerImpl> {
 public:
   LayerImpl() = default;
@@ -98,28 +109,20 @@ public:
 
   virtual ~LayerImpl() = default;
 
-  void init();
+  void init(IAllocator &param_allocator, InitOptions opts = InitOptions{});
 
   Vec<Tensor> forward(const Vec<Tensor> &inputs);
   Vec<Tensor> forward(const Vec<Tensor> &inputs, Residuals &residuals);
   Vec<Tensor> backward(const Vec<Tensor> &grad_outputs, Residuals &residuals);
 
   // Note: have to call init again after changing param dtype
-  LayerImpl &set_allocator(DELAllocatorV2 &allocator);
-  DELAllocatorV2 *get_allocator() const;
-  LayerImpl &set_seed(unsigned long long seed);
-  LayerImpl &set_io_dtype(DType_t dtype);
-  DType_t get_io_dtype() const;
-  LayerImpl &set_param_dtype(DType_t dtype);
-  DType_t get_param_dtype() const;
-  LayerImpl &set_compute_dtype(DType_t dtype);
-  DType_t get_compute_dtype() const;
-  LayerImpl &set_training(bool training);
-  bool is_training() const;
-  LayerImpl &set_engine(Engine engine);
   Engine get_engine();
-  void set_backend_handle(engine_handle handle);
   engine_handle get_backend_handle() const;
+  DType_t get_io_dtype() const;
+  DType_t get_param_dtype() const;
+  DType_t get_compute_dtype() const;
+  void set_training(bool training);
+  bool is_training() const;
 
   virtual Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const = 0;
   std::string name() const { return name_; }
@@ -127,47 +130,34 @@ public:
   virtual std::string type() const = 0;
   virtual LayerConfig get_config() const = 0;
 
-  Vec<Param> &params() { return params_; }
-
-  const Vec<Param> &params() const { return params_; }
+  virtual Vec<Param> params();
+  virtual const Vec<Param> params() const;
 
   void zero_grads() {
     for (auto &param : params_) {
-      param.zero_grad(backend_handle_.get_stream());
+      param.zero_grad(engine_handle_.get_stream());
     }
   }
 
   Device &device() const {
-    if (!allocator_) {
-      throw std::runtime_error("LayerImpl: Allocator is not set to get device.");
+    if (!param_allocator_) {
+      throw std::runtime_error("LayerImpl: Param allocator is not set to get device.");
     }
-    return allocator_->device();
+    return param_allocator_->device();
   }
 
 protected:
-  Param make_param(const Vec<size_t> &shape, DType_t dtype) {
-    Param param(shape, dtype, *allocator_);
-    params_.push_back(param);
-    return param;
-  }
   virtual void init_impl() {}
-  virtual void on_set_engine(Engine engine) {}
-  virtual void on_set_allocator(DELAllocatorV2 &allocator) {}
-  virtual void on_set_flow_handle(stream handle) {}
-  virtual void on_set_seed(unsigned long long seed) {}
   virtual void on_set_training(bool training) {}
-  virtual void on_set_io_dtype(DType_t dtype) {}
-  virtual void on_set_param_dtype(DType_t dtype) {}
-  virtual void on_set_compute_dtype(DType_t dtype) {}
-  virtual void on_set_backend_handle(engine_handle handle) {}
   virtual Vec<Tensor> forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) = 0;
   virtual Vec<Tensor> backward_impl(const Vec<Tensor> &grad_outputs, Residuals &residuals) = 0;
 
 protected:
   bool initialized_ = false;
-  Engine engine_;
-  engine_handle backend_handle_;
-  DELAllocatorV2 *allocator_ = nullptr;
+  Engine engine_ = nullptr;
+  engine_handle engine_handle_ = nullptr;
+  IAllocator *param_allocator_ = nullptr;
+  DELAllocatorV2 *ws_allocator_ = nullptr;
   bool is_training_ = true;
   bool use_seed_ = false;
   unsigned long long srand_seed_ = 0;
@@ -178,7 +168,8 @@ protected:
   DType_t compute_dtype_ = DType_t::FP32;  // data type for internal computations
 
   // helpers
-  Tensor get_tensor(const Vec<size_t> &shape, DType_t dtype);
+  Param make_param(const Vec<size_t> &shape, DType_t dtype);
+  Tensor make_tensor(const Vec<size_t> &shape, DType_t dtype);
 };
 
 template <typename LayerType>
@@ -253,14 +244,9 @@ public:
     return (*impl_)(std::forward<Args>(args)...);
   }
 
-  EngineType get_engine_type() const {
-    check_layer("get_engine_type");
-    return impl_->get_engine_type();
-  }
-
-  void init() {
+  void init(IAllocator &allocator, InitOptions init_options) {
     check_layer("init");
-    impl_->init();
+    impl_->init(allocator, init_options);
   }
 
   Vec<Tensor> forward(const Vec<Tensor> &inputs) {
@@ -278,27 +264,9 @@ public:
     return impl_->backward(grad_outputs, residuals);
   }
 
-  LayerRef &set_allocator(DELAllocatorV2 &allocator) {
-    check_layer("set_allocator");
-    impl_->set_allocator(allocator);
-    return *this;
-  }
-
   DELAllocatorV2 *get_allocator() const {
     check_layer("get_allocator");
     return impl_->get_allocator();
-  }
-
-  LayerRef &set_seed(unsigned long long seed) {
-    check_layer("set_seed");
-    impl_->set_seed(seed);
-    return *this;
-  }
-
-  LayerRef &set_io_dtype(DType_t dtype) {
-    check_layer("set_io_dtype");
-    impl_->set_io_dtype(dtype);
-    return *this;
   }
 
   DType_t get_io_dtype() const {
@@ -306,21 +274,9 @@ public:
     return impl_->get_io_dtype();
   }
 
-  LayerRef &set_param_dtype(DType_t dtype) {
-    check_layer("set_param_dtype");
-    impl_->set_param_dtype(dtype);
-    return *this;
-  }
-
   DType_t get_param_dtype() const {
     check_layer("get_param_dtype");
     return impl_->get_param_dtype();
-  }
-
-  LayerRef &set_compute_dtype(DType_t dtype) {
-    check_layer("set_compute_dtype");
-    impl_->set_compute_dtype(dtype);
-    return *this;
   }
 
   DType_t get_compute_dtype() const {
@@ -364,12 +320,12 @@ public:
     return impl_->get_config();
   }
 
-  Vec<Param> &params() {
+  Vec<Param> params() {
     check_layer("params");
     return impl_->params();
   }
 
-  const Vec<Param> &params() const {
+  const Vec<Param> params() const {
     check_layer("params");
     return impl_->params();
   }

@@ -18,10 +18,10 @@ LeakyReLUImpl::LeakyReLUImpl(float negative_slope, const std::string &name)
       negative_slope_(negative_slope) {}
 
 Tensor LeakyReLUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  Tensor output = get_tensor(input.shape(), io_dtype_);
+  Tensor output = make_tensor(input.shape(), io_dtype_);
 
   if (this->is_training_) {
-    Tensor mask = this->get_tensor(input.shape(), DType_t::UINT8_T);
+    Tensor mask = this->make_tensor(input.shape(), DType_t::UINT8_T);
     residuals["mask"] = mask;
 
     activation_->apply(input, output);
@@ -52,7 +52,7 @@ Tensor LeakyReLUImpl::backward_impl(const Tensor &grad_output, Residuals &residu
     throw std::runtime_error("No cached mask found for backward pass in LeakyReLUImpl");
   }
 
-  Tensor grad_input = get_tensor(grad_output.shape(), io_dtype_);
+  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
 
   // Gradient: grad_input = grad_output * (mask ? 1.0 : negative_slope)
   size_t num_elements = grad_output.size();

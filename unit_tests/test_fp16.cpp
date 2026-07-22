@@ -5,6 +5,8 @@
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/dense.hpp"
+#include "tensor/tensor_ops.hpp"
+#include "tensor_test_utils.hpp"
 #include "type/type.hpp"
 
 using namespace std;
@@ -48,23 +50,37 @@ stream FP16Test::stream_ = nullptr;
 TEST_F(FP16Test, Dense) {
   auto &allocator = PoolAllocator::instance(device_, stream_);
 
-  auto fp32_dense_layer = Dense(128, 64, false, "fp32_dense");
-  fp32_dense_layer.set_io_dtype(DType_t::FP32);
+  Graph fp32_graph;
+  auto fp32_dense = Dense(128, 64, false, "fp32_dense");
+  {
+    Node fp32_input = fp32_graph.input("input");
+    Node fp32_output = fp32_dense(fp32_input);
+    GraphOpts fp32_opts{
+        .io_dtype = DType_t::FP32,
+        .param_dtype = DType_t::FP32,
+        .compute_dtype = DType_t::FP32,
+    };
+    fp32_graph.set_output(fp32_output);
+    fp32_graph.compile(allocator, fp32_opts);
+  }
 
-  auto fp16_dense_layer = Dense(128, 64, false, "fp16_dense");
-  fp16_dense_layer.set_io_dtype(DType_t::FP16);
-  fp16_dense_layer.set_param_dtype(DType_t::FP16);
+  Graph fp16_graph;
+  auto fp16_dense = Dense(128, 64, false, "fp16_dense");
+  {
+    Node fp16_input = fp16_graph.input("input");
+    Node fp16_output = fp16_dense(fp16_input);
 
-  Graph graph;
-  Node input = graph.make_node("input");
-  Node fp32_output = fp32_dense_layer(input);
-  fp32_output->set_uid("fp32_output");
-  Node fp16_output = fp16_dense_layer(input);
-  fp16_output->set_uid("fp16_output");
-  graph.compile(allocator);
+    GraphOpts fp16_opts{
+        .io_dtype = DType_t::FP16,
+        .param_dtype = DType_t::FP16,
+        .compute_dtype = DType_t::FP32,
+    };
+    fp16_graph.set_output(fp16_output);
+    fp16_graph.compile(allocator, fp16_opts);
+  }
 
-  auto fp16_params = fp16_dense_layer.params();
-  auto fp32_params = fp32_dense_layer.params();
+  auto fp16_params = fp16_dense.params();
+  auto fp32_params = fp32_dense.params();
   for (size_t i = 0; i < fp16_params.size(); ++i) {
     Tensor cpu_fp16_param = fp16_params[i].data().to_host();
     Tensor cpu_fp32_param = fp32_params[i].data().to_host();
@@ -73,7 +89,7 @@ TEST_F(FP16Test, Dense) {
     for (size_t j = 0; j < cpu_fp16_param.size(); ++j) {
       fp32_data[j] = static_cast<float>(fp16_data[j]);
     }
-    cpu_fp32_param.copy_to(fp32_params[i].data());
+    cpu_fp32_param.copy_to(fp32_params[i].data(), stream_);
   }
 
   Tensor fp16_input = Tensor({32, 128}, DType_t::FP16, getHost());
@@ -86,21 +102,16 @@ TEST_F(FP16Test, Dense) {
     input_data_fp32[i] = static_cast<float>(input_data[i]);
   }
 
-  Tensor input_fp32 = fp32_input.to_device(device_);
-  Tensor input_fp16 = fp16_input.to_device(device_);
+  Tensor device_fp32_input = fp32_input.to_device(device_);
+  Tensor device_fp16_input = fp16_input.to_device(device_);
 
-  Tensor output_fp32 = fp32_dense_layer.forward({input_fp32})[0];
-  Tensor output_fp16 = fp16_dense_layer.forward({input_fp16})[0];
+  Tensor output_fp32 = fp32_dense.forward({device_fp32_input})[0];
+  Tensor output_fp16 = fp16_dense.forward({device_fp16_input})[0];
 
-  Tensor cpu_output_fp32 = output_fp32.to_host();
-  Tensor cpu_output_fp16 = output_fp16.to_host();
+  Tensor host_output_fp32 = output_fp32.to_host();
+  Tensor host_output_fp16 = output_fp16.to_host();
 
-  float *output_data_fp32 = cpu_output_fp32.data_as<float>();
-  fp16 *output_data_fp16 = cpu_output_fp16.data_as<fp16>();
-  constexpr double tolerance = 1e-4;
-  for (size_t i = 0; i < cpu_output_fp32.size(); ++i) {
-    EXPECT_NEAR(static_cast<double>(output_data_fp32[i]), static_cast<double>(output_data_fp16[i]),
-                tolerance)
-        << "At index " << i;
-  }
+  stream_.sync();
+
+  compare_tensor(host_output_fp16, host_output_fp32);
 }

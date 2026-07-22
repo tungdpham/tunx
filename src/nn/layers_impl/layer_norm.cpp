@@ -17,7 +17,7 @@ namespace tunx {
 namespace internal {
 
 LayerNormImpl::LayerNormImpl(size_t normalized_shape, float epsilon, bool affine,
-                                       const std::string &name)
+                             const std::string &name)
     : SISOLayerImpl(name),
       normalized_shape_(normalized_shape),
       epsilon_(epsilon),
@@ -30,8 +30,8 @@ void LayerNormImpl::init_impl() {
     gamma_ = make_param({normalized_shape_}, param_dtype_);
     beta_ = make_param({normalized_shape_}, param_dtype_);
   } else {
-    gamma_.data() = get_tensor({normalized_shape_}, param_dtype_);
-    beta_.data() = get_tensor({normalized_shape_}, param_dtype_);
+    gamma_.data() = make_tensor({normalized_shape_}, param_dtype_);
+    beta_.data() = make_tensor({normalized_shape_}, param_dtype_);
   }
 
   fill(gamma_.data(), 1.0f);
@@ -64,30 +64,30 @@ Tensor LayerNormImpl::forward_impl(const Tensor &input, Residuals &residuals) {
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_layernorm_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq ws_req = engine_->query_layernorm_graph(engine_handle_, stats, type_desc);
 
   if (this->is_training_) {
-    Tensor batch_mean = get_tensor({batch_size}, DType_t::FP32);
-    Tensor batch_invar = get_tensor({batch_size}, DType_t::FP32);
+    Tensor batch_mean = make_tensor({batch_size}, DType_t::FP32);
+    Tensor batch_invar = make_tensor({batch_size}, DType_t::FP32);
     residuals["batch_mean"] = batch_mean;
     residuals["batch_invar"] = batch_invar;
 
-    Tensor output = get_tensor(shape, io_dtype_);
+    Tensor output = make_tensor(shape, io_dtype_);
 
-    Tensor ws = get_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+    Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
-    engine_->layernorm_fwd(backend_handle_, stats, input.data_as<void>(), gamma_.data_as<void>(),
+    engine_->layernorm_fwd(engine_handle_, stats, input.data_as<void>(), gamma_.data_as<void>(),
                            beta_.data_as<void>(), output.data_as<void>(),
                            batch_mean.data_as<void>(), batch_invar.data_as<void>(),
                            ws.data_as<void>(), type_desc);
 
     return output;
   } else {
-    Tensor output = get_tensor(shape, io_dtype_);
+    Tensor output = make_tensor(shape, io_dtype_);
 
-    Tensor ws = get_tensor({ws_req.inf_workspace}, DType_t::BYTE);
+    Tensor ws = make_tensor({ws_req.inf_workspace}, DType_t::BYTE);
 
-    engine_->layernorm_infer(backend_handle_, stats, input.data_as<void>(), gamma_.data_as<void>(),
+    engine_->layernorm_infer(engine_handle_, stats, input.data_as<void>(), gamma_.data_as<void>(),
                              beta_.data_as<void>(), output.data_as<void>(), ws.data_as<void>(),
                              type_desc);
     return output;
@@ -101,7 +101,7 @@ Tensor LayerNormImpl::backward_impl(const Tensor &grad_output, Residuals &residu
   }
 
   const auto &shape = input.shape();
-  Tensor grad_input = get_tensor(shape, io_dtype_);
+  Tensor grad_input = make_tensor(shape, io_dtype_);
 
   size_t last_dim = shape.back();
   size_t channels = last_dim;
@@ -123,21 +123,21 @@ Tensor LayerNormImpl::backward_impl(const Tensor &grad_output, Residuals &residu
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_layernorm_graph(backend_handle_, stats, type_desc);
-  Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = engine_->query_layernorm_graph(engine_handle_, stats, type_desc);
+  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
   const Tensor &batch_mean = residuals["batch_mean"];
   const Tensor &batch_invar = residuals["batch_invar"];
 
   if (affine_) {
-    engine_->layernorm_bwd(backend_handle_, stats, grad_output.data_as<void>(),
+    engine_->layernorm_bwd(engine_handle_, stats, grad_output.data_as<void>(),
                            input.data_as<void>(), gamma_.data_as<void>(),
                            batch_mean.data_as<void>(), batch_invar.data_as<void>(),
                            grad_input.data_as<void>(), gamma_.grad_as<void>(),
                            beta_.grad_as<void>(), ws.data_as<void>(), type_desc);
   } else {
     engine_->layernorm_bwd(
-        backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
+        engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
         gamma_.data_as<void>(), batch_mean.data_as<void>(), batch_invar.data_as<void>(),
         grad_input.data_as<void>(), nullptr, nullptr, ws.data_as<void>(), type_desc);
   }
@@ -155,8 +155,7 @@ LayerConfig LayerNormImpl::get_config() const {
   return config;
 }
 
-std::shared_ptr<LayerNormImpl> LayerNormImpl::create_from_config(
-    const LayerConfig &config) {
+std::shared_ptr<LayerNormImpl> LayerNormImpl::create_from_config(const LayerConfig &config) {
   size_t normalized_shape = config.get<size_t>("normalized_shape");
   float epsilon = config.get<float>("epsilon", 1e-5f);
   bool affine = config.get<bool>("affine", true);

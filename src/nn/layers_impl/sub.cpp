@@ -35,11 +35,11 @@ Vec<Tensor> SubImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residual
     throw std::runtime_error("SubImpl: both inputs must have the same shape");
   }
 
-  Tensor output = get_tensor(a.shape(), io_dtype_);
+  Tensor output = make_tensor(a.shape(), io_dtype_);
   size_t n = a.size();
 
   DISPATCH_DTYPE(a.dtype(), T, {
-    ops::sub<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n, backend_handle_.get_stream());
+    ops::sub<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n, engine_handle_.get_stream());
   });
 
   return {output};
@@ -53,13 +53,13 @@ Vec<Tensor> SubImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &r
   size_t n = grad_out.size();
 
   // grad_a = grad_out, grad_b = -grad_out
-  Tensor grad_a = get_tensor(grad_out.shape(), this->io_dtype_);
-  Tensor grad_b = get_tensor(grad_out.shape(), this->io_dtype_);
+  Tensor grad_a = make_tensor(grad_out.shape(), this->io_dtype_);
+  Tensor grad_b = make_tensor(grad_out.shape(), this->io_dtype_);
 
   DISPATCH_DTYPE(grad_out.dtype(), T, {
-    ops::copy<T>(grad_out.data_ptr(), grad_a.data_ptr(), n, backend_handle_.get_stream());
+    ops::copy<T>(grad_out.data_ptr(), grad_a.data_ptr(), n, engine_handle_.get_stream());
     ops::mul_scalar<T>(grad_out.data_ptr(), static_cast<T>(-1), grad_b.data_ptr(), n,
-                       backend_handle_.get_stream());
+                       engine_handle_.get_stream());
   });
 
   return {grad_a, grad_b};

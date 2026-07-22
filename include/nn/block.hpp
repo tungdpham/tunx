@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nn/layer.hpp"
+#include "nn/param.hpp"
 
 namespace tunx {
 class Block : public LayerImpl {
@@ -8,27 +9,46 @@ public:
   Block(const std::string &name = "block")
       : LayerImpl(name) {}
 
-  virtual Vec<Layer> layers() = 0;
+  virtual const Vec<Layer> layers() const = 0;
+
+  Vec<Layer> layers() {
+    const Vec<Layer> &const_layers = static_cast<const Block &>(*this).layers();
+    return const_cast<Vec<Layer> &>(const_layers);
+  }
+
+  Vec<Param> params() override {
+    Vec<Param> params;
+    for (Layer &layer : this->layers()) {
+      auto layer_params = layer.params();
+      params.insert(params.end(), layer_params.begin(), layer_params.end());
+    }
+    return params;
+  }
+
+  const Vec<Param> params() const override {
+    Vec<Param> params;
+    for (const Layer &layer : this->layers()) {
+      const auto layer_params = layer.params();
+      params.insert(params.end(), layer_params.begin(), layer_params.end());
+    }
+    return params;
+  }
 
 protected:
   void init_impl() override {
     Vec<Layer> layers = this->layers();
-    for (Layer &layer : layers) {
-      layer.init();
-    }
-  }
+    InitOptions opts{
+        .ws_allocator = ws_allocator_,
+        .engine = engine_,
+        .handle = engine_handle_,
+        .seed = srand_seed_,
+        .io_dtype = io_dtype_,
+        .param_dtype = param_dtype_,
+        .compute_dtype = compute_dtype_,
+    };
 
-  void on_set_allocator(DELAllocatorV2 &allocator) override {
-    Vec<Layer> layers = this->layers();
     for (Layer &layer : layers) {
-      layer.set_allocator(allocator);
-    }
-  }
-
-  void on_set_seed(unsigned long long seed) override {
-    Vec<Layer> layers = this->layers();
-    for (Layer &layer : layers) {
-      layer.set_seed(seed);
+      layer.init(*param_allocator_, opts);
     }
   }
 
@@ -36,27 +56,6 @@ protected:
     Vec<Layer> layers = this->layers();
     for (Layer &layer : layers) {
       layer.set_training(training);
-    }
-  }
-
-  void on_set_io_dtype(DType_t dtype) override {
-    Vec<Layer> layers = this->layers();
-    for (Layer &layer : layers) {
-      layer.set_io_dtype(dtype);
-    }
-  }
-
-  void on_set_param_dtype(DType_t dtype) override {
-    Vec<Layer> layers = this->layers();
-    for (Layer &layer : layers) {
-      layer.set_param_dtype(dtype);
-    }
-  }
-
-  void on_set_compute_dtype(DType_t dtype) override {
-    Vec<Layer> layers = this->layers();
-    for (Layer &layer : layers) {
-      layer.set_compute_dtype(dtype);
     }
   }
 };

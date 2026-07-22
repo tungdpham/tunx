@@ -22,7 +22,7 @@ Tensor ELUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
     residuals["input"] = input;
   }
 
-  Tensor output = get_tensor(input.shape(), io_dtype_);
+  Tensor output = make_tensor(input.shape(), io_dtype_);
   activation_->apply(input, output);
   return output;
 }
@@ -33,7 +33,7 @@ Tensor ELUImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
     throw std::runtime_error("No cached input found for backward pass in ELUImpl");
   }
 
-  Tensor grad_input = get_tensor(input.shape(), io_dtype_);
+  Tensor grad_input = make_tensor(input.shape(), io_dtype_);
   activation_->compute_gradient(input, grad_output, grad_input);
   return grad_input;
 }

@@ -9,6 +9,7 @@
 
 #include <string>
 
+#include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
 #include "type/type.hpp"
 
@@ -28,15 +29,14 @@ size_t channels(const Shape &shape) {
 Node conv2d(Node input, Shape &shape, size_t out_channels, size_t kernel_h, size_t kernel_w,
             size_t stride_h, size_t stride_w, size_t pad_h, size_t pad_w, bool use_bias,
             const std::string &name) {
-  auto layer = Conv2D(channels(shape), out_channels, kernel_h, kernel_w, stride_h, stride_w,
-                           pad_h, pad_w, use_bias, name);
+  auto layer = Conv2D(channels(shape), out_channels, kernel_h, kernel_w, stride_h, stride_w, pad_h,
+                      pad_w, use_bias, name);
   shape = layer.output_shapes({shape})[0];
   return layer(input);
 }
 
 Node batchnorm(Node input, Shape &shape, bool use_relu, const std::string &name) {
-  auto layer =
-      BatchNorm(channels(shape), dtype_eps(DType_t::FP32), 0.1f, true, use_relu, name);
+  auto layer = BatchNorm(channels(shape), dtype_eps(DType_t::FP32), 0.1f, true, use_relu, name);
   shape = layer.output_shapes({shape})[0];
   return layer(input);
 }
@@ -214,13 +214,13 @@ Node gpt_block(Node input, Shape &shape, size_t embed_dim, size_t num_heads, siz
   return x + ffn;
 }
 
-void finalize_graph(Graph &graph, IAllocator &allocator, const Node &output) {
+void finalize_graph(Graph &graph, IAllocator &allocator, const Node &output, GraphOpts opts) {
   output->set_uid("output");
   graph.set_output(output);
-  graph.compile(allocator);
+  graph.compile(allocator, opts);
 }
 
-Graph create_mnist_graph(IAllocator &allocator) {
+Graph create_mnist_graph(IAllocator &allocator, GraphOpts opts) {
   Graph graph;
   Node input = graph.input("input");
   Shape shape = {1, 28, 28, 1};
@@ -236,11 +236,11 @@ Graph create_mnist_graph(IAllocator &allocator) {
   x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool2");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 10, false, "output");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_cifar10_vgg_graph(IAllocator &allocator) {
+Graph create_cifar10_vgg_graph(IAllocator &allocator, GraphOpts opts) {
   Graph graph;
   Node input = graph.input("input");
   Shape shape = {1, 32, 32, 3};
@@ -273,11 +273,11 @@ Graph create_cifar10_vgg_graph(IAllocator &allocator) {
   x = dense(x, shape, 512, true, "fc0");
   x = relu(x, shape, "relu10");
   Node output = dense(x, shape, 10, true, "fc1");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_cifar10_test_graph(IAllocator &allocator) {
+Graph create_cifar10_test_graph(IAllocator &allocator, GraphOpts opts) {
   Graph graph;
   Node input = graph.input("input");
   Shape shape = {1, 32, 32, 3};
@@ -294,11 +294,11 @@ Graph create_cifar10_test_graph(IAllocator &allocator) {
   x = avgpool2d(x, shape, 4, 4, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 10, true, "output");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_cifar10_resnet9_graph(IAllocator &allocator) {
+Graph create_cifar10_resnet9_graph(IAllocator &allocator, GraphOpts opts) {
   Graph graph;
   Node input = graph.input("input");
   Shape shape = {1, 32, 32, 3};
@@ -322,11 +322,11 @@ Graph create_cifar10_resnet9_graph(IAllocator &allocator) {
   x = avgpool2d(x, shape, 4, 4, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 10, true, "output");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_cifar100_resnet18_graph(IAllocator &allocator) {
+Graph create_cifar100_resnet18_graph(IAllocator &allocator, GraphOpts opts) {
   Graph graph;
   Node input = graph.input("input");
   Shape shape = {1, 32, 32, 3};
@@ -345,11 +345,11 @@ Graph create_cifar100_resnet18_graph(IAllocator &allocator) {
   x = avgpool2d(x, shape, 2, 2, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 100, true, "fc");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_cifar100_wrn16_8_graph(IAllocator &allocator) {
+Graph create_cifar100_wrn16_8_graph(IAllocator &allocator, GraphOpts opts) {
   constexpr size_t width_factor = 8;
   constexpr float dropout_rate = 0.3f;
   constexpr size_t c1 = 16 * width_factor;
@@ -371,11 +371,11 @@ Graph create_cifar100_wrn16_8_graph(IAllocator &allocator) {
   x = avgpool2d(x, shape, 8, 8, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 100, true, "fc");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_tiny_imagenet_resnet18_graph(IAllocator &allocator) {
+Graph create_tiny_imagenet_resnet18_graph(IAllocator &allocator, GraphOpts opts) {
   Graph graph;
   Node input = graph.input("input");
   Shape shape = {1, 64, 64, 3};
@@ -394,11 +394,11 @@ Graph create_tiny_imagenet_resnet18_graph(IAllocator &allocator) {
   x = avgpool2d(x, shape, 4, 4, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 200, true, "fc");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_tiny_imagenet_wrn16_8_graph(IAllocator &allocator) {
+Graph create_tiny_imagenet_wrn16_8_graph(IAllocator &allocator, GraphOpts opts) {
   constexpr size_t width_factor = 8;
   constexpr float dropout_rate = 0.3f;
   constexpr size_t c1 = 16 * width_factor;
@@ -420,11 +420,11 @@ Graph create_tiny_imagenet_wrn16_8_graph(IAllocator &allocator) {
   x = avgpool2d(x, shape, 8, 8, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 200, true, "fc");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_tiny_imagenet_resnet50_graph(IAllocator &allocator) {
+Graph create_tiny_imagenet_resnet50_graph(IAllocator &allocator, GraphOpts opts) {
   Graph graph;
   Node input = graph.input("input");
   Shape shape = {1, 64, 64, 3};
@@ -451,11 +451,11 @@ Graph create_tiny_imagenet_resnet50_graph(IAllocator &allocator) {
   x = avgpool2d(x, shape, 4, 4, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 200, true, "fc");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_resnet50_imagenet_graph(IAllocator &allocator) {
+Graph create_resnet50_imagenet_graph(IAllocator &allocator, GraphOpts opts) {
   Graph graph;
   Node input = graph.input("input");
   Shape shape = {1, 224, 224, 3};
@@ -482,11 +482,11 @@ Graph create_resnet50_imagenet_graph(IAllocator &allocator) {
   x = avgpool2d(x, shape, 7, 7, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 1000, true, "fc");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_imagenet100_resnet50_graph(IAllocator &allocator) {
+Graph create_imagenet100_resnet50_graph(IAllocator &allocator, GraphOpts opts) {
   Graph graph;
   Node input = graph.input("input");
   Shape shape = {1, 224, 224, 3};
@@ -513,11 +513,11 @@ Graph create_imagenet100_resnet50_graph(IAllocator &allocator) {
   x = avgpool2d(x, shape, 7, 7, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 100, true, "fc");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_tiny_imagenet_vit_graph(IAllocator &allocator) {
+Graph create_tiny_imagenet_vit_graph(IAllocator &allocator, GraphOpts opts) {
   constexpr size_t patch_size = 4;
   constexpr size_t embed_dim = 256;
   constexpr size_t num_heads = 4;
@@ -547,11 +547,11 @@ Graph create_tiny_imagenet_vit_graph(IAllocator &allocator) {
   x = slice(x, shape, 1, 0, 1, "extract_cls");
   x = flatten(x, shape, 1, -1, "flatten_cls");
   Node output = dense(x, shape, num_classes, true, "head");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
-Graph create_tiny_imagenet_flash_vit_graph(IAllocator &allocator) {
+Graph create_tiny_imagenet_flash_vit_graph(IAllocator &allocator, GraphOpts opts) {
   constexpr size_t patch_size = 4;
   constexpr size_t embed_dim = 256;
   constexpr size_t num_heads = 4;
@@ -581,12 +581,13 @@ Graph create_tiny_imagenet_flash_vit_graph(IAllocator &allocator) {
   x = slice(x, shape, 1, 0, 1, "extract_cls");
   x = flatten(x, shape, 1, -1, "flatten_cls");
   Node output = dense(x, shape, num_classes, true, "head");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
 Graph create_gpt2_graph(IAllocator &allocator, size_t embed_dim, size_t num_heads,
-                        size_t num_layers, bool use_flash, const std::string &name) {
+                        size_t num_layers, bool use_flash, const std::string &name,
+                        GraphOpts opts) {
   constexpr size_t seq_len = 1024;
   constexpr size_t vocab_size = 50257;
   constexpr float dropout_rate = 0.1f;
@@ -606,13 +607,14 @@ Graph create_gpt2_graph(IAllocator &allocator, size_t embed_dim, size_t num_head
 
   x = layernorm(x, shape, 1e-5f, true, "ln_f");
   Node output = dense(x, shape, vocab_size, true, "head");
-  finalize_graph(graph, allocator, output);
+  finalize_graph(graph, allocator, output, opts);
   return graph;
 }
 
 }  // namespace
 
-std::unordered_map<std::string, std::function<Graph(IAllocator &)>> ExampleGraphs::creators_;
+std::unordered_map<std::string, std::function<Graph(IAllocator &, GraphOpts)>>
+    ExampleGraphs::creators_;
 
 void ExampleGraphs::register_defaults() {
   register_graph("mnist_cnn", create_mnist_graph);
@@ -633,23 +635,23 @@ void ExampleGraphs::register_defaults() {
   register_graph("imagenet_resnet50", create_resnet50_imagenet_graph);
   register_graph("imagenet100_resnet50", create_imagenet100_resnet50_graph);
 
-  register_graph("gpt2_small", [](IAllocator &allocator) {
-    return create_gpt2_graph(allocator, 768, 12, 12, false, "gpt2_small");
+  register_graph("gpt2_small", [](IAllocator &allocator, GraphOpts opts) {
+    return create_gpt2_graph(allocator, 768, 12, 12, false, "gpt2_small", opts);
   });
-  register_graph("flash_gpt2_small", [](IAllocator &allocator) {
-    return create_gpt2_graph(allocator, 768, 12, 12, true, "flash_gpt2_small");
+  register_graph("flash_gpt2_small", [](IAllocator &allocator, GraphOpts opts) {
+    return create_gpt2_graph(allocator, 768, 12, 12, true, "flash_gpt2_small", opts);
   });
-  register_graph("gpt2_medium", [](IAllocator &allocator) {
-    return create_gpt2_graph(allocator, 1024, 16, 24, false, "gpt2_medium");
+  register_graph("gpt2_medium", [](IAllocator &allocator, GraphOpts opts) {
+    return create_gpt2_graph(allocator, 1024, 16, 24, false, "gpt2_medium", opts);
   });
-  register_graph("flash_gpt2_medium", [](IAllocator &allocator) {
-    return create_gpt2_graph(allocator, 1024, 16, 24, true, "flash_gpt2_medium");
+  register_graph("flash_gpt2_medium", [](IAllocator &allocator, GraphOpts opts) {
+    return create_gpt2_graph(allocator, 1024, 16, 24, true, "flash_gpt2_medium", opts);
   });
-  register_graph("gpt2_large", [](IAllocator &allocator) {
-    return create_gpt2_graph(allocator, 1280, 20, 36, false, "gpt2_large");
+  register_graph("gpt2_large", [](IAllocator &allocator, GraphOpts opts) {
+    return create_gpt2_graph(allocator, 1280, 20, 36, false, "gpt2_large", opts);
   });
-  register_graph("flash_gpt2_large", [](IAllocator &allocator) {
-    return create_gpt2_graph(allocator, 1280, 20, 36, true, "flash_gpt2_large");
+  register_graph("flash_gpt2_large", [](IAllocator &allocator, GraphOpts opts) {
+    return create_gpt2_graph(allocator, 1280, 20, 36, true, "flash_gpt2_large", opts);
   });
 }
 

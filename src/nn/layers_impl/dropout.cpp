@@ -26,7 +26,7 @@ DropoutImpl::DropoutImpl(float dropout_rate, const std::string &name)
 
 Tensor DropoutImpl::forward_impl(const Tensor &input, Residuals &residuals) {
   if (!this->is_training_) {
-    Tensor output = get_tensor(input.shape(), io_dtype_);
+    Tensor output = make_tensor(input.shape(), io_dtype_);
     input.copy_to(output);
     return output;
   }
@@ -48,15 +48,15 @@ Tensor DropoutImpl::forward_impl(const Tensor &input, Residuals &residuals) {
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_dropout_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq ws_req = engine_->query_dropout_graph(engine_handle_, stats, type_desc);
 
-  Tensor mask = get_tensor(input.shape(), DType_t::BOOL);
+  Tensor mask = make_tensor(input.shape(), DType_t::BOOL);
   residuals["mask"] = mask;
 
-  Tensor output = get_tensor(input.shape(), io_dtype_);
-  Tensor ws = get_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+  Tensor output = make_tensor(input.shape(), io_dtype_);
+  Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
-  engine_->dropout_fwd(backend_handle_, stats, input.data_as<void>(), output.data_as<void>(),
+  engine_->dropout_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
                        mask.data_as<bool>(), ws.data_as<void>(), type_desc);
 
   return output;
@@ -85,13 +85,13 @@ Tensor DropoutImpl::backward_impl(const Tensor &grad_output, Residuals &residual
       .compute_dtype = compute_dtype_,
   };
 
-  Tensor grad_input = get_tensor(grad_output.shape(), io_dtype_);
-  WorkspaceReq ws_req = engine_->query_dropout_graph(backend_handle_, stats, type_desc);
-  Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
+  WorkspaceReq ws_req = engine_->query_dropout_graph(engine_handle_, stats, type_desc);
+  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
   double scale = 1.0 / (1.0 - dropout_rate_);
 
-  engine_->dropout_bwd(backend_handle_, stats, grad_output.data_as<void>(),
+  engine_->dropout_bwd(engine_handle_, stats, grad_output.data_as<void>(),
                        grad_input.data_as<void>(), mask.data_as<bool>(), scale, ws.data_as<void>(),
                        type_desc);
 

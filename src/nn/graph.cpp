@@ -44,7 +44,7 @@ static Engine get_default_engine(Device &device) {
   }
 }
 
-void Graph::compile(IAllocator &allocator, stream s) {
+void Graph::compile(IAllocator &allocator, GraphOpts opts) {
   sort();
   std::set<LayerImpl *> unique_layers;
   for (const auto &edge : edges_) {
@@ -56,19 +56,28 @@ void Graph::compile(IAllocator &allocator, stream s) {
 
   // if stream not provided or invalid, take device's default stream
   Device &device = allocator.device();
-  s = s ? s : device.default_stream();
+  stream s = opts.s ? opts.s : device.default_stream();
 
-  engine_ = get_default_engine(allocator.device());
+  engine_ = opts.engine ? opts.engine : get_default_engine(allocator.device());
   param_allocator_ = &allocator;
-
   workspace_allocator_ = DELAllocatorV2::create(allocator.device(), s);
   engine_handle_ = engine_->create_handle(s);
+  io_dtype_ = opts.io_dtype;
+  param_dtype_ = opts.param_dtype;
+  compute_dtype_ = opts.compute_dtype;
+
+  InitOptions layer_opts{
+      .ws_allocator = workspace_allocator_.get(),
+      .engine = engine_,
+      .handle = engine_handle_,
+      .seed = opts.seed,
+      .io_dtype = io_dtype_,
+      .param_dtype = param_dtype_,
+      .compute_dtype = compute_dtype_,
+  };
 
   for (LayerImpl *layer_ptr : unique_layers) {
-    layer_ptr->set_engine(engine_);
-    layer_ptr->set_backend_handle(engine_handle_);
-    layer_ptr->set_allocator(*workspace_allocator_);
-    layer_ptr->init();
+    layer_ptr->init(*param_allocator_, layer_opts);
   }
 
   // sanity check: ensure there are output nodes
@@ -304,24 +313,6 @@ void Graph::set_mode(ExecutionMode mode) {
   }
 }
 
-void Graph::set_io_dtype(DType_t dtype) {
-  for (const auto &edge : edges_) {
-    edge->layer()->set_io_dtype(dtype);
-  }
-}
-
-void Graph::set_param_dtype(DType_t dtype) {
-  for (const auto &edge : edges_) {
-    edge->layer()->set_param_dtype(dtype);
-  }
-}
-
-void Graph::set_compute_dtype(DType_t dtype) {
-  for (const auto &edge : edges_) {
-    edge->layer()->set_compute_dtype(dtype);
-  }
-}
-
 void Graph::set_input(Node node) {
   if (std::find(nodes_.begin(), nodes_.end(), node) == nodes_.end()) {
     throw std::runtime_error("Input node does not belong to graph");
@@ -355,7 +346,8 @@ Vec<Param> Graph::params() {
   Vec<Param> params;
   for (auto &edge : edges_) {
     auto layer = edge->layer();
-    params.insert(params.end(), layer->params().begin(), layer->params().end());
+    auto layer_params = layer->params();
+    params.insert(params.end(), layer_params.begin(), layer_params.end());
   }
   return params;
 }
@@ -515,6 +507,7 @@ void load_node_index_set(std::istream &stream, Graph &graph, const Vec<Node> &no
 
 }  // namespace
 
+// TODO : save params like io dtype, param dtype, compute dtype to preserve precision.
 void Graph::save_state(std::ostream &stream) const {
   if (!stream) {
     throw std::runtime_error("Stream is not ready for writing");
@@ -597,6 +590,7 @@ void Graph::save_state(std::ostream &stream) const {
   }
 }
 
+// TODO : load params like io dtype, param dtype, compute dtype to preserve precision.
 Graph Graph::load_state(std::istream &stream, IAllocator &allocator) {
   if (!stream) {
     throw std::runtime_error("Stream is not ready for reading");

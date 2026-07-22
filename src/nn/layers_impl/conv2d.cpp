@@ -83,7 +83,7 @@ Tensor Conv2DImpl::forward_impl(const Tensor &input, Residuals &residuals) {
   size_t output_h = (input_h + 2 * pad_h_ - kernel_h_) / stride_h_ + 1;
   size_t output_w = (input_w + 2 * pad_w_ - kernel_w_) / stride_w_ + 1;
 
-  Tensor output = get_tensor({batch_size, output_h, output_w, out_channels_}, input.dtype());
+  Tensor output = make_tensor({batch_size, output_h, output_w, out_channels_}, input.dtype());
 
   Conv2DStats stats{
       .batch_size = batch_size,
@@ -106,10 +106,10 @@ Tensor Conv2DImpl::forward_impl(const Tensor &input, Residuals &residuals) {
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_conv2d_graph(backend_handle_, stats, type_desc);
-  Tensor ws = get_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = engine_->query_conv2d_graph(engine_handle_, stats, type_desc);
+  Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
-  engine_->conv2d_fwd(backend_handle_, stats, input.data_as<void>(), weights_.data_as<void>(),
+  engine_->conv2d_fwd(engine_handle_, stats, input.data_as<void>(), weights_.data_as<void>(),
                       use_bias_ ? bias_.data_as<void>() : nullptr, output.data_as<void>(),
                       ws.data_as<void>(), type_desc);
 
@@ -131,7 +131,7 @@ Tensor Conv2DImpl::backward_impl(const Tensor &grad_output, Residuals &residuals
 
   const Tensor &input = residuals["input"];
   const auto &input_shape = input.shape();
-  Tensor grad_input = get_tensor(input_shape, io_dtype_);
+  Tensor grad_input = make_tensor(input_shape, io_dtype_);
 
   size_t batch_size = input_shape[0];
   size_t input_h = input_shape[1];
@@ -158,18 +158,18 @@ Tensor Conv2DImpl::backward_impl(const Tensor &grad_output, Residuals &residuals
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_conv2d_graph(backend_handle_, stats, type_desc);
-  Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = engine_->query_conv2d_graph(engine_handle_, stats, type_desc);
+  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->conv2d_wgrad(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
+  engine_->conv2d_wgrad(engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
                         weights_.grad_as<void>(), ws.data_as<void>(), type_desc);
 
   if (use_bias_) {
-    engine_->conv2d_bgrad(backend_handle_, stats, grad_output.data_as<void>(),
-                          bias_.grad_as<void>(), ws.data_as<void>(), type_desc);
+    engine_->conv2d_bgrad(engine_handle_, stats, grad_output.data_as<void>(), bias_.grad_as<void>(),
+                          ws.data_as<void>(), type_desc);
   }
 
-  engine_->conv2d_dgrad(backend_handle_, stats, grad_output.data_as<void>(),
+  engine_->conv2d_dgrad(engine_handle_, stats, grad_output.data_as<void>(),
                         weights_.data_as<void>(), grad_input.data_as<void>(), ws.data_as<void>(),
                         type_desc);
 

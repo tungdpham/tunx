@@ -185,15 +185,15 @@ inline void col2im(const Tensor &col_data, Tensor &result_data, size_t batch_siz
 
     auto &device = col_data.device();
     if (col_data.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_col2im<T>, col_data_ptr, result_data_ptr,
-                             batch_size, channels, height, width, kernel_h, kernel_w, stride_h,
-                             stride_w, pad_h, pad_w, output_h, output_w);
+      return create_cpu_task(device, stream, tunx::cpu::cpu_col2im<T>, col_data_ptr,
+                             result_data_ptr, batch_size, channels, height, width, kernel_h,
+                             kernel_w, stride_h, stride_w, pad_h, pad_w, output_h, output_w);
     }
 #ifdef TUNX_USE_CUDA
     else if (col_data.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_col2im<T>, col_data_ptr, result_data_ptr,
-                              batch_size, channels, height, width, kernel_h, kernel_w, stride_h,
-                              stride_w, pad_h, pad_w, output_h, output_w);
+      return create_cuda_task(device, stream, tunx::cuda::cuda_col2im<T>, col_data_ptr,
+                              result_data_ptr, batch_size, channels, height, width, kernel_h,
+                              kernel_w, stride_h, stride_w, pad_h, pad_w, output_h, output_w);
     }
 #endif
     else {
@@ -232,13 +232,13 @@ inline void pad(const Tensor &input, Tensor &result, size_t pad_h, size_t pad_w,
 
     auto &device = input.device();
     if (input.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_pad<T>, input_data, result_data, batch_size,
-                             channels, height, width, pad_h, pad_w, value);
+      return create_cpu_task(device, stream, tunx::cpu::cpu_pad<T>, input_data, result_data,
+                             batch_size, channels, height, width, pad_h, pad_w, value);
     }
 #ifdef TUNX_USE_CUDA
     else if (input.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_pad<T>, input_data, result_data, batch_size,
-                              channels, height, width, pad_h, pad_w, value);
+      return create_cuda_task(device, stream, tunx::cuda::cuda_pad<T>, input_data, result_data,
+                              batch_size, channels, height, width, pad_h, pad_w, value);
     }
 #endif
     else {
@@ -284,8 +284,8 @@ inline void unpad(const Tensor &input, Tensor &result, size_t pad_h, size_t pad_
 
     auto &device = input.device();
     if (input.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_unpad<T>, input_data, result_data, batch_size,
-                             channels, height, width, pad_h, pad_w);
+      return create_cpu_task(device, stream, tunx::cpu::cpu_unpad<T>, input_data, result_data,
+                             batch_size, channels, height, width, pad_h, pad_w);
     }
 #ifdef TUNX_USE_CUDA
     else if (input.device_type() == DeviceType::CUDA) {
@@ -336,13 +336,15 @@ inline void crop(const Tensor &input, Tensor &result, size_t start_h, size_t sta
 
     auto &device = input.device();
     if (input.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_crop<T>, input_data, result_data, batch_size,
-                             channels, height, width, start_h, start_w, new_height, new_width);
+      return create_cpu_task(device, stream, tunx::cpu::cpu_crop<T>, input_data, result_data,
+                             batch_size, channels, height, width, start_h, start_w, new_height,
+                             new_width);
     }
 #ifdef TUNX_USE_CUDA
     else if (input.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_crop<T>, input_data, result_data, batch_size,
-                              channels, height, width, start_h, start_w, new_height, new_width);
+      return create_cuda_task(device, stream, tunx::cuda::cuda_crop<T>, input_data, result_data,
+                              batch_size, channels, height, width, start_h, start_w, new_height,
+                              new_width);
     }
 #endif
     else {
@@ -389,13 +391,13 @@ inline void slice_batch(const Tensor &input, Tensor &result, size_t start_batch,
 
     auto &device = input.device();
     if (input.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, stream, ops::cpu::copy<T>, &input_data[start_batch * batch_stride],
-                             result_data, copy_size);
+      return create_cpu_task(device, stream, ops::cpu::copy<T>,
+                             &input_data[start_batch * batch_stride], result_data, copy_size);
     }
 #ifdef TUNX_USE_CUDA
     else if (input.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, ops::cuda::copy<T>, &input_data[start_batch * batch_stride],
-                              result_data, copy_size);
+      return create_cuda_task(device, stream, ops::cuda::copy<T>,
+                              &input_data[start_batch * batch_stride], result_data, copy_size);
     }
 #endif
     else {
@@ -444,13 +446,13 @@ inline void split(const Tensor &input, Vec<Tensor> &results, size_t num_splits,
 
       auto &device = input.device();
       if (input.device_type() == DeviceType::CPU) {
-        create_cpu_task(device, stream, ops::cpu::copy<T>, &input_data[start * batch_stride], result_data,
-                        copy_size);
+        create_cpu_task(device, stream, ops::cpu::copy<T>, &input_data[start * batch_stride],
+                        result_data, copy_size);
       }
 #ifdef TUNX_USE_CUDA
       else if (input.device_type() == DeviceType::CUDA) {
-        create_cuda_task(device, stream, ops::cuda::copy<T>, &input_data[start * batch_stride], result_data,
-                         copy_size);
+        create_cuda_task(device, stream, ops::cuda::copy<T>, &input_data[start * batch_stride],
+                         result_data, copy_size);
       }
 #endif
       else {
@@ -484,13 +486,13 @@ inline void transpose_2d(const Tensor &input, Tensor &output, size_t rows, size_
     auto device_type = device.device_type();
 
     if (device_type == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_transpose_2d<T>, input_data, output_data, rows,
-                             cols);
+      return create_cpu_task(device, stream, tunx::cpu::cpu_transpose_2d<T>, input_data,
+                             output_data, rows, cols);
     }
 #ifdef TUNX_USE_CUDA
     else if (device_type == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_transpose_2d<T>, input_data, output_data,
-                              rows, cols);
+      return create_cuda_task(device, stream, tunx::cuda::cuda_transpose_2d<T>, input_data,
+                              output_data, rows, cols);
     }
 #endif
     else {
@@ -522,13 +524,13 @@ inline void nchw_to_cnhw(const Tensor &input, Tensor &output, size_t n, size_t c
     auto device_type = device.device_type();
 
     if (device_type == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_nchw_to_cnhw<T>, input_data, output_data, n, c,
-                             h, w);
+      return create_cpu_task(device, stream, tunx::cpu::cpu_nchw_to_cnhw<T>, input_data,
+                             output_data, n, c, h, w);
     }
 #ifdef TUNX_USE_CUDA
     else if (device_type == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_nchw_to_cnhw<T>, input_data, output_data, n,
-                              c, h, w);
+      return create_cuda_task(device, stream, tunx::cuda::cuda_nchw_to_cnhw<T>, input_data,
+                              output_data, n, c, h, w);
     }
 #endif
     else {
@@ -560,13 +562,13 @@ inline void cnhw_to_nchw(const Tensor &input, Tensor &output, size_t n, size_t c
     auto device_type = device.device_type();
 
     if (device_type == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_cnhw_to_nchw<T>, input_data, output_data, n, c,
-                             h, w);
+      return create_cpu_task(device, stream, tunx::cpu::cpu_cnhw_to_nchw<T>, input_data,
+                             output_data, n, c, h, w);
     }
 #ifdef TUNX_USE_CUDA
     else if (device_type == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_cnhw_to_nchw<T>, input_data, output_data, n,
-                              c, h, w);
+      return create_cuda_task(device, stream, tunx::cuda::cuda_cnhw_to_nchw<T>, input_data,
+                              output_data, n, c, h, w);
     }
 #endif
     else {

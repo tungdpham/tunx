@@ -16,9 +16,8 @@
 namespace tunx {
 namespace internal {
 
-AvgPool2DImpl::AvgPool2DImpl(size_t pool_h, size_t pool_w, size_t stride_h,
-                                       size_t stride_w, size_t pad_h, size_t pad_w,
-                                       const std::string &name)
+AvgPool2DImpl::AvgPool2DImpl(size_t pool_h, size_t pool_w, size_t stride_h, size_t stride_w,
+                             size_t pad_h, size_t pad_w, const std::string &name)
     : SISOLayerImpl(name),
       pool_h_(pool_h),
       pool_w_(pool_w),
@@ -65,13 +64,13 @@ Tensor AvgPool2DImpl::forward_impl(const Tensor &input, Residuals &residuals) {
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_avgpool_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq ws_req = engine_->query_avgpool_graph(engine_handle_, stats, type_desc);
 
-  Tensor output = get_tensor({batch_size, output_h, output_w, channels}, input.dtype());
+  Tensor output = make_tensor({batch_size, output_h, output_w, channels}, input.dtype());
   size_t ws_size = is_training_ ? ws_req.fwd_workspace : ws_req.inf_workspace;
-  Tensor ws = get_tensor({ws_size}, DType_t::BYTE);
+  Tensor ws = make_tensor({ws_size}, DType_t::BYTE);
 
-  engine_->avgpool_fwd(backend_handle_, stats, input.data_as<void>(), output.data_as<void>(),
+  engine_->avgpool_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
                        ws.data_as<void>(), type_desc);
 
   return output;
@@ -107,13 +106,13 @@ Tensor AvgPool2DImpl::backward_impl(const Tensor &grad_output, Residuals &residu
       .compute_dtype = compute_dtype_,
   };
 
-  Tensor grad_input = get_tensor({batch_size, input_h, input_w, channels}, grad_output.dtype());
+  Tensor grad_input = make_tensor({batch_size, input_h, input_w, channels}, grad_output.dtype());
   fill(grad_input, 0.0f);
 
-  WorkspaceReq ws_req = engine_->query_avgpool_graph(backend_handle_, stats, type_desc);
-  Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = engine_->query_avgpool_graph(engine_handle_, stats, type_desc);
+  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->avgpool_bwd(backend_handle_, stats, grad_output.data_as<void>(),
+  engine_->avgpool_bwd(engine_handle_, stats, grad_output.data_as<void>(),
                        grad_input.data_as<void>(), ws.data_as<void>(), type_desc);
 
   return grad_input;
@@ -149,8 +148,7 @@ Vec<size_t> AvgPool2DImpl::compute_output_shape(const Vec<size_t> &input_shape) 
   return {batch_size, output_h, output_w, channels};
 }
 
-std::shared_ptr<AvgPool2DImpl> AvgPool2DImpl::create_from_config(
-    const LayerConfig &config) {
+std::shared_ptr<AvgPool2DImpl> AvgPool2DImpl::create_from_config(const LayerConfig &config) {
   size_t pool_h = config.get<size_t>("pool_h");
   size_t pool_w = config.get<size_t>("pool_w");
   size_t stride_h = config.get<size_t>("stride_h");
@@ -159,7 +157,7 @@ std::shared_ptr<AvgPool2DImpl> AvgPool2DImpl::create_from_config(
   size_t pad_w = config.get<size_t>("pad_w");
 
   return std::make_shared<AvgPool2DImpl>(pool_h, pool_w, stride_h, stride_w, pad_h, pad_w,
-                                              config.name);
+                                         config.name);
 }
 
 }  // namespace internal

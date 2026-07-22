@@ -9,16 +9,36 @@
 
 #include <fmt/ranges.h>
 
+#include "device/del_allocator_v2.hpp"
+#include "device/iallocator.hpp"
 #include "device/stream.hpp"
+#include "nn/engines/engine_handle.hpp"
+#include "nn/param.hpp"
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
 
-void LayerImpl::init() {
+void LayerImpl::init(IAllocator &param_allocator, InitOptions opts) {
   if (initialized_) {
     throw std::runtime_error("Cannot initalize LayerImpl more than once. ");
+  }
+  param_allocator_ = &param_allocator;
+  engine_ = opts.engine;
+  engine_handle_ = opts.handle;
+  if (!opts.ws_allocator) {
+    ws_allocator_ =
+        DELAllocatorV2::instance(param_allocator.device(), engine_handle_.get_stream()).get();
+  } else {
+    ws_allocator_ = opts.ws_allocator;
+  }
+  io_dtype_ = opts.io_dtype;
+  param_dtype_ = opts.param_dtype;
+  compute_dtype_ = opts.compute_dtype;
+  if (opts.seed) {
+    use_seed_ = true;
+    srand_seed_ = opts.seed;
   }
   init_impl();
   initialized_ = true;
@@ -42,7 +62,7 @@ Vec<Tensor> LayerImpl::forward(const Vec<Tensor> &inputs, Residuals &residuals) 
   }
   Vec<Tensor> outputs = forward_impl(current_inputs, residuals);
 #ifndef NDEBUG
-  backend_handle_.get_stream().sync();
+  engine_handle_.get_stream().sync();
 #endif
   return outputs;
 }
@@ -60,63 +80,23 @@ Vec<Tensor> LayerImpl::backward(const Vec<Tensor> &grad_outputs, Residuals &resi
   }
   auto grad_inputs = backward_impl(current_grad_outputs, residuals);
 #ifndef NDEBUG
-  backend_handle_.get_stream().sync();
+  engine_handle_.get_stream().sync();
 #endif
   return grad_inputs;
 }
 
-LayerImpl &LayerImpl::set_allocator(DELAllocatorV2 &allocator) {
-  allocator_ = &allocator;
-  on_set_allocator(allocator);
-  return *this;
-}
-
-DELAllocatorV2 *LayerImpl::get_allocator() const { return allocator_; }
-
-LayerImpl &LayerImpl::set_io_dtype(DType_t dtype) {
-  io_dtype_ = dtype;
-  on_set_io_dtype(dtype);
-  return *this;
-}
-
 DType_t LayerImpl::get_io_dtype() const { return io_dtype_; }
-
-LayerImpl &LayerImpl::set_param_dtype(DType_t dtype) {
-  param_dtype_ = dtype;
-  on_set_param_dtype(dtype);
-  return *this;
-}
 
 DType_t LayerImpl::get_param_dtype() const { return param_dtype_; }
 
-LayerImpl &LayerImpl::set_compute_dtype(DType_t dtype) {
-  compute_dtype_ = dtype;
-  on_set_compute_dtype(dtype);
-  return *this;
-}
-
 DType_t LayerImpl::get_compute_dtype() const { return compute_dtype_; }
 
-LayerImpl &LayerImpl::set_seed(unsigned long long seed) {
-  use_seed_ = true;
-  srand_seed_ = seed;
-  on_set_seed(seed);
-  return *this;
-}
-
-LayerImpl &LayerImpl::set_training(bool training) {
+void LayerImpl::set_training(bool training) {
   is_training_ = training;
   on_set_training(training);
-  return *this;
 }
 
 bool LayerImpl::is_training() const { return is_training_; }
-
-LayerImpl &LayerImpl::set_engine(Engine engine) {
-  engine_ = engine;
-  on_set_engine(engine);
-  return *this;
-}
 
 Engine LayerImpl::get_engine() {
   if (!engine_) {
@@ -125,12 +105,11 @@ Engine LayerImpl::get_engine() {
   return engine_;
 }
 
-void LayerImpl::set_backend_handle(engine_handle backend_handle) {
-  backend_handle_ = backend_handle;
-  on_set_backend_handle(backend_handle);
-}
+engine_handle LayerImpl::get_backend_handle() const { return engine_handle_; }
 
-engine_handle LayerImpl::get_backend_handle() const { return backend_handle_; }
+Vec<Param> LayerImpl::params() { return params_; }
+
+const Vec<Param> LayerImpl::params() const { return params_; }
 
 void LayerImpl::save_state(std::ostream &out) const {
   auto config = get_config();
@@ -139,17 +118,26 @@ void LayerImpl::save_state(std::ostream &out) const {
   size_t j_size = j_str.size();
   out.write(reinterpret_cast<const char *>(&j_size), sizeof(size_t));
   out.write(j_str.c_str(), j_size);
-  const Vec<Param> &parameters = params();
+  Vec<Param> parameters = this->params();
   for (const auto &param : parameters) {
     save(param.data(), out);
   }
 }
 
-Tensor LayerImpl::get_tensor(const Vec<size_t> &shape, DType_t dtype) {
-  if (!allocator_) {
-    throw std::runtime_error("Allocator is not set");
+Param LayerImpl::make_param(const Vec<size_t> &shape, DType_t dtype) {
+  if (!param_allocator_) {
+    throw std::runtime_error("LayerImpl::make_param: Param allocator is not set");
   }
-  return Tensor(shape, dtype, *allocator_);
+  Param param(shape, dtype, *param_allocator_);
+  params_.push_back(param);
+  return param;
+}
+
+Tensor LayerImpl::make_tensor(const Vec<size_t> &shape, DType_t dtype) {
+  if (!ws_allocator_) {
+    throw std::runtime_error("LayerImpl::make_tensor: Workspace allocator is not set");
+  }
+  return Tensor(shape, dtype, *ws_allocator_);
 }
 
 }  // namespace tunx

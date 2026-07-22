@@ -48,7 +48,7 @@ public:
   LayerConfig get_config() const override;
   static std::shared_ptr<SequentialImpl> create_from_config(const LayerConfig &config);
 
-  Vec<Layer> layers() override { return layers_; }
+  const Vec<Layer> layers() const override { return layers_; }
 
   Node operator()(const Node &input) {
     if (!input) {

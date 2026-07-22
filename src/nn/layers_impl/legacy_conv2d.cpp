@@ -108,20 +108,20 @@ Tensor LegacyConv2DImpl::def_forward(const Tensor &input, Residuals &residuals) 
   size_t output_h = (input_h + 2 * pad_h_ - kernel_h_) / stride_h_ + 1;
   size_t output_w = (input_w + 2 * pad_w_ - kernel_w_) / stride_w_ + 1;
 
-  Tensor output = get_tensor({batch_size, out_channels_, output_h, output_w}, input.dtype());
+  Tensor output = make_tensor({batch_size, out_channels_, output_h, output_w}, input.dtype());
 
   size_t kernel_size = in_channels_ * kernel_h_ * kernel_w_;
   size_t output_size = batch_size * output_h * output_w;
   size_t col_matrix_size = kernel_size * output_size;
 
-  Tensor col_buffer = get_tensor({col_matrix_size}, io_dtype_);
+  Tensor col_buffer = make_tensor({col_matrix_size}, io_dtype_);
   residuals["col_buffer"] = col_buffer;
 
   size_t output_buffer_size = out_channels_ * output_size;
-  Tensor temp_output_buffer = get_tensor({output_buffer_size}, io_dtype_);
+  Tensor temp_output_buffer = make_tensor({output_buffer_size}, io_dtype_);
 
   im2col(input, col_buffer, kernel_h_, kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_,
-         backend_handle_.get_stream());
+         engine_handle_.get_stream());
 
   DTypeDesc type_desc{
       .io_dtype = io_dtype_,
@@ -129,15 +129,15 @@ Tensor LegacyConv2DImpl::def_forward(const Tensor &input, Residuals &residuals) 
       .compute_dtype = compute_dtype_,
   };
 
-  engine_->legacy_conv2d_fwd(backend_handle_, col_buffer.data_as<void>(), weights_.data_as<void>(),
+  engine_->legacy_conv2d_fwd(engine_handle_, col_buffer.data_as<void>(), weights_.data_as<void>(),
                              temp_output_buffer.data_as<void>(), output_size, kernel_size,
                              out_channels_, type_desc);
 
   cnhw_to_nchw(temp_output_buffer, output, batch_size, out_channels_, output_h, output_w,
-               backend_handle_.get_stream());
+               engine_handle_.get_stream());
 
   if (use_bias_) {
-    engine_->legacy_conv2d_add_bias(backend_handle_, output.data_as<void>(), bias_.data_as<void>(),
+    engine_->legacy_conv2d_add_bias(engine_handle_, output.data_as<void>(), bias_.data_as<void>(),
                                     batch_size, output_h, output_w, out_channels_, type_desc);
   }
 
@@ -153,7 +153,7 @@ Tensor LegacyConv2DImpl::def_backward(const Tensor &grad_output, Residuals &resi
   size_t input_h = (output_h - 1) * stride_h_ + kernel_h_ - 2 * pad_h_;
   size_t input_w = (output_w - 1) * stride_w_ + kernel_w_ - 2 * pad_w_;
 
-  Tensor grad_input = get_tensor({batch_size, channels, input_h, input_w}, io_dtype_);
+  Tensor grad_input = make_tensor({batch_size, channels, input_h, input_w}, io_dtype_);
   fill(grad_input, 0.0f);  // col2im accumulates, so we need to zero first
 
   Tensor col_buffer = residuals["col_buffer"];
@@ -163,11 +163,11 @@ Tensor LegacyConv2DImpl::def_backward(const Tensor &grad_output, Residuals &resi
   size_t col_grad_matrix_size = kernel_size * output_size;
 
   size_t gradient_buffer_size = out_channels_ * output_size;
-  Tensor temp_gradient_buffer = get_tensor({gradient_buffer_size}, io_dtype_);
-  Tensor temp_col_grad_matrix_buffer = get_tensor({col_grad_matrix_size}, io_dtype_);
+  Tensor temp_gradient_buffer = make_tensor({gradient_buffer_size}, io_dtype_);
+  Tensor temp_col_grad_matrix_buffer = make_tensor({col_grad_matrix_size}, io_dtype_);
 
   nchw_to_cnhw(grad_output, temp_gradient_buffer, batch_size, out_channels_, output_h, output_w,
-               backend_handle_.get_stream());
+               engine_handle_.get_stream());
 
   DTypeDesc type_desc{
       .io_dtype = io_dtype_,
@@ -175,20 +175,20 @@ Tensor LegacyConv2DImpl::def_backward(const Tensor &grad_output, Residuals &resi
       .compute_dtype = compute_dtype_,
   };
 
-  engine_->legacy_conv2d_wgrad(backend_handle_, col_buffer.data_as<void>(),
+  engine_->legacy_conv2d_wgrad(engine_handle_, col_buffer.data_as<void>(),
                                temp_gradient_buffer.data_as<void>(), grad_weights_.data_as<void>(),
                                output_size, kernel_size, out_channels_, type_desc);
 
-  engine_->legacy_conv2d_dgrad(backend_handle_, temp_gradient_buffer.data_as<void>(),
+  engine_->legacy_conv2d_dgrad(engine_handle_, temp_gradient_buffer.data_as<void>(),
                                weights_.data_as<void>(),
                                temp_col_grad_matrix_buffer.data_as<void>(), output_size,
                                kernel_size, out_channels_, type_desc);
 
   col2im(temp_col_grad_matrix_buffer, grad_input, batch_size, in_channels_, input_h, input_w,
-         kernel_h_, kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_, backend_handle_.get_stream());
+         kernel_h_, kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_, engine_handle_.get_stream());
 
   if (use_bias_) {
-    engine_->legacy_conv2d_bgrad(backend_handle_, grad_output.data_as<void>(),
+    engine_->legacy_conv2d_bgrad(engine_handle_, grad_output.data_as<void>(),
                                  grad_bias_.data_as<void>(), batch_size, output_h, output_w,
                                  out_channels_, type_desc);
   }

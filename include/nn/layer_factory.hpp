@@ -151,7 +151,7 @@ std::unique_ptr<LayerType> load_config(std::istream &file) {
 }
 
 inline void load_params(std::istream &in, LayerImpl &layer) {
-  Vec<Param> &params = layer.params();
+  Vec<Param> params = layer.params();
   for (auto &param : params) {
     load(param.data(), in);
   }

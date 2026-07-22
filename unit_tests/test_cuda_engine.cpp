@@ -12,6 +12,7 @@
 #include "nn/engines/cuda_engine.hpp"
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
+#include "tensor_test_utils.hpp"
 
 using namespace tunx;
 

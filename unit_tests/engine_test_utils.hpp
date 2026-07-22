@@ -6,32 +6,7 @@
 #include <cmath>
 #include <vector>
 
-#include "tensor/tensor.hpp"
-
 namespace tunx {
-
-template <typename T>
-void compare_array_t(const T* output, const T* expected, size_t size, double eps = 1e-3) {
-  size_t mismatch_count = 0;
-  for (size_t i = 0; i < size; i++) {
-    float out = static_cast<float>(output[i]);
-    float exp = static_cast<float>(expected[i]);
-    double diff = std::abs(out - exp);
-    if (diff > eps && mismatch_count < 100) {
-      mismatch_count++;
-      fmt::print("Mismatch at index: {}, output: {}, expected: {}, diff: {}\n", i, out, exp, diff);
-    }
-  }
-  EXPECT_EQ(mismatch_count, 0) << fmt::format("Mismatch count: {}", mismatch_count);
-}
-
-inline void compare_tensor(const Tensor& output, const Tensor& expected, double eps = 1e-3) {
-  EXPECT_EQ(output.size(), expected.size());
-  DType_t dtype = output.dtype();
-  DISPATCH_ANY_DTYPE(dtype, T, {
-    compare_array_t(output.data_as<T>(), expected.data_as<T>(), output.size(), eps);
-  });
-}
 
 // Math baseline for Dense Forward
 template <typename T>

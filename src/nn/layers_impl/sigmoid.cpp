@@ -17,7 +17,7 @@ SigmoidImpl::SigmoidImpl(const std::string &name)
       activation_(std::make_unique<func::Sigmoid>()) {}
 
 Tensor SigmoidImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  Tensor output = get_tensor(input.shape(), io_dtype_);
+  Tensor output = make_tensor(input.shape(), io_dtype_);
   activation_->apply(input, output);
 
   if (this->is_training_) {
@@ -35,7 +35,7 @@ Tensor SigmoidImpl::backward_impl(const Tensor &grad_output, Residuals &residual
     throw std::runtime_error("No cached output found for backward pass in SigmoidImpl");
   }
 
-  Tensor grad_input = get_tensor(grad_output.shape(), io_dtype_);
+  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
 
   // Gradient: grad_input = grad_output * output * (1 - output)
   size_t num_elements = grad_output.size();

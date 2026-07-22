@@ -18,17 +18,18 @@ namespace tunx {
 
 class ExampleGraphs {
 private:
-  static std::unordered_map<std::string, std::function<Graph(IAllocator &)>> creators_;
+  static std::unordered_map<std::string, std::function<Graph(IAllocator &, GraphOpts)>> creators_;
 
 public:
-  static void register_graph(const std::string &name, std::function<Graph(IAllocator &)> creator) {
+  static void register_graph(const std::string &name,
+                             std::function<Graph(IAllocator &, GraphOpts)> creator) {
     creators_[name] = std::move(creator);
   }
 
-  static Graph create(const std::string &name, IAllocator &allocator) {
+  static Graph create(const std::string &name, IAllocator &allocator, GraphOpts opts = {}) {
     auto it = creators_.find(name);
     if (it != creators_.end()) {
-      return it->second(allocator);
+      return it->second(allocator, opts);
     }
     throw std::invalid_argument("Unknown graph: " + name);
   }
@@ -45,7 +46,7 @@ public:
 };
 
 inline Graph load_or_create_graph(const std::string &graph_name, const std::string &graph_path,
-                                  IAllocator &allocator) {
+                                  IAllocator &allocator, GraphOpts opts = {}) {
   if (!graph_path.empty()) {
     std::cout << "Loading graph from: " << graph_path << std::endl;
     std::ifstream file(graph_path, std::ios::binary);
@@ -57,7 +58,7 @@ inline Graph load_or_create_graph(const std::string &graph_name, const std::stri
     return graph;
   }
   try {
-    auto graph = ExampleGraphs::create(graph_name, allocator);
+    auto graph = ExampleGraphs::create(graph_name, allocator, opts);
     std::cout << "Created graph: " << graph_name << std::endl;
     return graph;
   } catch (const std::exception &e) {

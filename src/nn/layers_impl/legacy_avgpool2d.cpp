@@ -16,8 +16,8 @@ namespace tunx {
 namespace internal {
 
 LegacyAvgPool2DImpl::LegacyAvgPool2DImpl(size_t pool_h, size_t pool_w, size_t stride_h,
-                                                   size_t stride_w, size_t pad_h, size_t pad_w,
-                                                   const std::string &name)
+                                         size_t stride_w, size_t pad_h, size_t pad_w,
+                                         const std::string &name)
     : SISOLayerImpl(name),
       pool_h_(pool_h),
       pool_w_(pool_w),
@@ -47,7 +47,7 @@ Tensor LegacyAvgPool2DImpl::forward_impl(const Tensor &input, Residuals &residua
   size_t output_h = (input_h + 2 * pad_h_ - pool_h_) / stride_h_ + 1;
   size_t output_w = (input_w + 2 * pad_w_ - pool_w_) / stride_w_ + 1;
 
-  Tensor output = get_tensor({batch_size, channels, output_h, output_w}, input.dtype());
+  Tensor output = make_tensor({batch_size, channels, output_h, output_w}, input.dtype());
 
   DTypeDesc type_desc{
       .io_dtype = io_dtype_,
@@ -55,7 +55,7 @@ Tensor LegacyAvgPool2DImpl::forward_impl(const Tensor &input, Residuals &residua
       .compute_dtype = compute_dtype_,
   };
 
-  engine_->legacy_avgpool2d_fwd(backend_handle_, input.data_as<void>(), output.data_as<void>(),
+  engine_->legacy_avgpool2d_fwd(engine_handle_, input.data_as<void>(), output.data_as<void>(),
                                 batch_size, channels, input_h, input_w, output_h, output_w, pool_h_,
                                 pool_w_, stride_h_, stride_w_, pad_h_, pad_w_, type_desc);
 
@@ -79,7 +79,7 @@ Tensor LegacyAvgPool2DImpl::backward_impl(const Tensor &grad_output, Residuals &
   size_t input_h = (grad_shape[2] - 1) * stride_h_ + pool_h_ - 2 * pad_h_;
   size_t input_w = (grad_shape[3] - 1) * stride_w_ + pool_w_ - 2 * pad_w_;
 
-  Tensor grad_input = get_tensor({batch_size, channels, input_h, input_w}, grad_output.dtype());
+  Tensor grad_input = make_tensor({batch_size, channels, input_h, input_w}, grad_output.dtype());
   fill(grad_input, 0.0f);
 
   DTypeDesc type_desc{
@@ -88,15 +88,13 @@ Tensor LegacyAvgPool2DImpl::backward_impl(const Tensor &grad_output, Residuals &
       .compute_dtype = compute_dtype_,
   };
 
-  engine_->legacy_avgpool2d_bwd(backend_handle_, grad_output.data_as<void>(),
+  engine_->legacy_avgpool2d_bwd(engine_handle_, grad_output.data_as<void>(),
                                 grad_input.data_as<void>(), batch_size, channels, input_h, input_w,
                                 output_h, output_w, pool_h_, pool_w_, stride_h_, stride_w_, pad_h_,
                                 pad_w_, type_desc);
 
   return grad_input;
 }
-
-
 
 LayerConfig LegacyAvgPool2DImpl::get_config() const {
   LayerConfig config;
@@ -137,8 +135,8 @@ std::shared_ptr<LegacyAvgPool2DImpl> LegacyAvgPool2DImpl::create_from_config(
   size_t pad_h = config.get<size_t>("pad_h");
   size_t pad_w = config.get<size_t>("pad_w");
 
-  return std::make_shared<LegacyAvgPool2DImpl>(pool_h, pool_w, stride_h, stride_w, pad_h,
-                                                    pad_w, config.name);
+  return std::make_shared<LegacyAvgPool2DImpl>(pool_h, pool_w, stride_h, stride_w, pad_h, pad_w,
+                                               config.name);
 }
 
 }  // namespace internal

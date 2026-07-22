@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <vector>
 
 #include "ops/cuda/kernels.hpp"
 #include "type/type.hpp"

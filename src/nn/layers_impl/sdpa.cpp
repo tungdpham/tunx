@@ -89,7 +89,7 @@ Vec<Tensor> SDPAImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residua
     }
   }
 
-  Tensor output = get_tensor(q_shape, io_dtype_);
+  Tensor output = make_tensor(q_shape, io_dtype_);
 
   if (this->is_training_) {
     residuals["q"] = q;
@@ -113,9 +113,9 @@ Vec<Tensor> SDPAImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residua
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq req = engine_->query_sdpa_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_sdpa_graph(engine_handle_, stats, type_desc);
 
-  Tensor workspace = this->get_tensor({req.fwd_workspace}, DType_t::BYTE);
+  Tensor workspace = this->make_tensor({req.fwd_workspace}, DType_t::BYTE);
 
   // Use a stats_tensor to hold statistics for backward pass
   // CPU uses [B, H, S, S] float/double
@@ -123,13 +123,13 @@ Vec<Tensor> SDPAImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residua
   // We allocate conservatively.
   size_t stats_elements =
       std::max(batch_size * num_heads * seq_len * seq_len, batch_size * num_heads * seq_len * 1);
-  Tensor stats_tensor = this->get_tensor({stats_elements}, io_dtype_);
+  Tensor stats_tensor = this->make_tensor({stats_elements}, io_dtype_);
 
   if (this->is_training_) {
     residuals["stats"] = stats_tensor;
   }
 
-  engine_->sdpa_fwd(backend_handle_, stats, q.data_as<void>(), k.data_as<void>(), v.data_as<void>(),
+  engine_->sdpa_fwd(engine_handle_, stats, q.data_as<void>(), k.data_as<void>(), v.data_as<void>(),
                     output.data_as<void>(), stats_tensor.data_as<void>(), workspace.data_as<void>(),
                     type_desc);
 
@@ -155,9 +155,9 @@ Vec<Tensor> SDPAImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &
   size_t seq_len = q_shape[2];
   size_t head_dim = q_shape[3];
 
-  Tensor grad_q = get_tensor(q_shape, this->io_dtype_);
-  Tensor grad_k = get_tensor(q_shape, this->io_dtype_);
-  Tensor grad_v = get_tensor(q_shape, this->io_dtype_);
+  Tensor grad_q = make_tensor(q_shape, this->io_dtype_);
+  Tensor grad_k = make_tensor(q_shape, this->io_dtype_);
+  Tensor grad_v = make_tensor(q_shape, this->io_dtype_);
 
   AttentionStats stats{
       .batch_size = batch_size,
@@ -174,11 +174,11 @@ Vec<Tensor> SDPAImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq req = engine_->query_sdpa_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_sdpa_graph(engine_handle_, stats, type_desc);
 
-  Tensor workspace = this->get_tensor({req.bwd_workspace}, DType_t::BYTE);
+  Tensor workspace = this->make_tensor({req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->sdpa_bwd(backend_handle_, stats, q.data_as<void>(), k.data_as<void>(), v.data_as<void>(),
+  engine_->sdpa_bwd(engine_handle_, stats, q.data_as<void>(), k.data_as<void>(), v.data_as<void>(),
                     output.data_as<void>(), grad_output.data_as<void>(),
                     stats_tensor.data_as<void>(), grad_q.data_as<void>(), grad_k.data_as<void>(),
                     grad_v.data_as<void>(), workspace.data_as<void>(), type_desc);

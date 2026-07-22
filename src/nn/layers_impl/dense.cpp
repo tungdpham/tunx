@@ -19,7 +19,7 @@ namespace tunx {
 namespace internal {
 
 DenseImpl::DenseImpl(size_t input_features, size_t output_features, bool use_bias,
-                               const std::string &name)
+                     const std::string &name)
     : SISOLayerImpl(name),
       input_features_(input_features),
       output_features_(output_features),
@@ -66,7 +66,7 @@ Tensor DenseImpl::forward_impl(const Tensor &input, Residuals &residuals) {
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_dense_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq ws_req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
 
   if (this->is_training_) {
     residuals["input"] = input;
@@ -74,10 +74,10 @@ Tensor DenseImpl::forward_impl(const Tensor &input, Residuals &residuals) {
 
   Vec<size_t> out_shape = in_shape;
   out_shape.back() = output_features_;
-  Tensor output = get_tensor(out_shape, io_dtype_);
-  Tensor ws = get_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+  Tensor output = make_tensor(out_shape, io_dtype_);
+  Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
-  engine_->dense_fwd(backend_handle_, stats, input.data_as<void>(), weights_.data_as<void>(),
+  engine_->dense_fwd(engine_handle_, stats, input.data_as<void>(), weights_.data_as<void>(),
                      use_bias_ ? bias_.data_as<void>() : nullptr, output.data_as<void>(),
                      ws.data_as<void>(), type_desc);
 
@@ -108,21 +108,20 @@ Tensor DenseImpl::backward_impl(const Tensor &grad_output, Residuals &residuals)
       .compute_dtype = compute_dtype_,
   };
 
-  Tensor grad_input = get_tensor(in_shape, io_dtype_);
-  WorkspaceReq ws_req = engine_->query_dense_graph(backend_handle_, stats, type_desc);
-  Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  Tensor grad_input = make_tensor(in_shape, io_dtype_);
+  WorkspaceReq ws_req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
+  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->dense_wgrad(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
+  engine_->dense_wgrad(engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
                        weights_.grad_as<void>(), ws.data_as<void>(), type_desc);
 
   if (use_bias_) {
-    engine_->dense_bgrad(backend_handle_, stats, grad_output.data_as<void>(),
-                         bias_.grad_as<void>(), ws.data_as<void>(), type_desc);
+    engine_->dense_bgrad(engine_handle_, stats, grad_output.data_as<void>(), bias_.grad_as<void>(),
+                         ws.data_as<void>(), type_desc);
   }
 
-  engine_->dense_dgrad(backend_handle_, stats, grad_output.data_as<void>(),
-                       weights_.data_as<void>(), grad_input.data_as<void>(), ws.data_as<void>(),
-                       type_desc);
+  engine_->dense_dgrad(engine_handle_, stats, grad_output.data_as<void>(), weights_.data_as<void>(),
+                       grad_input.data_as<void>(), ws.data_as<void>(), type_desc);
 
   return grad_input;
 }

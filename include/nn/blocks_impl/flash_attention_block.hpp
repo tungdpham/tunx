@@ -45,7 +45,7 @@ public:
   Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const override;
   static std::shared_ptr<FlashAttentionBlockImpl> create_from_config(const LayerConfig &config);
 
-  Vec<Layer> layers() override { return {q_proj_, k_proj_, v_proj_, out_proj_}; }
+  const Vec<Layer> layers() const override { return {q_proj_, k_proj_, v_proj_, out_proj_}; }
 
   Node operator()(const Node &input) {
     if (!input) {

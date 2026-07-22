@@ -11,7 +11,7 @@ namespace tunx {
 namespace internal {
 
 ActivationImpl::ActivationImpl(std::unique_ptr<ActivationFunction> activation,
-                                         const std::string &name)
+                               const std::string &name)
     : SISOLayerImpl(name),
       activation_(std::move(activation)) {
   if (!activation_) {
@@ -24,7 +24,7 @@ Tensor ActivationImpl::forward_impl(const Tensor &input, Residuals &residuals) {
     residuals["input"] = input;
   }
 
-  Tensor output = get_tensor(input.shape(), input.dtype());
+  Tensor output = make_tensor(input.shape(), input.dtype());
   activation_->apply(input, output);
   return output;
 }
@@ -34,7 +34,7 @@ Tensor ActivationImpl::backward_impl(const Tensor &grad_output, Residuals &resid
   if (!input) {
     throw std::runtime_error("No cached input found for backward pass in ActivationImpl");
   }
-  Tensor grad_input = get_tensor(input.shape(), input.dtype());
+  Tensor grad_input = make_tensor(input.shape(), input.dtype());
   activation_->compute_gradient(input, grad_output, grad_input);
   return grad_input;
 }
@@ -51,8 +51,7 @@ Vec<size_t> ActivationImpl::compute_output_shape(const Vec<size_t> &input_shape)
   return input_shape;
 }
 
-std::shared_ptr<ActivationImpl> ActivationImpl::create_from_config(
-    const LayerConfig &config) {
+std::shared_ptr<ActivationImpl> ActivationImpl::create_from_config(const LayerConfig &config) {
   std::string activation_name = config.get<std::string>("activation", "relu");
   ActivationFactory::register_defaults();
   auto activation = ActivationFactory::create(activation_name);

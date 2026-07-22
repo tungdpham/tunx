@@ -76,7 +76,7 @@ Vec<Tensor> ResidualBlockImpl::forward_impl(const Vec<Tensor> &inputs, Residuals
   for (size_t i = 0; i < outputs.size(); ++i) {
     if (final_activation_) {
       std::string pre_act_key = "pre_activation_" + std::to_string(i);
-      Tensor pre_act = get_tensor(main_outputs[i].shape(), io_dtype_);
+      Tensor pre_act = make_tensor(main_outputs[i].shape(), io_dtype_);
       DISPATCH_IO_DTYPE(ops::add, main_outputs[i].data_ptr(), shortcut_outputs[i].data_ptr(),
                         pre_act.data_ptr(), outputs[i].size());
       residuals[pre_act_key] = pre_act;
@@ -97,12 +97,12 @@ Vec<Tensor> ResidualBlockImpl::backward_impl(const Vec<Tensor> &grad_outputs,
     for (size_t i = 0; i < grad_outputs.size(); ++i) {
       std::string pre_act_key = "pre_activation_" + std::to_string(i);
       Tensor &pre_act = residuals[pre_act_key];
-      Tensor grad_pre_act = this->get_tensor(pre_act.shape(), pre_act.dtype());
+      Tensor grad_pre_act = this->make_tensor(pre_act.shape(), pre_act.dtype());
       final_activation_->compute_gradient(pre_act, grad_outputs[i], grad_pre_act);
       pre_act = Tensor();  // release pre-activation cache
       grads_to_propagate[i] = grad_pre_act;
     }
-    allocator_->flip();  // flip workspace allocator between main and shortcut backward
+    ws_allocator_->flip();  // flip workspace allocator between main and shortcut backward
   }
 
   // Backward through main path
@@ -117,7 +117,7 @@ Vec<Tensor> ResidualBlockImpl::backward_impl(const Vec<Tensor> &grad_outputs,
 
   Vec<Tensor> grad_inputs(main_grad_inputs.size());
   for (size_t i = 0; i < grad_inputs.size(); ++i) {
-    grad_inputs[i] = this->get_tensor(main_grad_inputs[i].shape(), main_grad_inputs[i].dtype());
+    grad_inputs[i] = this->make_tensor(main_grad_inputs[i].shape(), main_grad_inputs[i].dtype());
     DISPATCH_IO_DTYPE(ops::add, main_grad_inputs[i].data_ptr(), shortcut_grad_inputs[i].data_ptr(),
                       grad_inputs[i].data_ptr(), grad_inputs[i].size(), nullptr);
   }

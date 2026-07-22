@@ -206,14 +206,16 @@ public:
   std::unique_ptr<Loss> clone() const override { return std::make_unique<MSELoss>(); }
 
 private:
-  void compute_loss_impl(const Tensor &predictions, const Tensor &targets, float &loss, stream s) override {
+  void compute_loss_impl(const Tensor &predictions, const Tensor &targets, float &loss,
+                         stream s) override {
     if (predictions.device() != targets.device()) {
       throw std::runtime_error("Predictions and targets must be on the same device for MSELoss.");
     }
     DISPATCH_DTYPE(predictions.dtype(), T, return compute_loss_t<T>(predictions, targets, loss, s));
   }
 
-  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient, stream s) override {
+  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
+                             stream s) override {
     if (predictions.device() != targets.device() || predictions.device() != gradient.device()) {
       throw std::runtime_error(
           "Predictions, targets, and gradient must be on the same device for MSELoss.");
@@ -245,7 +247,8 @@ private:
   }
 
   template <typename T>
-  void compute_gradient_t(const Tensor &predictions, const Tensor &targets, Tensor &gradient, stream s) {
+  void compute_gradient_t(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
+                          stream s) {
     auto &device = predictions.device();
     gradient = Tensor(predictions.shape(), predictions.dtype(), predictions.device());
     size_t batch_size = predictions.shape()[0];
@@ -255,8 +258,9 @@ private:
     }
 
     if (predictions.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, s, cpu::loss::compute_mse_gradient<T>, predictions.data_as<T>(),
-                             targets.data_as<T>(), gradient.data_as<T>(), batch_size, output_size);
+      return create_cpu_task(device, s, cpu::loss::compute_mse_gradient<T>,
+                             predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
+                             batch_size, output_size);
     }
 #ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
@@ -285,14 +289,16 @@ public:
   std::unique_ptr<Loss> clone() const override { return std::make_unique<MAELoss>(); }
 
 private:
-  void compute_loss_impl(const Tensor &predictions, const Tensor &targets, float &loss, stream s) override {
+  void compute_loss_impl(const Tensor &predictions, const Tensor &targets, float &loss,
+                         stream s) override {
     if (predictions.device() != targets.device()) {
       throw std::runtime_error("Predictions and targets must be on the same device for MAELoss.");
     }
     DISPATCH_DTYPE(predictions.dtype(), T, return compute_loss_t<T>(predictions, targets, loss, s));
   }
 
-  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient, stream s) override {
+  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
+                             stream s) override {
     if (predictions.device() != targets.device() || predictions.device() != gradient.device()) {
       throw std::runtime_error(
           "Predictions, targets, and gradient must be on the same device for MAELoss.");
@@ -324,7 +330,8 @@ private:
   }
 
   template <typename T>
-  void compute_gradient_t(const Tensor &predictions, const Tensor &targets, Tensor &gradient, stream s) {
+  void compute_gradient_t(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
+                          stream s) {
     auto &device = predictions.device();
     gradient = Tensor(predictions.shape(), predictions.dtype(), predictions.device());
     size_t batch_size = predictions.shape()[0];
@@ -334,8 +341,9 @@ private:
     }
 
     if (predictions.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, s, cpu::loss::compute_mae_gradient<T>, predictions.data_as<T>(),
-                             targets.data_as<T>(), gradient.data_as<T>(), batch_size, output_size);
+      return create_cpu_task(device, s, cpu::loss::compute_mae_gradient<T>,
+                             predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
+                             batch_size, output_size);
     }
 #ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
@@ -371,14 +379,16 @@ public:
 private:
   double delta_;
 
-  void compute_loss_impl(const Tensor &predictions, const Tensor &targets, float &loss, stream s) override {
+  void compute_loss_impl(const Tensor &predictions, const Tensor &targets, float &loss,
+                         stream s) override {
     if (predictions.device() != targets.device()) {
       throw std::runtime_error("Predictions and targets must be on the same device for HuberLoss.");
     }
     DISPATCH_DTYPE(predictions.dtype(), T, return compute_loss_t<T>(predictions, targets, loss, s));
   }
 
-  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient, stream s) override {
+  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
+                             stream s) override {
     if (predictions.device() != targets.device() || predictions.device() != gradient.device()) {
       throw std::runtime_error(
           "Predictions, targets, and gradient must be on the same device for HuberLoss.");
@@ -403,16 +413,17 @@ private:
     }
 #ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, s, cuda::loss::compute_huber_loss<T>, predictions.data_as<T>(),
-                              targets.data_as<T>(), loss, batch_size, output_size,
-                              static_cast<T>(delta_));
+      return create_cuda_task(device, s, cuda::loss::compute_huber_loss<T>,
+                              predictions.data_as<T>(), targets.data_as<T>(), loss, batch_size,
+                              output_size, static_cast<T>(delta_));
     }
 #endif
     throw std::runtime_error("Unsupported device type for HuberLoss.");
   }
 
   template <typename T>
-  void compute_gradient_t(const Tensor &predictions, const Tensor &targets, Tensor &gradient, stream s) {
+  void compute_gradient_t(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
+                          stream s) {
     auto &device = predictions.device();
     gradient = Tensor(predictions.shape(), predictions.dtype(), predictions.device());
     size_t batch_size = predictions.shape()[0];

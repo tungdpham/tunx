@@ -62,7 +62,7 @@ public:
   LayerConfig get_config() const override;
   static std::shared_ptr<ResidualBlockImpl> create_from_config(const LayerConfig &config);
 
-  Vec<Layer> layers() override {
+  const Vec<Layer> layers() const override {
     Vec<Layer> all_layers = {main_path_};
     if (shortcut_path_) {
       all_layers.push_back(shortcut_path_);

@@ -104,12 +104,12 @@ TEST_F(GPUTensorTest, TensorAddition) {
 
   Tensor result = tensor1 + tensor2;
 
-  Tensor cpu_result = result.to_host();
+  Tensor host_result = result.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 5.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 5.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 5.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 5.0f);
 }
 
 TEST_F(GPUTensorTest, TensorSubtraction) {
@@ -121,12 +121,12 @@ TEST_F(GPUTensorTest, TensorSubtraction) {
 
   Tensor result = tensor1 - tensor2;
 
-  Tensor cpu_result = result.to_host();
+  Tensor host_result = result.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 3.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 3.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 3.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 3.0f);
 }
 
 TEST_F(GPUTensorTest, TensorMultiplication) {
@@ -138,12 +138,12 @@ TEST_F(GPUTensorTest, TensorMultiplication) {
 
   Tensor result = tensor1 * tensor2;
 
-  Tensor cpu_result = result.to_host();
+  Tensor host_result = result.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 12.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 12.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 12.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 12.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 12.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 12.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 12.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 12.0f);
 }
 
 TEST_F(GPUTensorTest, TensorDivision) {
@@ -155,12 +155,12 @@ TEST_F(GPUTensorTest, TensorDivision) {
 
   Tensor result = tensor1 / tensor2;
 
-  Tensor cpu_result = result.to_host();
+  Tensor host_result = result.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 3.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 3.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 3.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 3.0f);
 }
 
 TEST_F(GPUTensorTest, ScalarMultiplication) {
@@ -169,12 +169,12 @@ TEST_F(GPUTensorTest, ScalarMultiplication) {
 
   Tensor result = tensor * 2.0;
 
-  Tensor cpu_result = result.to_host();
+  Tensor host_result = result.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 6.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 6.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 6.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 6.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 6.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 6.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 6.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 6.0f);
 }
 
 TEST_F(GPUTensorTest, ScalarDivision) {
@@ -183,12 +183,12 @@ TEST_F(GPUTensorTest, ScalarDivision) {
 
   Tensor result = tensor / 2.0;
 
-  Tensor cpu_result = result.to_host();
+  Tensor host_result = result.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 4.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 4.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 4.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 4.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 4.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 4.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 4.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 4.0f);
 }
 
 TEST_F(GPUTensorTest, InPlaceAddition) {
@@ -200,12 +200,12 @@ TEST_F(GPUTensorTest, InPlaceAddition) {
 
   tensor1 += tensor2;
 
-  Tensor cpu_result = tensor1.to_host();
+  Tensor host_result = tensor1.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 5.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 5.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 5.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 5.0f);
 }
 
 TEST_F(GPUTensorTest, InPlaceSubtraction) {
@@ -217,12 +217,12 @@ TEST_F(GPUTensorTest, InPlaceSubtraction) {
 
   tensor1 -= tensor2;
 
-  Tensor cpu_result = tensor1.to_host();
+  Tensor host_result = tensor1.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 3.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 3.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 3.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 3.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 3.0f);
 }
 
 TEST_F(GPUTensorTest, InPlaceMultiplication) {
@@ -234,12 +234,12 @@ TEST_F(GPUTensorTest, InPlaceMultiplication) {
 
   tensor1 *= tensor2;
 
-  Tensor cpu_result = tensor1.to_host();
+  Tensor host_result = tensor1.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 12.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 12.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 12.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 12.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 12.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 12.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 12.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 12.0f);
 }
 
 TEST_F(GPUTensorTest, InPlaceScalarMultiplication) {
@@ -248,12 +248,12 @@ TEST_F(GPUTensorTest, InPlaceScalarMultiplication) {
 
   tensor *= 2.0;
 
-  Tensor cpu_result = tensor.to_host();
+  Tensor host_result = tensor.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 6.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 6.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 6.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 6.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 6.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 6.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 6.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 6.0f);
 }
 
 TEST_F(GPUTensorTest, InPlaceScalarDivision) {
@@ -262,12 +262,12 @@ TEST_F(GPUTensorTest, InPlaceScalarDivision) {
 
   tensor /= 2.0;
 
-  Tensor cpu_result = tensor.to_host();
+  Tensor host_result = tensor.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 4.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 4.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 4.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 4.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 4.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 4.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 4.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 4.0f);
 }
 
 TEST_F(GPUTensorTest, SameShapeComparison) {
@@ -296,12 +296,12 @@ TEST_F(GPUTensorTest, FillOperation) {
   Tensor tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(tensor, 42.0);
 
-  Tensor cpu_result = tensor.to_host();
+  Tensor host_result = tensor.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 42.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 42.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 42.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 42.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 42.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 42.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 42.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 42.0f);
 }
 
 TEST_F(GPUTensorTest, CloneOperation) {
@@ -313,12 +313,12 @@ TEST_F(GPUTensorTest, CloneOperation) {
   EXPECT_TRUE(original.shape() == cloned.shape());
   EXPECT_TRUE(cloned.device_type() == DeviceType::CUDA);
 
-  Tensor cpu_result = cloned.to_host();
+  Tensor host_result = cloned.to_host();
 
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 5.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 1}), 5.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 0}), 5.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 1, 1}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 1}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 0}), 5.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 1, 1}), 5.0f);
 }
 
 TEST_F(GPUTensorTest, MoveConstructor) {
@@ -330,8 +330,8 @@ TEST_F(GPUTensorTest, MoveConstructor) {
   EXPECT_EQ(moved.size(), 4);
   EXPECT_TRUE(moved.device_type() == DeviceType::CUDA);
 
-  Tensor cpu_result = moved.to_host();
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 42.0f);
+  Tensor host_result = moved.to_host();
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 42.0f);
   EXPECT_TRUE(!original);
 }
 
@@ -345,17 +345,17 @@ TEST_F(GPUTensorTest, MoveAssignment) {
   EXPECT_EQ(moved.size(), 4);
   EXPECT_TRUE(moved.device_type() == DeviceType::CUDA);
 
-  Tensor cpu_result = moved.to_host();
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 42.0f);
+  Tensor host_result = moved.to_host();
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 42.0f);
 }
 
 TEST_F(GPUTensorTest, MultiBatchAccess) {
-  Tensor cpu_tensor = Tensor({2, 1, 2, 2}, DType_t::FP32);
+  Tensor host_tensor = Tensor({2, 1, 2, 2}, DType_t::FP32);
 
-  cpu_tensor.at<float>({0, 0, 0, 0}) = 1.0f;
-  cpu_tensor.at<float>({1, 0, 0, 0}) = 2.0f;
+  host_tensor.at<float>({0, 0, 0, 0}) = 1.0f;
+  host_tensor.at<float>({1, 0, 0, 0}) = 2.0f;
 
-  Tensor gpu_tensor = cpu_tensor.to_device(device_);
+  Tensor gpu_tensor = host_tensor.to_device(device_);
   Tensor result = gpu_tensor.to_host();
 
   EXPECT_FLOAT_EQ(result.at<float>({0, 0, 0, 0}), 1.0f);
@@ -363,13 +363,13 @@ TEST_F(GPUTensorTest, MultiBatchAccess) {
 }
 
 TEST_F(GPUTensorTest, MultiChannelAccess) {
-  Tensor cpu_tensor = Tensor({1, 3, 2, 2}, DType_t::FP32);
+  Tensor host_tensor = Tensor({1, 3, 2, 2}, DType_t::FP32);
 
-  cpu_tensor.at<float>({0, 0, 0, 0}) = 1.0f;
-  cpu_tensor.at<float>({0, 1, 0, 0}) = 2.0f;
-  cpu_tensor.at<float>({0, 2, 0, 0}) = 3.0f;
+  host_tensor.at<float>({0, 0, 0, 0}) = 1.0f;
+  host_tensor.at<float>({0, 1, 0, 0}) = 2.0f;
+  host_tensor.at<float>({0, 2, 0, 0}) = 3.0f;
 
-  Tensor gpu_tensor = cpu_tensor.to_device(device_);
+  Tensor gpu_tensor = host_tensor.to_device(device_);
   Tensor result = gpu_tensor.to_host();
 
   EXPECT_FLOAT_EQ(result.at<float>({0, 0, 0, 0}), 1.0f);
@@ -387,34 +387,34 @@ TEST_F(GPUTensorTest, CopyConstructor) {
   EXPECT_TRUE(copy.shape() == original.shape());
   EXPECT_TRUE(copy.device_type() == DeviceType::CUDA);
 
-  Tensor cpu_copy = copy.to_host();
-  EXPECT_FLOAT_EQ(cpu_copy.at<float>({0, 0, 0, 0}), 42.0f);
+  Tensor host_copy = copy.to_host();
+  EXPECT_FLOAT_EQ(host_copy.at<float>({0, 0, 0, 0}), 42.0f);
 }
 
 TEST_F(GPUTensorTest, ToCPU) {
   Tensor gpu_tensor = Tensor({1, 1, 2, 2}, DType_t::FP32, device_);
   fill(gpu_tensor, 42.0);
 
-  Tensor cpu_tensor = gpu_tensor.to_host();
+  Tensor host_tensor = gpu_tensor.to_host();
 
-  EXPECT_TRUE(cpu_tensor.device_type() == DeviceType::CPU);
-  EXPECT_FALSE(cpu_tensor.device_type() == DeviceType::CUDA);
-  EXPECT_EQ(cpu_tensor.size(), 4);
+  EXPECT_TRUE(host_tensor.device_type() == DeviceType::CPU);
+  EXPECT_FALSE(host_tensor.device_type() == DeviceType::CUDA);
+  EXPECT_EQ(host_tensor.size(), 4);
 
-  EXPECT_FLOAT_EQ(cpu_tensor.at<float>({0, 0, 0, 0}), 42.0f);
-  EXPECT_FLOAT_EQ(cpu_tensor.at<float>({0, 0, 0, 1}), 42.0f);
-  EXPECT_FLOAT_EQ(cpu_tensor.at<float>({0, 0, 1, 0}), 42.0f);
-  EXPECT_FLOAT_EQ(cpu_tensor.at<float>({0, 0, 1, 1}), 42.0f);
+  EXPECT_FLOAT_EQ(host_tensor.at<float>({0, 0, 0, 0}), 42.0f);
+  EXPECT_FLOAT_EQ(host_tensor.at<float>({0, 0, 0, 1}), 42.0f);
+  EXPECT_FLOAT_EQ(host_tensor.at<float>({0, 0, 1, 0}), 42.0f);
+  EXPECT_FLOAT_EQ(host_tensor.at<float>({0, 0, 1, 1}), 42.0f);
 }
 
 TEST_F(GPUTensorTest, ToGPUFromCPU) {
-  Tensor cpu_tensor = Tensor({1, 1, 2, 2}, DType_t::FP32);
-  cpu_tensor.at<float>({0, 0, 0, 0}) = 1.0f;
-  cpu_tensor.at<float>({0, 0, 0, 1}) = 2.0f;
-  cpu_tensor.at<float>({0, 0, 1, 0}) = 3.0f;
-  cpu_tensor.at<float>({0, 0, 1, 1}) = 4.0f;
+  Tensor host_tensor = Tensor({1, 1, 2, 2}, DType_t::FP32);
+  host_tensor.at<float>({0, 0, 0, 0}) = 1.0f;
+  host_tensor.at<float>({0, 0, 0, 1}) = 2.0f;
+  host_tensor.at<float>({0, 0, 1, 0}) = 3.0f;
+  host_tensor.at<float>({0, 0, 1, 1}) = 4.0f;
 
-  Tensor gpu_tensor = cpu_tensor.to_device(device_);
+  Tensor gpu_tensor = host_tensor.to_device(device_);
 
   EXPECT_TRUE(gpu_tensor.device_type() == DeviceType::CUDA);
   EXPECT_FALSE(gpu_tensor.device_type() == DeviceType::CPU);
@@ -435,15 +435,15 @@ TEST_F(GPUTensorTest, ToGPUIdempotent) {
 
   EXPECT_TRUE(still_gpu.device_type() == DeviceType::CUDA);
 
-  Tensor cpu_result = still_gpu.to_host();
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 42.0f);
+  Tensor host_result = still_gpu.to_host();
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 42.0f);
 }
 
 TEST_F(GPUTensorTest, ToCPUIdempotent) {
-  Tensor cpu_tensor = Tensor({1, 1, 2, 2}, DType_t::FP32);
-  cpu_tensor.at<float>({0, 0, 0, 0}) = 42.0f;
+  Tensor host_tensor = Tensor({1, 1, 2, 2}, DType_t::FP32);
+  host_tensor.at<float>({0, 0, 0, 0}) = 42.0f;
 
-  Tensor still_cpu = cpu_tensor.to_host();
+  Tensor still_cpu = host_tensor.to_host();
 
   EXPECT_TRUE(still_cpu.device_type() == DeviceType::CPU);
   EXPECT_FLOAT_EQ(still_cpu.at<float>({0, 0, 0, 0}), 42.0f);
@@ -454,11 +454,11 @@ TEST_F(GPUTensorTest, FillRandomUniform) {
 
   fill_uniform(tensor, 0.0, 1.0);
 
-  Tensor cpu_result = tensor.to_host();
+  Tensor host_result = tensor.to_host();
 
   bool all_in_range = true;
-  for (size_t i = 0; i < cpu_result.size(); ++i) {
-    float val = cpu_result.at<float>({i / 4, 0, (i / 2) % 2, i % 2});
+  for (size_t i = 0; i < host_result.size(); ++i) {
+    float val = host_result.at<float>({i / 4, 0, (i / 2) % 2, i % 2});
     if (val < 0.0f || val > 1.0f) {
       all_in_range = false;
       break;
@@ -466,10 +466,10 @@ TEST_F(GPUTensorTest, FillRandomUniform) {
   }
   EXPECT_TRUE(all_in_range);
 
-  float first_val = cpu_result.at<float>({0, 0, 0, 0});
+  float first_val = host_result.at<float>({0, 0, 0, 0});
   bool has_different = false;
-  for (size_t i = 1; i < std::min(cpu_result.size(), size_t(100)); ++i) {
-    if (std::abs(cpu_result.at<float>({i / 4, 0, (i / 2) % 2, i % 2}) - first_val) > 1e-6f) {
+  for (size_t i = 1; i < std::min(host_result.size(), size_t(100)); ++i) {
+    if (std::abs(host_result.at<float>({i / 4, 0, (i / 2) % 2, i % 2}) - first_val) > 1e-6f) {
       has_different = true;
       break;
     }
@@ -481,12 +481,12 @@ TEST_F(GPUTensorTest, FillRandomNormal) {
   Tensor tensor = Tensor({1, 10, 10, 10}, DType_t::FP32, device_);
   fill_normal(tensor, 0.0, 1.0);
 
-  Tensor cpu_result = tensor.to_host();
+  Tensor host_result = tensor.to_host();
 
-  float first_val = cpu_result.at<float>({0, 0, 0, 0});
+  float first_val = host_result.at<float>({0, 0, 0, 0});
   bool has_different = false;
-  for (size_t i = 1; i < std::min(cpu_result.size(), size_t(100)); ++i) {
-    if (std::abs(cpu_result.at<float>({i / 4, 0, (i / 2) % 2, i % 2}) - first_val) > 1e-6f) {
+  for (size_t i = 1; i < std::min(host_result.size(), size_t(100)); ++i) {
+    if (std::abs(host_result.at<float>({i / 4, 0, (i / 2) % 2, i % 2}) - first_val) > 1e-6f) {
       has_different = true;
       break;
     }
@@ -494,10 +494,10 @@ TEST_F(GPUTensorTest, FillRandomNormal) {
   EXPECT_TRUE(has_different);
 
   float sum = 0.0f;
-  for (size_t i = 0; i < cpu_result.size(); ++i) {
-    sum += cpu_result.at<float>({i / 4, 0, (i / 2) % 2, i % 2});
+  for (size_t i = 0; i < host_result.size(); ++i) {
+    sum += host_result.at<float>({i / 4, 0, (i / 2) % 2, i % 2});
   }
-  float mean = sum / cpu_result.size();
+  float mean = sum / host_result.size();
 
   EXPECT_NEAR(mean, 0.0f, 0.2f);
 }
@@ -570,10 +570,10 @@ TEST_F(GPUTensorTest, LargeTensorOperations) {
   EXPECT_EQ(result.size(), 4 * 16 * 64 * 64);
   EXPECT_TRUE(result.device_type() == DeviceType::CUDA);
 
-  Tensor cpu_result = result.to_host();
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({0, 0, 0, 0}), 4.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({1, 5, 10, 20}), 4.0f);
-  EXPECT_FLOAT_EQ(cpu_result.at<float>({3, 15, 63, 63}), 4.0f);
+  Tensor host_result = result.to_host();
+  EXPECT_FLOAT_EQ(host_result.at<float>({0, 0, 0, 0}), 4.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({1, 5, 10, 20}), 4.0f);
+  EXPECT_FLOAT_EQ(host_result.at<float>({3, 15, 63, 63}), 4.0f);
 }
 
 TEST_F(GPUTensorTest, FloatingPointComparisons) {
@@ -584,9 +584,9 @@ TEST_F(GPUTensorTest, FloatingPointComparisons) {
   fill(tensor2, 0.3);
 
   Tensor diff = tensor1 - tensor2;
-  Tensor cpu_diff = diff.to_host();
+  Tensor host_diff = diff.to_host();
 
-  for (size_t i = 0; i < cpu_diff.size(); ++i) {
-    EXPECT_NEAR(cpu_diff.at<float>({i / 4, 0, (i / 2) % 2, i % 2}), 0.0f, 1e-6f);
+  for (size_t i = 0; i < host_diff.size(); ++i) {
+    EXPECT_NEAR(host_diff.at<float>({i / 4, 0, (i / 2) % 2, i % 2}), 0.0f, 1e-6f);
   }
 }

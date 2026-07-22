@@ -56,12 +56,12 @@ Tensor ClassTokenImpl::forward_impl(const Tensor &input, Residuals &residuals) {
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_class_token_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq ws_req = engine_->query_class_token_graph(engine_handle_, stats, type_desc);
 
-  Tensor output = get_tensor({batch_size, seq_len + 1, embed_dim}, input.dtype());
-  Tensor ws = get_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+  Tensor output = make_tensor({batch_size, seq_len + 1, embed_dim}, input.dtype());
+  Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
-  engine_->class_token_fwd(backend_handle_, stats, input.data_as<void>(),
+  engine_->class_token_fwd(engine_handle_, stats, input.data_as<void>(),
                            class_token_.data_as<void>(), output.data_as<void>(), ws.data_as<void>(),
                            type_desc);
 
@@ -90,11 +90,11 @@ Tensor ClassTokenImpl::backward_impl(const Tensor &grad_output, Residuals &resid
       .compute_dtype = compute_dtype_,
   };
 
-  Tensor grad_input = get_tensor({batch_size, seq_len, embed_dim}, grad_output.dtype());
-  WorkspaceReq ws_req = engine_->query_class_token_graph(backend_handle_, stats, type_desc);
-  Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  Tensor grad_input = make_tensor({batch_size, seq_len, embed_dim}, grad_output.dtype());
+  WorkspaceReq ws_req = engine_->query_class_token_graph(engine_handle_, stats, type_desc);
+  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->class_token_bwd(backend_handle_, stats, grad_output.data_as<void>(),
+  engine_->class_token_bwd(engine_handle_, stats, grad_output.data_as<void>(),
                            grad_input.data_as<void>(), class_token_.grad_as<void>(),
                            ws.data_as<void>(), type_desc);
 

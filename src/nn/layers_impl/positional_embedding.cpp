@@ -10,17 +10,17 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "nn/engines/iengine.hpp"
+#include "nn/stats/stats.hpp"
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
-#include "nn/engines/iengine.hpp"
-#include "nn/stats/stats.hpp"
 
 namespace tunx {
 namespace internal {
 
 PositionalEmbeddingImpl::PositionalEmbeddingImpl(size_t embed_dim, size_t seq_len,
-                                                           const std::string &name)
+                                                 const std::string &name)
     : SISOLayerImpl(name),
       embed_dim_(embed_dim),
       seq_len_(seq_len) {}
@@ -55,7 +55,7 @@ Tensor PositionalEmbeddingImpl::forward_impl(const Tensor &input, Residuals &res
                              std::to_string(seq_len_) + ")");
   }
 
-  Tensor output = get_tensor(shape, io_dtype_);
+  Tensor output = make_tensor(shape, io_dtype_);
 
   size_t batch_size = 1;
   for (size_t i = 0; i + 2 < shape.size(); ++i) {
@@ -74,17 +74,17 @@ Tensor PositionalEmbeddingImpl::forward_impl(const Tensor &input, Residuals &res
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_positional_embedding_graph(backend_handle_, stats, type_desc);
-  Tensor ws = get_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = engine_->query_positional_embedding_graph(engine_handle_, stats, type_desc);
+  Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
-  engine_->positional_embedding_fwd(backend_handle_, stats, input.data_as<void>(), pos_embedding_.data_as<void>(),
-                                    output.data_as<void>(), ws.data_as<void>(), type_desc);
+  engine_->positional_embedding_fwd(engine_handle_, stats, input.data_as<void>(),
+                                    pos_embedding_.data_as<void>(), output.data_as<void>(),
+                                    ws.data_as<void>(), type_desc);
 
   return output;
 }
 
-Tensor PositionalEmbeddingImpl::backward_impl(const Tensor &grad_output,
-                                                   Residuals &residuals) {
+Tensor PositionalEmbeddingImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
   const auto &shape = grad_output.shape();
   if (shape.size() < 2) {
     throw std::runtime_error("PositionalEmbeddingImpl: Gradient tensor must be at least 2D");
@@ -104,7 +104,7 @@ Tensor PositionalEmbeddingImpl::backward_impl(const Tensor &grad_output,
                              std::to_string(seq_len_) + ")");
   }
 
-  Tensor grad_input = get_tensor(shape, io_dtype_);
+  Tensor grad_input = make_tensor(shape, io_dtype_);
 
   grad_output.copy_to(grad_input);
 
@@ -125,11 +125,12 @@ Tensor PositionalEmbeddingImpl::backward_impl(const Tensor &grad_output,
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_positional_embedding_graph(backend_handle_, stats, type_desc);
-  Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = engine_->query_positional_embedding_graph(engine_handle_, stats, type_desc);
+  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->positional_embedding_bwd(backend_handle_, stats, grad_output.data_as<void>(),
-                                    pos_embedding_gradients_.data_as<void>(), ws.data_as<void>(), type_desc);
+  engine_->positional_embedding_bwd(engine_handle_, stats, grad_output.data_as<void>(),
+                                    pos_embedding_gradients_.data_as<void>(), ws.data_as<void>(),
+                                    type_desc);
 
   return grad_input;
 }
@@ -143,8 +144,7 @@ LayerConfig PositionalEmbeddingImpl::get_config() const {
   return config;
 }
 
-Vec<size_t> PositionalEmbeddingImpl::compute_output_shape(
-    const Vec<size_t> &input_shape) const {
+Vec<size_t> PositionalEmbeddingImpl::compute_output_shape(const Vec<size_t> &input_shape) const {
   return input_shape;
 }
 

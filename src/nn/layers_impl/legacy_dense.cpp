@@ -6,12 +6,11 @@
  */
 #include "nn/layers_impl/legacy_dense.hpp"
 
-#include "nn/engines/iengine.hpp"
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
 
-
+#include "nn/engines/iengine.hpp"
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
@@ -19,8 +18,8 @@
 namespace tunx {
 namespace internal {
 
-LegacyDenseImpl::LegacyDenseImpl(size_t input_features, size_t output_features,
-                                           bool use_bias, const std::string &name)
+LegacyDenseImpl::LegacyDenseImpl(size_t input_features, size_t output_features, bool use_bias,
+                                 const std::string &name)
     : SISOLayerImpl(name),
       input_features_(input_features),
       output_features_(output_features),
@@ -63,7 +62,7 @@ Tensor LegacyDenseImpl::forward_impl(const Tensor &input, Residuals &residuals) 
 
   Vec<size_t> out_shape = in_shape;
   out_shape.back() = output_features_;
-  Tensor output = get_tensor(out_shape, io_dtype_);
+  Tensor output = make_tensor(out_shape, io_dtype_);
 
   DTypeDesc type_desc{
       .io_dtype = io_dtype_,
@@ -71,12 +70,12 @@ Tensor LegacyDenseImpl::forward_impl(const Tensor &input, Residuals &residuals) 
       .compute_dtype = compute_dtype_,
   };
 
-  engine_->legacy_dense_fwd(backend_handle_, input.data_as<void>(), weights_.data_as<void>(),
+  engine_->legacy_dense_fwd(engine_handle_, input.data_as<void>(), weights_.data_as<void>(),
                             output.data_as<void>(), batch_size, input_features_, output_features_,
                             type_desc);
 
   if (use_bias_) {
-    engine_->legacy_dense_add_bias(backend_handle_, output.data_as<void>(), bias_.data_as<void>(),
+    engine_->legacy_dense_add_bias(engine_handle_, output.data_as<void>(), bias_.data_as<void>(),
                                    batch_size, output_features_, type_desc);
   }
 
@@ -94,7 +93,7 @@ Tensor LegacyDenseImpl::backward_impl(const Tensor &grad_output, Residuals &resi
     batch_size *= in_shape[i];
   }
 
-  Tensor grad_input = get_tensor(input.shape(), io_dtype_);
+  Tensor grad_input = make_tensor(input.shape(), io_dtype_);
 
   DTypeDesc type_desc{
       .io_dtype = io_dtype_,
@@ -102,24 +101,22 @@ Tensor LegacyDenseImpl::backward_impl(const Tensor &grad_output, Residuals &resi
       .compute_dtype = compute_dtype_,
   };
 
-  engine_->legacy_dense_wgrad(backend_handle_, input.data_as<void>(), grad_output.data_as<void>(),
+  engine_->legacy_dense_wgrad(engine_handle_, input.data_as<void>(), grad_output.data_as<void>(),
                               grad_weights_.data_as<void>(), batch_size, input_features_,
                               output_features_, type_desc);
 
   if (use_bias_) {
-    engine_->legacy_dense_bgrad(backend_handle_, grad_output.data_as<void>(),
+    engine_->legacy_dense_bgrad(engine_handle_, grad_output.data_as<void>(),
                                 grad_bias_.data_as<void>(), batch_size, output_features_,
                                 type_desc);
   }
 
-  engine_->legacy_dense_dgrad(backend_handle_, grad_output.data_as<void>(),
-                              weights_.data_as<void>(), grad_input.data_as<void>(), batch_size,
-                              input_features_, output_features_, type_desc);
+  engine_->legacy_dense_dgrad(engine_handle_, grad_output.data_as<void>(), weights_.data_as<void>(),
+                              grad_input.data_as<void>(), batch_size, input_features_,
+                              output_features_, type_desc);
 
   return grad_input;
 }
-
-
 
 LayerConfig LegacyDenseImpl::get_config() const {
   LayerConfig config;
@@ -140,14 +137,12 @@ Vec<size_t> LegacyDenseImpl::compute_output_shape(const Vec<size_t> &input_shape
   return out_shape;
 }
 
-std::shared_ptr<LegacyDenseImpl> LegacyDenseImpl::create_from_config(
-    const LayerConfig &config) {
+std::shared_ptr<LegacyDenseImpl> LegacyDenseImpl::create_from_config(const LayerConfig &config) {
   size_t input_features = config.get<size_t>("input_features");
   size_t output_features = config.get<size_t>("output_features");
   bool use_bias = config.get<bool>("use_bias");
 
-  return std::make_shared<LegacyDenseImpl>(input_features, output_features, use_bias,
-                                                config.name);
+  return std::make_shared<LegacyDenseImpl>(input_features, output_features, use_bias, config.name);
 }
 
 }  // namespace internal

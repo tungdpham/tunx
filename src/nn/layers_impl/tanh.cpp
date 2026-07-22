@@ -21,8 +21,8 @@ Tensor TanhImpl::forward_impl(const Tensor &input, Residuals &residuals) {
     residuals["input"] = input;
   }
 
-  Tensor output = get_tensor(input.shape(), io_dtype_);
-  activation_->apply(input, output, backend_handle_.get_stream());
+  Tensor output = make_tensor(input.shape(), io_dtype_);
+  activation_->apply(input, output, engine_handle_.get_stream());
 
   return output;
 }
@@ -33,9 +33,9 @@ Tensor TanhImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) 
     throw std::runtime_error("No cached input found for backward pass in TanhImpl");
   }
 
-  Tensor grad_input = get_tensor(grad_output.shape(), io_dtype_);
+  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
 
-  activation_->compute_gradient(input, grad_output, grad_input, backend_handle_.get_stream());
+  activation_->compute_gradient(input, grad_output, grad_input, engine_handle_.get_stream());
 
   return grad_input;
 }

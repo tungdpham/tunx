@@ -23,9 +23,9 @@ Tensor SliceImpl::forward_impl(const Tensor &input, Residuals &residuals) {
   residuals["original_shape"] = shape_tensor;
 
   Vec<size_t> output_shape = compute_output_shape(input.shape());
-  Tensor output = get_tensor(output_shape, io_dtype_);
+  Tensor output = make_tensor(output_shape, io_dtype_);
 
-  DISPATCH_ON_3_DTYPES_TO_METHOD(slice_forward, input, output, backend_handle_.get_stream());
+  DISPATCH_ON_3_DTYPES_TO_METHOD(slice_forward, input, output, engine_handle_.get_stream());
   return output;
 }
 
@@ -38,10 +38,10 @@ Tensor SliceImpl::backward_impl(const Tensor &grad_output, Residuals &residuals)
   std::copy(shape_tensor.data_as<size_t>(), shape_tensor.data_as<size_t>() + shape_tensor.size(),
             original_shape.begin());
 
-  Tensor grad_input = get_tensor(original_shape, io_dtype_);
+  Tensor grad_input = make_tensor(original_shape, io_dtype_);
 
   DISPATCH_ON_3_DTYPES_TO_METHOD(slice_backward, grad_output, grad_input, original_shape,
-                                 backend_handle_.get_stream());
+                                 engine_handle_.get_stream());
   return grad_input;
 }
 

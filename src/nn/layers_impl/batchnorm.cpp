@@ -84,41 +84,41 @@ Tensor BatchNormImpl::forward_impl(const Tensor &input, Residuals &residuals) {
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_batchnorm_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq ws_req = engine_->query_batchnorm_graph(engine_handle_, stats, type_desc);
 
   // allocate order: residuals, output, workspace.
   if (is_training_) {
     residuals["input"] = input;
 
-    Tensor batch_mean = get_tensor({C}, DType_t::FP32);
-    Tensor batch_invar = get_tensor({C}, DType_t::FP32);
+    Tensor batch_mean = make_tensor({C}, DType_t::FP32);
+    Tensor batch_invar = make_tensor({C}, DType_t::FP32);
     residuals["batch_mean"] = batch_mean;
     residuals["batch_invar"] = batch_invar;
 
     Tensor relu_mask;
     if (use_relu_) {
-      relu_mask = get_tensor(input.shape(), DType_t::BOOL);
+      relu_mask = make_tensor(input.shape(), DType_t::BOOL);
       residuals["relu_mask"] = relu_mask;
     }
 
-    Tensor output = get_tensor(input.shape(), io_dtype_);
+    Tensor output = make_tensor(input.shape(), io_dtype_);
 
-    Tensor ws = get_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+    Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
     engine_->batchnorm_fwd(
-        backend_handle_, stats, input.data_as<void>(), gamma_.data_as<void>(),
-        beta_.data_as<void>(), output.data_as<void>(), running_mean_.data_as<void>(),
-        running_var_.data_as<void>(), running_mean_.data_as<void>(), running_var_.data_as<void>(),
-        batch_mean.data_as<void>(), batch_invar.data_as<void>(),
-        use_relu_ ? relu_mask.data_as<void>() : nullptr, ws.data_as<void>(), type_desc);
+        engine_handle_, stats, input.data_as<void>(), gamma_.data_as<void>(), beta_.data_as<void>(),
+        output.data_as<void>(), running_mean_.data_as<void>(), running_var_.data_as<void>(),
+        running_mean_.data_as<void>(), running_var_.data_as<void>(), batch_mean.data_as<void>(),
+        batch_invar.data_as<void>(), use_relu_ ? relu_mask.data_as<void>() : nullptr,
+        ws.data_as<void>(), type_desc);
 
     return output;
   } else {
-    Tensor output = get_tensor(input.shape(), io_dtype_);
+    Tensor output = make_tensor(input.shape(), io_dtype_);
 
-    Tensor ws = get_tensor({ws_req.inf_workspace}, DType_t::BYTE);
+    Tensor ws = make_tensor({ws_req.inf_workspace}, DType_t::BYTE);
 
-    engine_->batchnorm_infer(backend_handle_, stats, input.data_as<void>(), gamma_.data_as<void>(),
+    engine_->batchnorm_infer(engine_handle_, stats, input.data_as<void>(), gamma_.data_as<void>(),
                              beta_.data_as<void>(), running_mean_.data_as<void>(),
                              running_var_.data_as<void>(), output.data_as<void>(),
                              ws.data_as<void>(), type_desc);
@@ -154,12 +154,12 @@ Tensor BatchNormImpl::backward_impl(const Tensor &grad_output, Residuals &residu
       .compute_dtype = compute_dtype_,
   };
 
-  Tensor grad_input = get_tensor(grad_output.shape(), io_dtype_);
+  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
 
-  WorkspaceReq ws_req = engine_->query_batchnorm_graph(backend_handle_, stats, type_desc);
-  Tensor workspace = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = engine_->query_batchnorm_graph(engine_handle_, stats, type_desc);
+  Tensor workspace = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->batchnorm_bwd(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
+  engine_->batchnorm_bwd(engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
                          use_relu_ ? relu_mask.data_as<void>() : nullptr, gamma_.data_as<void>(),
                          grad_input.data_as<void>(), gamma_.grad_as<void>(), beta_.grad_as<void>(),
                          batch_mean.data_as<void>(), batch_invar.data_as<void>(),

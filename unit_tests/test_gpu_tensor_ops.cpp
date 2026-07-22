@@ -15,6 +15,7 @@
 #include "device/device_manager.hpp"
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
+#include "tensor_test_utils.hpp"
 
 using namespace tunx;
 
@@ -48,32 +49,6 @@ protected:
 
   static void TearDownTestSuite() {}
 
-  template <typename T>
-  void compareTensors(const Tensor &expected, const Tensor &actual,
-                      T tolerance = static_cast<T>(1e-5)) {
-    ASSERT_TRUE(expected.shape() == actual.shape()) << fmt::format(
-        "Tensor have different shapes. Expected: {}, Actual: {}", expected.shape(), actual.shape());
-
-    Tensor expected_cpu =
-        expected.device_type() == DeviceType::CPU ? expected.clone() : expected.to_host();
-    Tensor actual_cpu = actual.device_type() == DeviceType::CPU ? actual.clone() : actual.to_host();
-
-    auto shape = expected_cpu.shape();
-    for (size_t n = 0; n < shape[0]; ++n) {
-      for (size_t c = 0; c < shape[1]; ++c) {
-        for (size_t h = 0; h < shape[2]; ++h) {
-          for (size_t w = 0; w < shape[3]; ++w) {
-            T expected_val = expected_cpu.at<T>({n, c, h, w});
-            T actual_val = actual_cpu.at<T>({n, c, h, w});
-            EXPECT_NEAR(expected_val, actual_val, tolerance)
-                << "Mismatch at position [" << n << "," << c << "," << h << "," << w
-                << "]. Expected: " << expected_val << ", Got: " << actual_val;
-          }
-        }
-      }
-    }
-  }
-
   static bool has_gpu_;
   static sref<Device> device_;
   static stream stream_;
@@ -84,380 +59,380 @@ sref<Device> GPUOpsTest::device_;
 stream GPUOpsTest::stream_ = nullptr;
 
 TEST_F(GPUOpsTest, PadBasic) {
-  Tensor cpu_tensor = Tensor({1, 1, 3, 3}, DType_t::FP32);
-  auto cpu_data = cpu_tensor.data_as<float>();
+  Tensor host_tensor = Tensor({1, 1, 3, 3}, DType_t::FP32);
+  auto host_data = host_tensor.data_as<float>();
   for (size_t i = 0; i < 9; ++i) {
-    cpu_data[i] = static_cast<float>(i + 1);
+    host_data[i] = static_cast<float>(i + 1);
   }
 
-  Tensor cpu_padded = Tensor({1, 1, 5, 5}, DType_t::FP32);
-  pad(cpu_tensor, cpu_padded, 1, 1);
+  Tensor host_padded = Tensor({1, 1, 5, 5}, DType_t::FP32);
+  pad(host_tensor, host_padded, 1, 1);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_padded = Tensor({1, 1, 5, 5}, DType_t::FP32, getGPU());
   pad(gpu_tensor, gpu_padded, 1, 1);
 
-  compareTensors<float>(cpu_padded, gpu_padded);
+  compare_tensor(host_padded, gpu_padded);
 }
 
 TEST_F(GPUOpsTest, PadMultiChannel) {
-  Tensor cpu_tensor = Tensor({2, 3, 4, 4}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 10.0f);
+  Tensor host_tensor = Tensor({2, 3, 4, 4}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 10.0f);
 
-  Tensor cpu_padded = Tensor({2, 3, 8, 8}, DType_t::FP32);
-  pad(cpu_tensor, cpu_padded, 2, 2, -1.0f);
+  Tensor host_padded = Tensor({2, 3, 8, 8}, DType_t::FP32);
+  pad(host_tensor, host_padded, 2, 2, -1.0f);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_padded = Tensor({2, 3, 8, 8}, DType_t::FP32, getGPU());
   pad(gpu_tensor, gpu_padded, 2, 2, -1.0f);
 
-  compareTensors<float>(cpu_padded, gpu_padded);
+  compare_tensor(host_padded, gpu_padded);
 }
 
 TEST_F(GPUOpsTest, PadAsymmetric) {
-  Tensor cpu_tensor = Tensor({1, 2, 5, 7}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 5.0f);
+  Tensor host_tensor = Tensor({1, 2, 5, 7}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 5.0f);
 
-  Tensor cpu_padded = Tensor({1, 2, 11, 9}, DType_t::FP32);
-  pad(cpu_tensor, cpu_padded, 3, 1, 2.5f);
+  Tensor host_padded = Tensor({1, 2, 11, 9}, DType_t::FP32);
+  pad(host_tensor, host_padded, 3, 1, 2.5f);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_padded = Tensor({1, 2, 11, 9}, DType_t::FP32, getGPU());
   pad(gpu_tensor, gpu_padded, 3, 1, 2.5f);
 
-  compareTensors<float>(cpu_padded, gpu_padded);
+  compare_tensor(host_padded, gpu_padded);
 }
 
 TEST_F(GPUOpsTest, UnpadBasic) {
-  Tensor cpu_tensor = Tensor({1, 1, 5, 5}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 10.0f);
+  Tensor host_tensor = Tensor({1, 1, 5, 5}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 10.0f);
 
-  Tensor cpu_unpadded = Tensor({1, 1, 3, 3}, DType_t::FP32);
-  unpad(cpu_tensor, cpu_unpadded, 1, 1);
+  Tensor host_unpadded = Tensor({1, 1, 3, 3}, DType_t::FP32);
+  unpad(host_tensor, host_unpadded, 1, 1);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_unpadded = Tensor({1, 1, 3, 3}, DType_t::FP32, getGPU());
   unpad(gpu_tensor, gpu_unpadded, 1, 1);
 
-  compareTensors<float>(cpu_unpadded, gpu_unpadded);
+  compare_tensor(host_unpadded, gpu_unpadded);
 }
 
 TEST_F(GPUOpsTest, UnpadMultiChannel) {
-  Tensor cpu_tensor = Tensor({2, 3, 8, 8}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 15.0f);
+  Tensor host_tensor = Tensor({2, 3, 8, 8}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 15.0f);
 
-  Tensor cpu_unpadded = Tensor({2, 3, 4, 4}, DType_t::FP32);
-  unpad(cpu_tensor, cpu_unpadded, 2, 2);
+  Tensor host_unpadded = Tensor({2, 3, 4, 4}, DType_t::FP32);
+  unpad(host_tensor, host_unpadded, 2, 2);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_unpadded = Tensor({2, 3, 4, 4}, DType_t::FP32, getGPU());
   unpad(gpu_tensor, gpu_unpadded, 2, 2);
 
-  compareTensors<float>(cpu_unpadded, gpu_unpadded);
+  compare_tensor(host_unpadded, gpu_unpadded);
 }
 
 TEST_F(GPUOpsTest, PadUnpadRoundTrip) {
-  Tensor cpu_original = Tensor({1, 2, 4, 4}, DType_t::FP32);
-  fill_normal(cpu_original, 0.0, 8.0f);
+  Tensor host_original = Tensor({1, 2, 4, 4}, DType_t::FP32);
+  fill_normal(host_original, 0.0, 8.0f);
 
-  Tensor cpu_padded = Tensor({1, 2, 8, 8}, DType_t::FP32);
-  pad(cpu_original, cpu_padded, 2, 2);
-  Tensor cpu_restored = Tensor({1, 2, 4, 4}, DType_t::FP32);
-  unpad(cpu_padded, cpu_restored, 2, 2);
+  Tensor host_padded = Tensor({1, 2, 8, 8}, DType_t::FP32);
+  pad(host_original, host_padded, 2, 2);
+  Tensor host_restored = Tensor({1, 2, 4, 4}, DType_t::FP32);
+  unpad(host_padded, host_restored, 2, 2);
 
-  Tensor gpu_original = cpu_original.to_device(getGPU());
+  Tensor gpu_original = host_original.to_device(getGPU());
   Tensor gpu_padded = Tensor({1, 2, 8, 8}, DType_t::FP32, getGPU());
   pad(gpu_original, gpu_padded, 2, 2);
   Tensor gpu_restored = Tensor({1, 2, 4, 4}, DType_t::FP32, getGPU());
   unpad(gpu_padded, gpu_restored, 2, 2);
 
-  compareTensors<float>(cpu_original, cpu_restored);
-  compareTensors<float>(cpu_original, gpu_restored);
-  compareTensors<float>(cpu_restored, gpu_restored);
+  compare_tensor(host_original, host_restored);
+  compare_tensor(host_original, gpu_restored);
+  compare_tensor(host_restored, gpu_restored);
 }
 
 TEST_F(GPUOpsTest, CropBasic) {
-  Tensor cpu_tensor = Tensor({1, 1, 5, 5}, DType_t::FP32);
-  auto cpu_data = cpu_tensor.data_as<float>();
+  Tensor host_tensor = Tensor({1, 1, 5, 5}, DType_t::FP32);
+  auto host_data = host_tensor.data_as<float>();
   for (size_t i = 0; i < 25; ++i) {
-    cpu_data[i] = static_cast<float>(i);
+    host_data[i] = static_cast<float>(i);
   }
 
-  Tensor cpu_cropped = Tensor({1, 1, 3, 3}, DType_t::FP32);
-  crop(cpu_tensor, cpu_cropped, 1, 1, 3, 3);
+  Tensor host_cropped = Tensor({1, 1, 3, 3}, DType_t::FP32);
+  crop(host_tensor, host_cropped, 1, 1, 3, 3);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_cropped = Tensor({1, 1, 3, 3}, DType_t::FP32, getGPU());
   crop(gpu_tensor, gpu_cropped, 1, 1, 3, 3);
 
-  compareTensors<float>(cpu_cropped, gpu_cropped);
+  compare_tensor(host_cropped, gpu_cropped);
 }
 
 TEST_F(GPUOpsTest, CropMultiChannel) {
-  Tensor cpu_tensor = Tensor({2, 3, 10, 10}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 20.0f);
+  Tensor host_tensor = Tensor({2, 3, 10, 10}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 20.0f);
 
-  Tensor cpu_cropped = Tensor({2, 3, 6, 6}, DType_t::FP32);
-  crop(cpu_tensor, cpu_cropped, 2, 3, 7, 8);
+  Tensor host_cropped = Tensor({2, 3, 6, 6}, DType_t::FP32);
+  crop(host_tensor, host_cropped, 2, 3, 7, 8);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_cropped = Tensor({2, 3, 6, 6}, DType_t::FP32, getGPU());
   crop(gpu_tensor, gpu_cropped, 2, 3, 7, 8);
 
-  compareTensors<float>(cpu_cropped, gpu_cropped);
+  compare_tensor(host_cropped, gpu_cropped);
 }
 
 TEST_F(GPUOpsTest, CropCorner) {
-  Tensor cpu_tensor = Tensor({1, 2, 8, 8}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 12.0f);
+  Tensor host_tensor = Tensor({1, 2, 8, 8}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 12.0f);
 
-  Tensor cpu_cropped = Tensor({1, 2, 4, 4}, DType_t::FP32);
-  crop(cpu_tensor, cpu_cropped, 0, 0, 3, 3);
+  Tensor host_cropped = Tensor({1, 2, 4, 4}, DType_t::FP32);
+  crop(host_tensor, host_cropped, 0, 0, 3, 3);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_cropped = Tensor({1, 2, 4, 4}, DType_t::FP32, getGPU());
   crop(gpu_tensor, gpu_cropped, 0, 0, 3, 3);
 
-  compareTensors<float>(cpu_cropped, gpu_cropped);
+  compare_tensor(host_cropped, gpu_cropped);
 }
 
 TEST_F(GPUOpsTest, CropBottomRight) {
-  Tensor cpu_tensor = Tensor({1, 1, 6, 6}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 10.0f);
+  Tensor host_tensor = Tensor({1, 1, 6, 6}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 10.0f);
 
-  Tensor cpu_cropped = Tensor({1, 1, 3, 3}, DType_t::FP32);
-  crop(cpu_tensor, cpu_cropped, 3, 3, 5, 5);
+  Tensor host_cropped = Tensor({1, 1, 3, 3}, DType_t::FP32);
+  crop(host_tensor, host_cropped, 3, 3, 5, 5);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_cropped = Tensor({1, 1, 3, 3}, DType_t::FP32, getGPU());
   crop(gpu_tensor, gpu_cropped, 3, 3, 5, 5);
 
-  compareTensors<float>(cpu_cropped, gpu_cropped);
+  compare_tensor(host_cropped, gpu_cropped);
 }
 
 TEST_F(GPUOpsTest, SliceBatchBasic) {
-  Tensor cpu_tensor = Tensor({4, 2, 3, 3}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 15.0f);
+  Tensor host_tensor = Tensor({4, 2, 3, 3}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 15.0f);
 
-  Tensor cpu_sliced = Tensor({2, 2, 3, 3}, DType_t::FP32);
-  slice_batch(cpu_tensor, cpu_sliced, 1, 3);
+  Tensor host_sliced = Tensor({2, 2, 3, 3}, DType_t::FP32);
+  slice_batch(host_tensor, host_sliced, 1, 3);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_sliced = Tensor({2, 2, 3, 3}, DType_t::FP32, getGPU());
   slice_batch(gpu_tensor, gpu_sliced, 1, 3);
 
-  compareTensors<float>(cpu_sliced, gpu_sliced);
+  compare_tensor(host_sliced, gpu_sliced);
 }
 
 TEST_F(GPUOpsTest, SliceBatchSingle) {
-  Tensor cpu_tensor = Tensor({5, 3, 4, 4}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 10.0f);
+  Tensor host_tensor = Tensor({5, 3, 4, 4}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 10.0f);
 
-  Tensor cpu_sliced = Tensor({1, 3, 4, 4}, DType_t::FP32);
-  slice_batch(cpu_tensor, cpu_sliced, 2, 3);
+  Tensor host_sliced = Tensor({1, 3, 4, 4}, DType_t::FP32);
+  slice_batch(host_tensor, host_sliced, 2, 3);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_sliced = Tensor({1, 3, 4, 4}, DType_t::FP32, getGPU());
   slice_batch(gpu_tensor, gpu_sliced, 2, 3);
 
-  compareTensors<float>(cpu_sliced, gpu_sliced);
+  compare_tensor(host_sliced, gpu_sliced);
 }
 
 TEST_F(GPUOpsTest, SliceBatchFirstBatch) {
-  Tensor cpu_tensor = Tensor({3, 2, 5, 5}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 8.0f);
+  Tensor host_tensor = Tensor({3, 2, 5, 5}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 8.0f);
 
-  Tensor cpu_sliced = Tensor({1, 2, 5, 5}, DType_t::FP32);
-  slice_batch(cpu_tensor, cpu_sliced, 0, 1);
+  Tensor host_sliced = Tensor({1, 2, 5, 5}, DType_t::FP32);
+  slice_batch(host_tensor, host_sliced, 0, 1);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_sliced = Tensor({1, 2, 5, 5}, DType_t::FP32, getGPU());
   slice_batch(gpu_tensor, gpu_sliced, 0, 1);
 
-  compareTensors<float>(cpu_sliced, gpu_sliced);
+  compare_tensor(host_sliced, gpu_sliced);
 }
 
 TEST_F(GPUOpsTest, SplitBasic) {
-  Tensor cpu_tensor = Tensor({4, 2, 3, 3}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 10.0f);
+  Tensor host_tensor = Tensor({4, 2, 3, 3}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 10.0f);
 
-  Vec<Tensor> cpu_splits, gpu_splits;
-  split(cpu_tensor, cpu_splits, 2);
+  Vec<Tensor> host_splits, gpu_splits;
+  split(host_tensor, host_splits, 2);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   split(gpu_tensor, gpu_splits, 2);
-  ASSERT_EQ(cpu_splits.size(), gpu_splits.size());
+  ASSERT_EQ(host_splits.size(), gpu_splits.size());
 
-  for (size_t i = 0; i < cpu_splits.size(); ++i) {
-    compareTensors<float>(cpu_splits[i], gpu_splits[i]);
+  for (size_t i = 0; i < host_splits.size(); ++i) {
+    compare_tensor(host_splits[i], gpu_splits[i]);
   }
 }
 
 TEST_F(GPUOpsTest, SplitMultiple) {
-  Tensor cpu_tensor = Tensor({8, 3, 4, 4}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 15.0f);
-  Vec<Tensor> cpu_splits;
-  split(cpu_tensor, cpu_splits, 4);
+  Tensor host_tensor = Tensor({8, 3, 4, 4}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 15.0f);
+  Vec<Tensor> host_splits;
+  split(host_tensor, host_splits, 4);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Vec<Tensor> gpu_splits;
   split(gpu_tensor, gpu_splits, 4);
 
-  ASSERT_EQ(cpu_splits.size(), gpu_splits.size());
+  ASSERT_EQ(host_splits.size(), gpu_splits.size());
 
-  float *original_data = cpu_tensor.data_as<float>();
+  float *original_data = host_tensor.data_as<float>();
   int original_idx = 0;
-  for (size_t i = 0; i < cpu_splits.size(); ++i) {
-    float *split_data = cpu_splits[i].data_as<float>();
-    for (size_t idx = 0; idx < cpu_splits[i].size(); ++idx) {
+  for (size_t i = 0; i < host_splits.size(); ++i) {
+    float *split_data = host_splits[i].data_as<float>();
+    for (size_t idx = 0; idx < host_splits[i].size(); ++idx) {
       EXPECT_EQ(original_data[original_idx++], split_data[idx])
           << "Mismatch in CPU split at index " << idx << " of split " << i;
     }
   }
 
-  ASSERT_EQ(original_idx, cpu_tensor.size());
+  ASSERT_EQ(original_idx, host_tensor.size());
 
-  for (size_t i = 0; i < cpu_splits.size(); ++i) {
-    compareTensors<float>(cpu_splits[i], gpu_splits[i]);
+  for (size_t i = 0; i < host_splits.size(); ++i) {
+    compare_tensor(host_splits[i], gpu_splits[i]);
   }
 }
 
 TEST_F(GPUOpsTest, SplitSingleBatch) {
-  Tensor cpu_tensor = Tensor({6, 2, 5, 5}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 12.0f);
+  Tensor host_tensor = Tensor({6, 2, 5, 5}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 12.0f);
 
-  Vec<Tensor> cpu_splits, gpu_splits;
-  split(cpu_tensor, cpu_splits, 6);
+  Vec<Tensor> host_splits, gpu_splits;
+  split(host_tensor, host_splits, 6);
 
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   split(gpu_tensor, gpu_splits, 6);
 
-  ASSERT_EQ(cpu_splits.size(), gpu_splits.size());
+  ASSERT_EQ(host_splits.size(), gpu_splits.size());
 
-  for (size_t i = 0; i < cpu_splits.size(); ++i) {
-    compareTensors<float>(cpu_splits[i], gpu_splits[i]);
+  for (size_t i = 0; i < host_splits.size(); ++i) {
+    compare_tensor(host_splits[i], gpu_splits[i]);
   }
 }
 
 TEST_F(GPUOpsTest, Im2colBasicKernel3x3) {
-  Tensor cpu_input = Tensor({1, 1, 5, 5}, DType_t::FP32);
-  auto cpu_input_data = cpu_input.data_as<float>();
+  Tensor host_input = Tensor({1, 1, 5, 5}, DType_t::FP32);
+  auto host_input_data = host_input.data_as<float>();
   for (size_t i = 0; i < 25; ++i) {
-    cpu_input_data[i] = static_cast<float>(i + 1);
+    host_input_data[i] = static_cast<float>(i + 1);
   }
 
   size_t kernel_h = 3, kernel_w = 3;
   size_t stride_h = 1, stride_w = 1;
   size_t pad_h = 0, pad_w = 0;
 
-  auto input_shape = cpu_input.shape();
+  auto input_shape = host_input.shape();
   size_t output_h = (input_shape[2] - kernel_h) / stride_h + 1;
   size_t output_w = (input_shape[3] - kernel_w) / stride_w + 1;
   size_t col_size = input_shape[0] * input_shape[1] * kernel_h * kernel_w * output_h * output_w;
 
-  Tensor cpu_col_data = Tensor({col_size}, DType_t::FP32);
-  im2col(cpu_input, cpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
+  Tensor host_col_data = Tensor({col_size}, DType_t::FP32);
+  im2col(host_input, host_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Tensor gpu_input = cpu_input.to_device(getGPU());
+  Tensor gpu_input = host_input.to_device(getGPU());
   Tensor gpu_col_data = Tensor({col_size}, DType_t::FP32, getGPU());
   im2col(gpu_input, gpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Tensor cpu_col_cpu = cpu_col_data.to_host();
+  Tensor host_col_cpu = host_col_data.to_host();
   Tensor gpu_col_cpu = gpu_col_data.to_host();
 
   for (size_t i = 0; i < col_size; ++i) {
-    EXPECT_NEAR(cpu_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
+    EXPECT_NEAR(host_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
         << "Mismatch at index " << i;
   }
 }
 
 TEST_F(GPUOpsTest, Im2colWithPadding) {
-  Tensor cpu_input = Tensor({1, 2, 4, 4}, DType_t::FP32);
-  fill_normal(cpu_input, 0.0, 10.0f);
+  Tensor host_input = Tensor({1, 2, 4, 4}, DType_t::FP32);
+  fill_normal(host_input, 0.0, 10.0f);
 
   size_t kernel_h = 3, kernel_w = 3;
   size_t stride_h = 1, stride_w = 1;
   size_t pad_h = 1, pad_w = 1;
 
-  auto input_shape = cpu_input.shape();
+  auto input_shape = host_input.shape();
   size_t padded_h = input_shape[2] + 2 * pad_h;
   size_t padded_w = input_shape[3] + 2 * pad_w;
   size_t output_h = (padded_h - kernel_h) / stride_h + 1;
   size_t output_w = (padded_w - kernel_w) / stride_w + 1;
   size_t col_size = input_shape[0] * input_shape[1] * kernel_h * kernel_w * output_h * output_w;
 
-  Tensor cpu_col_data = Tensor({col_size}, DType_t::FP32);
-  im2col(cpu_input, cpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
+  Tensor host_col_data = Tensor({col_size}, DType_t::FP32);
+  im2col(host_input, host_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Tensor gpu_input = cpu_input.to_device(getGPU());
+  Tensor gpu_input = host_input.to_device(getGPU());
   Tensor gpu_col_data = Tensor({col_size}, DType_t::FP32, getGPU());
   im2col(gpu_input, gpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Tensor cpu_col_cpu = cpu_col_data.to_host();
+  Tensor host_col_cpu = host_col_data.to_host();
   Tensor gpu_col_cpu = gpu_col_data.to_host();
 
   for (size_t i = 0; i < col_size; ++i) {
-    EXPECT_NEAR(cpu_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
+    EXPECT_NEAR(host_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
         << "Mismatch at index " << i;
   }
 }
 
 TEST_F(GPUOpsTest, Im2colWithStride) {
-  Tensor cpu_input = Tensor({1, 1, 8, 8}, DType_t::FP32);
-  fill_normal(cpu_input, 0.0, 15.0f);
+  Tensor host_input = Tensor({1, 1, 8, 8}, DType_t::FP32);
+  fill_normal(host_input, 0.0, 15.0f);
 
   size_t kernel_h = 3, kernel_w = 3;
   size_t stride_h = 2, stride_w = 2;
   size_t pad_h = 0, pad_w = 0;
 
-  auto input_shape = cpu_input.shape();
+  auto input_shape = host_input.shape();
   size_t output_h = (input_shape[2] - kernel_h) / stride_h + 1;
   size_t output_w = (input_shape[3] - kernel_w) / stride_w + 1;
   size_t col_size = input_shape[0] * input_shape[1] * kernel_h * kernel_w * output_h * output_w;
 
-  Tensor cpu_col = Tensor({col_size}, DType_t::FP32);
-  im2col(cpu_input, cpu_col, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
+  Tensor host_col = Tensor({col_size}, DType_t::FP32);
+  im2col(host_input, host_col, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Tensor gpu_input = cpu_input.to_device(getGPU());
+  Tensor gpu_input = host_input.to_device(getGPU());
   Tensor gpu_col_data = Tensor({col_size}, DType_t::FP32, getGPU());
   im2col(gpu_input, gpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Tensor cpu_col_cpu = cpu_col.to_host();
+  Tensor host_col_cpu = host_col.to_host();
   Tensor gpu_col_cpu = gpu_col_data.to_host();
 
   for (size_t i = 0; i < col_size; ++i) {
-    EXPECT_NEAR(cpu_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
+    EXPECT_NEAR(host_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
         << "Mismatch at index " << i;
   }
 }
 
 TEST_F(GPUOpsTest, Im2colMultiBatch) {
-  Tensor cpu_input = Tensor({4, 3, 6, 6}, DType_t::FP32);
-  fill_normal(cpu_input, 0.0, 12.0f);
+  Tensor host_input = Tensor({4, 3, 6, 6}, DType_t::FP32);
+  fill_normal(host_input, 0.0, 12.0f);
 
   size_t kernel_h = 3, kernel_w = 3;
   size_t stride_h = 1, stride_w = 1;
   size_t pad_h = 1, pad_w = 1;
 
-  auto input_shape = cpu_input.shape();
+  auto input_shape = host_input.shape();
   size_t padded_h = input_shape[2] + 2 * pad_h;
   size_t padded_w = input_shape[3] + 2 * pad_w;
   size_t output_h = (padded_h - kernel_h) / stride_h + 1;
   size_t output_w = (padded_w - kernel_w) / stride_w + 1;
   size_t col_size = input_shape[0] * input_shape[1] * kernel_h * kernel_w * output_h * output_w;
 
-  Tensor cpu_col = Tensor({col_size}, DType_t::FP32);
-  im2col(cpu_input, cpu_col, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
+  Tensor host_col = Tensor({col_size}, DType_t::FP32);
+  im2col(host_input, host_col, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Tensor gpu_input = cpu_input.to_device(getGPU());
+  Tensor gpu_input = host_input.to_device(getGPU());
   Tensor gpu_col_data = Tensor({col_size}, DType_t::FP32, getGPU());
   im2col(gpu_input, gpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Tensor cpu_col_cpu = cpu_col.to_host();
+  Tensor host_col_cpu = host_col.to_host();
   Tensor gpu_col_cpu = gpu_col_data.to_host();
 
   for (size_t i = 0; i < col_size; ++i) {
-    EXPECT_NEAR(cpu_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
+    EXPECT_NEAR(host_col_cpu.data_as<float>()[i], gpu_col_cpu.data_as<float>()[i], 1e-5f)
         << "Mismatch at index " << i;
   }
 }
@@ -472,18 +447,18 @@ TEST_F(GPUOpsTest, Col2imBasic) {
   size_t output_w = (width - kernel_w) / stride_w + 1;
   size_t col_size = batch_size * channels * kernel_h * kernel_w * output_h * output_w;
 
-  Tensor cpu_col_data = Tensor({col_size}, DType_t::FP32);
-  auto cpu_col_ptr = cpu_col_data.data_as<float>();
+  Tensor host_col_data = Tensor({col_size}, DType_t::FP32);
+  auto host_col_ptr = host_col_data.data_as<float>();
   for (size_t i = 0; i < col_size; ++i) {
-    cpu_col_ptr[i] = static_cast<float>(i % 10);
+    host_col_ptr[i] = static_cast<float>(i % 10);
   }
 
-  Tensor cpu_result = Tensor({batch_size * channels * height * width}, DType_t::FP32);
-  fill(cpu_result, 0.0f);
-  col2im(cpu_col_data, cpu_result, batch_size, channels, height, width, kernel_h, kernel_w,
+  Tensor host_result = Tensor({batch_size * channels * height * width}, DType_t::FP32);
+  fill(host_result, 0.0f);
+  col2im(host_col_data, host_result, batch_size, channels, height, width, kernel_h, kernel_w,
          stride_h, stride_w, pad_h, pad_w);
 
-  Tensor gpu_col_data = cpu_col_data.to_device(getGPU());
+  Tensor gpu_col_data = host_col_data.to_device(getGPU());
 
   Tensor gpu_result = Tensor({batch_size * channels * height * width}, DType_t::FP32, getGPU());
   fill(gpu_result, 0.0f);
@@ -491,11 +466,11 @@ TEST_F(GPUOpsTest, Col2imBasic) {
   col2im(gpu_col_data, gpu_result, batch_size, channels, height, width, kernel_h, kernel_w,
          stride_h, stride_w, pad_h, pad_w);
 
-  Tensor cpu_result_cpu = cpu_result.to_host();
+  Tensor host_result_cpu = host_result.to_host();
   Tensor gpu_result_cpu = gpu_result.to_host();
 
-  for (size_t i = 0; i < cpu_result_cpu.size(); ++i) {
-    EXPECT_NEAR(cpu_result_cpu.data_as<float>()[i], gpu_result_cpu.data_as<float>()[i], 1e-4f)
+  for (size_t i = 0; i < host_result_cpu.size(); ++i) {
+    EXPECT_NEAR(host_result_cpu.data_as<float>()[i], gpu_result_cpu.data_as<float>()[i], 1e-4f)
         << "Mismatch at index " << i;
   }
 }
@@ -512,18 +487,18 @@ TEST_F(GPUOpsTest, Col2imWithPadding) {
   size_t output_w = (padded_w - kernel_w) / stride_w + 1;
   size_t col_size = batch_size * channels * kernel_h * kernel_w * output_h * output_w;
 
-  Tensor cpu_col_data = Tensor({col_size}, DType_t::FP32);
-  auto cpu_col_ptr = cpu_col_data.data_as<float>();
+  Tensor host_col_data = Tensor({col_size}, DType_t::FP32);
+  auto host_col_ptr = host_col_data.data_as<float>();
   for (size_t i = 0; i < col_size; ++i) {
-    cpu_col_ptr[i] = static_cast<float>((i % 20) - 10);
+    host_col_ptr[i] = static_cast<float>((i % 20) - 10);
   }
 
-  Tensor cpu_result = Tensor({batch_size * channels * height * width}, DType_t::FP32);
-  fill(cpu_result, 0.0f);
-  col2im(cpu_col_data, cpu_result, batch_size, channels, height, width, kernel_h, kernel_w,
+  Tensor host_result = Tensor({batch_size * channels * height * width}, DType_t::FP32);
+  fill(host_result, 0.0f);
+  col2im(host_col_data, host_result, batch_size, channels, height, width, kernel_h, kernel_w,
          stride_h, stride_w, pad_h, pad_w);
 
-  Tensor gpu_col_data = cpu_col_data.to_device(getGPU());
+  Tensor gpu_col_data = host_col_data.to_device(getGPU());
 
   Tensor gpu_result = Tensor({batch_size * channels * height * width}, DType_t::FP32, getGPU());
   fill(gpu_result, 0.0f);
@@ -531,37 +506,37 @@ TEST_F(GPUOpsTest, Col2imWithPadding) {
   col2im(gpu_col_data, gpu_result, batch_size, channels, height, width, kernel_h, kernel_w,
          stride_h, stride_w, pad_h, pad_w);
 
-  Tensor cpu_result_cpu = cpu_result.to_host();
+  Tensor host_result_cpu = host_result.to_host();
   Tensor gpu_result_cpu = gpu_result.to_host();
 
-  for (size_t i = 0; i < cpu_result_cpu.size(); ++i) {
-    EXPECT_NEAR(cpu_result_cpu.data_as<float>()[i], gpu_result_cpu.data_as<float>()[i], 1e-4f)
+  for (size_t i = 0; i < host_result_cpu.size(); ++i) {
+    EXPECT_NEAR(host_result_cpu.data_as<float>()[i], gpu_result_cpu.data_as<float>()[i], 1e-4f)
         << "Mismatch at index " << i;
   }
 }
 
 TEST_F(GPUOpsTest, Im2colCol2imRoundTrip) {
-  Tensor cpu_input = Tensor({1, 1, 6, 6}, DType_t::FP32);
-  fill_normal(cpu_input, 0.0, 10.0f);
+  Tensor host_input = Tensor({1, 1, 6, 6}, DType_t::FP32);
+  fill_normal(host_input, 0.0, 10.0f);
 
   size_t kernel_h = 3, kernel_w = 3;
   size_t stride_h = 1, stride_w = 1;
   size_t pad_h = 0, pad_w = 0;
 
-  auto input_shape = cpu_input.shape();
+  auto input_shape = host_input.shape();
   size_t output_h = (input_shape[2] - kernel_h) / stride_h + 1;
   size_t output_w = (input_shape[3] - kernel_w) / stride_w + 1;
   size_t col_size = input_shape[0] * input_shape[1] * kernel_h * kernel_w * output_h * output_w;
 
-  Tensor cpu_col_data = Tensor({col_size}, DType_t::FP32);
-  im2col(cpu_input, cpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
+  Tensor host_col_data = Tensor({col_size}, DType_t::FP32);
+  im2col(host_input, host_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Tensor cpu_reconstructed = Tensor({1, 1, 6, 6}, DType_t::FP32);
-  fill(cpu_reconstructed, 0.0f);
-  col2im(cpu_col_data, cpu_reconstructed, input_shape[0], input_shape[1], input_shape[2],
+  Tensor host_reconstructed = Tensor({1, 1, 6, 6}, DType_t::FP32);
+  fill(host_reconstructed, 0.0f);
+  col2im(host_col_data, host_reconstructed, input_shape[0], input_shape[1], input_shape[2],
          input_shape[3], kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
-  Tensor gpu_input = cpu_input.to_device(getGPU());
+  Tensor gpu_input = host_input.to_device(getGPU());
   Tensor gpu_col_data = Tensor({col_size}, DType_t::FP32, getGPU());
   im2col(gpu_input, gpu_col_data, kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w);
 
@@ -572,21 +547,21 @@ TEST_F(GPUOpsTest, Im2colCol2imRoundTrip) {
          gpu_input_shape[2], gpu_input_shape[3], kernel_h, kernel_w, stride_h, stride_w, pad_h,
          pad_w);
 
-  compareTensors<float>(cpu_reconstructed, gpu_reconstructed, 1e-4f);
+  compare_tensor(host_reconstructed, gpu_reconstructed, 1e-4f);
 }
 
 TEST_F(GPUOpsTest, CombinedPadCropSlice) {
-  Tensor cpu_original = Tensor({4, 3, 8, 8}, DType_t::FP32);
-  fill_normal(cpu_original, 0.0, 15.0f);
+  Tensor host_original = Tensor({4, 3, 8, 8}, DType_t::FP32);
+  fill_normal(host_original, 0.0, 15.0f);
 
-  Tensor cpu_padded = Tensor({4, 3, 12, 12}, DType_t::FP32);
-  pad(cpu_original, cpu_padded, 2, 2);
-  Tensor cpu_cropped = Tensor({4, 3, 6, 6}, DType_t::FP32);
-  crop(cpu_padded, cpu_cropped, 3, 3, 8, 8);
-  Tensor cpu_sliced = Tensor({2, 3, 6, 6}, DType_t::FP32);
-  slice_batch(cpu_cropped, cpu_sliced, 1, 3);
+  Tensor host_padded = Tensor({4, 3, 12, 12}, DType_t::FP32);
+  pad(host_original, host_padded, 2, 2);
+  Tensor host_cropped = Tensor({4, 3, 6, 6}, DType_t::FP32);
+  crop(host_padded, host_cropped, 3, 3, 8, 8);
+  Tensor host_sliced = Tensor({2, 3, 6, 6}, DType_t::FP32);
+  slice_batch(host_cropped, host_sliced, 1, 3);
 
-  Tensor gpu_original = cpu_original.to_device(getGPU());
+  Tensor gpu_original = host_original.to_device(getGPU());
   Tensor gpu_padded = Tensor({4, 3, 12, 12}, DType_t::FP32, getGPU());
   pad(gpu_original, gpu_padded, 2, 2);
   Tensor gpu_cropped = Tensor({4, 3, 6, 6}, DType_t::FP32, getGPU());
@@ -594,82 +569,82 @@ TEST_F(GPUOpsTest, CombinedPadCropSlice) {
   Tensor gpu_sliced = Tensor({2, 3, 6, 6}, DType_t::FP32, getGPU());
   slice_batch(gpu_cropped, gpu_sliced, 1, 3);
 
-  compareTensors<float>(cpu_sliced, gpu_sliced);
+  compare_tensor(host_sliced, gpu_sliced);
 }
 
 TEST_F(GPUOpsTest, LargeTensorOperations) {
-  Tensor cpu_tensor = Tensor({8, 16, 32, 32}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 20.0f);
+  Tensor host_tensor = Tensor({8, 16, 32, 32}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 20.0f);
 
-  Tensor cpu_padded = Tensor({8, 16, 36, 36}, DType_t::FP32);
-  pad(cpu_tensor, cpu_padded, 2, 2);
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor host_padded = Tensor({8, 16, 36, 36}, DType_t::FP32);
+  pad(host_tensor, host_padded, 2, 2);
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_padded = Tensor({8, 16, 36, 36}, DType_t::FP32, getGPU());
   pad(gpu_tensor, gpu_padded, 2, 2);
-  compareTensors<float>(cpu_padded, gpu_padded);
+  compare_tensor(host_padded, gpu_padded);
 
-  Tensor cpu_cropped = Tensor({8, 16, 22, 22}, DType_t::FP32);
-  crop(cpu_tensor, cpu_cropped, 5, 5, 26, 26);
+  Tensor host_cropped = Tensor({8, 16, 22, 22}, DType_t::FP32);
+  crop(host_tensor, host_cropped, 5, 5, 26, 26);
   Tensor gpu_cropped = Tensor({8, 16, 22, 22}, DType_t::FP32, getGPU());
   crop(gpu_tensor, gpu_cropped, 5, 5, 26, 26);
-  compareTensors<float>(cpu_cropped, gpu_cropped);
+  compare_tensor(host_cropped, gpu_cropped);
 
-  Tensor cpu_sliced = Tensor({4, 16, 32, 32}, DType_t::FP32);
-  slice_batch(cpu_tensor, cpu_sliced, 2, 6);
+  Tensor host_sliced = Tensor({4, 16, 32, 32}, DType_t::FP32);
+  slice_batch(host_tensor, host_sliced, 2, 6);
   Tensor gpu_sliced = Tensor({4, 16, 32, 32}, DType_t::FP32, getGPU());
   slice_batch(gpu_tensor, gpu_sliced, 2, 6);
-  compareTensors<float>(cpu_sliced, gpu_sliced);
+  compare_tensor(host_sliced, gpu_sliced);
 }
 
 TEST_F(GPUOpsTest, MinimalTensor) {
-  Tensor cpu_tensor = Tensor({1, 1, 1, 1}, DType_t::FP32);
-  auto cpu_data = cpu_tensor.data_as<float>();
-  cpu_data[0] = 42.0f;
+  Tensor host_tensor = Tensor({1, 1, 1, 1}, DType_t::FP32);
+  auto host_data = host_tensor.data_as<float>();
+  host_data[0] = 42.0f;
 
-  Tensor cpu_padded = Tensor({1, 1, 3, 3}, DType_t::FP32);
-  pad(cpu_tensor, cpu_padded, 1, 1);
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor host_padded = Tensor({1, 1, 3, 3}, DType_t::FP32);
+  pad(host_tensor, host_padded, 1, 1);
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_padded = Tensor({1, 1, 3, 3}, DType_t::FP32, getGPU());
   pad(gpu_tensor, gpu_padded, 1, 1);
 
-  compareTensors<float>(cpu_padded, gpu_padded);
+  compare_tensor(host_padded, gpu_padded);
 }
 
 TEST_F(GPUOpsTest, SinglePixelPadding) {
-  Tensor cpu_tensor = Tensor({1, 1, 3, 3}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 5.0f);
+  Tensor host_tensor = Tensor({1, 1, 3, 3}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 5.0f);
 
-  Tensor cpu_padded = Tensor({1, 1, 5, 5}, DType_t::FP32);
-  pad(cpu_tensor, cpu_padded, 1, 1);
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor host_padded = Tensor({1, 1, 5, 5}, DType_t::FP32);
+  pad(host_tensor, host_padded, 1, 1);
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_padded = Tensor({1, 1, 5, 5}, DType_t::FP32, getGPU());
   pad(gpu_tensor, gpu_padded, 1, 1);
 
-  compareTensors<float>(cpu_padded, gpu_padded);
+  compare_tensor(host_padded, gpu_padded);
 }
 
 TEST_F(GPUOpsTest, AsymmetricDimensions) {
-  Tensor cpu_tensor = Tensor({1, 1, 20, 3}, DType_t::FP32);
-  fill_normal(cpu_tensor, 0.0, 10.0f);
+  Tensor host_tensor = Tensor({1, 1, 20, 3}, DType_t::FP32);
+  fill_normal(host_tensor, 0.0, 10.0f);
 
-  Tensor cpu_padded = Tensor({1, 1, 24, 13}, DType_t::FP32);
-  pad(cpu_tensor, cpu_padded, 2, 5, 1.0f);
-  Tensor gpu_tensor = cpu_tensor.to_device(getGPU());
+  Tensor host_padded = Tensor({1, 1, 24, 13}, DType_t::FP32);
+  pad(host_tensor, host_padded, 2, 5, 1.0f);
+  Tensor gpu_tensor = host_tensor.to_device(getGPU());
   Tensor gpu_padded = Tensor({1, 1, 24, 13}, DType_t::FP32, getGPU());
   pad(gpu_tensor, gpu_padded, 2, 5, 1.0f);
 
-  compareTensors<float>(cpu_padded, gpu_padded);
+  compare_tensor(host_padded, gpu_padded);
 
-  Tensor cpu_tensor2 = Tensor({1, 1, 3, 20}, DType_t::FP32);
-  fill_normal(cpu_tensor2, 0.0, 10.0f);
+  Tensor host_tensor2 = Tensor({1, 1, 3, 20}, DType_t::FP32);
+  fill_normal(host_tensor2, 0.0, 10.0f);
 
-  Tensor cpu_padded2 = Tensor({1, 1, 13, 24}, DType_t::FP32);
-  pad(cpu_tensor2, cpu_padded2, 5, 2, -2.0f);
-  Tensor gpu_tensor2 = cpu_tensor2.to_device(getGPU());
+  Tensor host_padded2 = Tensor({1, 1, 13, 24}, DType_t::FP32);
+  pad(host_tensor2, host_padded2, 5, 2, -2.0f);
+  Tensor gpu_tensor2 = host_tensor2.to_device(getGPU());
   Tensor gpu_padded2 = Tensor({1, 1, 13, 24}, DType_t::FP32, getGPU());
   pad(gpu_tensor2, gpu_padded2, 5, 2, -2.0f);
 
-  compareTensors<float>(cpu_padded2, gpu_padded2);
+  compare_tensor(host_padded2, gpu_padded2);
 }
 
 int main(int argc, char **argv) {

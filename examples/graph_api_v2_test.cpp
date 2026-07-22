@@ -39,11 +39,12 @@ Graph make_mlp(Device& device) {
   auto output = fc2(x);
   output->set_uid("output");
   graph.set_output(output);
-  graph.set_io_dtype(DType_t::BF16);
-  graph.set_param_dtype(DType_t::BF16);
-
+  GraphOpts opts{
+      .io_dtype = DType_t::BF16,
+      .param_dtype = DType_t::BF16,
+  };
   auto& allocator = PoolAllocator::instance(device, device.default_stream());
-  graph.compile(allocator);
+  graph.compile(allocator, opts);
 
   return graph;
 }
@@ -77,12 +78,14 @@ Graph make_mnist_model(Device& device) {
   auto output = fc(x);
   output->set_uid("output");
   graph.set_output(output);
-  graph.set_io_dtype(DType_t::BF16);
-  graph.set_param_dtype(DType_t::BF16);
 
+  GraphOpts opts{
+      .io_dtype = DType_t::BF16,
+      .param_dtype = DType_t::BF16,
+  };
   auto& allocator = PoolAllocator::instance(device, device.default_stream());
 
-  graph.compile(allocator);
+  graph.compile(allocator, opts);
 
   return graph;
 }

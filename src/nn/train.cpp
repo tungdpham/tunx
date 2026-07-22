@@ -581,10 +581,6 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
   vector<size_t> data_shape = train_dataset->get_data_shape();
   data_shape.insert(data_shape.begin(), config.batch_size);  // add batch dim
 
-  graph.set_io_dtype(config.io_dtype);
-  graph.set_param_dtype(config.param_dtype);
-  graph.set_compute_dtype(config.compute_dtype);
-
   bool is_val = config.max_steps == -1;
 
   if (is_val) {

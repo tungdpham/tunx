@@ -9,7 +9,6 @@
 #include <cmath>
 #include <memory>
 
-
 #include "nn/engines/iengine.hpp"
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
@@ -19,7 +18,7 @@ namespace tunx {
 namespace internal {
 
 EmbeddingImpl::EmbeddingImpl(size_t vocab_size, size_t embed_dim, const std::string &name,
-                                       size_t padding_idx)
+                             size_t padding_idx)
     : SISOLayerImpl(name),
       vocab_size_(vocab_size),
       embed_dim_(embed_dim) {
@@ -56,7 +55,7 @@ Tensor EmbeddingImpl::forward_impl(const Tensor &input, Residuals &residuals) {
 
   Vec<size_t> out_shape = input.shape();
   out_shape.push_back(embed_dim_);
-  Tensor output = get_tensor(out_shape, io_dtype_);
+  Tensor output = make_tensor(out_shape, io_dtype_);
 
   EmbeddingStats stats{
       .num_indices = num_tokens,
@@ -71,10 +70,10 @@ Tensor EmbeddingImpl::forward_impl(const Tensor &input, Residuals &residuals) {
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_embedding_graph(backend_handle_, stats, type_desc);
-  Tensor ws = get_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
+  Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
-  engine_->embedding_fwd(backend_handle_, stats, input.data_as<void>(), weight_.data_as<void>(),
+  engine_->embedding_fwd(engine_handle_, stats, input.data_as<void>(), weight_.data_as<void>(),
                          output.data_as<void>(), ws.data_as<void>(), type_desc);
 
   return output;
@@ -83,7 +82,7 @@ Tensor EmbeddingImpl::forward_impl(const Tensor &input, Residuals &residuals) {
 Tensor EmbeddingImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
   const Tensor &input = residuals["input"];
 
-  Tensor grad_input = get_tensor(input.shape(), io_dtype_);
+  Tensor grad_input = make_tensor(input.shape(), io_dtype_);
   fill(grad_input, 0.0f);
 
   size_t num_tokens = input.size();
@@ -101,10 +100,10 @@ Tensor EmbeddingImpl::backward_impl(const Tensor &grad_output, Residuals &residu
       .compute_dtype = compute_dtype_,
   };
 
-  WorkspaceReq ws_req = engine_->query_embedding_graph(backend_handle_, stats, type_desc);
-  Tensor ws = get_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
+  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->embedding_bwd(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
+  engine_->embedding_bwd(engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
                          weight_.grad_as<void>(), ws.data_as<void>(), type_desc);
 
   return grad_input;
@@ -126,8 +125,7 @@ LayerConfig EmbeddingImpl::get_config() const {
   return config;
 }
 
-std::shared_ptr<EmbeddingImpl> EmbeddingImpl::create_from_config(
-    const LayerConfig &config) {
+std::shared_ptr<EmbeddingImpl> EmbeddingImpl::create_from_config(const LayerConfig &config) {
   size_t vocab_size = config.get<size_t>("vocab_size");
   size_t embed_dim = config.get<size_t>("embed_dim");
   size_t padding_idx = config.get<size_t>("padding_idx", static_cast<size_t>(-1));

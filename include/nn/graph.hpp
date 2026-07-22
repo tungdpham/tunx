@@ -9,11 +9,13 @@
 #include <set>
 #include <string>
 
+#include "device/del_allocator_v2.hpp"
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
 #include "nn/edge.hpp"
 #include "nn/engines/engine_handle.hpp"
 #include "nn/node.hpp"
+#include "nn/param.hpp"
 #include "nn/tensor_bundle.hpp"
 #include "type/type.hpp"
 
@@ -53,14 +55,32 @@ struct ForwardPlanCacheEntry {
   bool profiled = false;
 };
 
+struct GraphOpts {
+  Engine engine = nullptr;
+  stream s = nullptr;
+  unsigned long long seed = 0;
+  DType_t io_dtype = DType_t::FP32;
+  DType_t param_dtype = DType_t::FP32;
+  DType_t compute_dtype = DType_t::FP32;
+};
+
 class Graph {
 public:
+  struct Opts {
+    Engine engine = nullptr;
+    stream s = nullptr;
+    unsigned long long seed = 0;
+    DType_t io_dtype = DType_t::FP32;
+    DType_t param_dtype = DType_t::FP32;
+    DType_t compute_dtype = DType_t::FP32;
+  };
+
   Graph() = default;
 
   void save_state(std::ostream &stream) const;
   static Graph load_state(std::istream &stream, IAllocator &allocator);
 
-  void compile(IAllocator &allocator, stream s = nullptr);
+  void compile(IAllocator &allocator, GraphOpts opts = GraphOpts{});
 
   Engine &engine() { return engine_; }
   const Engine &engine() const { return engine_; }
@@ -76,10 +96,8 @@ public:
 
   Device &device() const { return param_allocator_->device(); }
 
-  const IAllocator *param_allocator() const { return param_allocator_; }
-  const std::shared_ptr<DELAllocatorV2> &workspace_allocator() const {
-    return workspace_allocator_;
-  }
+  const DELAllocatorV2 *workspace_allocator() const { return workspace_allocator_.get(); }
+  DELAllocatorV2 *workspace_allocator() { return workspace_allocator_.get(); }
 
   void add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producers,
                 const Vec<Node> &consumers);
@@ -95,9 +113,6 @@ public:
   Node make_node(std::string uid = "");
 
   void set_mode(ExecutionMode mode);
-  void set_io_dtype(DType_t dtype);
-  void set_param_dtype(DType_t dtype);
-  void set_compute_dtype(DType_t dtype);
 
   void set_input(Node node);
   void set_output(Node node);
@@ -121,6 +136,9 @@ private:
   std::shared_ptr<DELAllocatorV2> workspace_allocator_;
   Engine engine_;
   engine_handle engine_handle_;
+  DType_t io_dtype_;
+  DType_t param_dtype_;
+  DType_t compute_dtype_;
 
   // connectivity
   Vec<Node> nodes_;

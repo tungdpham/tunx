@@ -20,6 +20,7 @@
 #include "nn/engines/cudnn_engine.hpp"
 #include "tensor/tensor.hpp"
 #include "tensor/tensor_ops.hpp"
+#include "tensor_test_utils.hpp"
 #include "type/type.hpp"
 
 using namespace tunx;
@@ -47,7 +48,7 @@ protected:
 
     stream_ = device_->default_stream();
     engine_ = std::make_unique<CuDNNEngine>();
-    backend_handle_ = engine_->create_handle(stream_);
+    engine_handle_ = engine_->create_handle(stream_);
   }
 
   void SetUp() override {}
@@ -55,31 +56,6 @@ protected:
   void TearDown() override {}
 
   static void TearDownTestSuite() { engine_.reset(); }
-
-  template <typename T>
-  void compare_array_t(const T* output, const T* expected, size_t size, double eps = 1e-3) {
-    size_t mismatch_count = 0;
-    for (size_t i = 0; i < size; i++) {
-      float out = static_cast<float>(output[i]);
-      float exp = static_cast<float>(expected[i]);
-      double diff = std::abs(out - exp);
-      if (diff > eps && mismatch_count < 100) {
-        mismatch_count++;
-        fmt::print("Mismatch at index: {}, output: {}, expected: {}, diff: {}\n", i, out, exp,
-                   diff);
-      }
-    }
-    EXPECT_EQ(mismatch_count, 0) << fmt::format("Mismatch count: {}", mismatch_count);
-  }
-
-  void compare_tensor(const Tensor& output, const Tensor& expected, double eps = 1e-3) {
-    EXPECT_EQ(output.size(), expected.size());
-
-    DType_t dtype = output.dtype();
-
-    DISPATCH_ANY_DTYPE(
-        dtype, T, compare_array_t(output.data_as<T>(), expected.data_as<T>(), output.size(), eps););
-  }
 
   void check_dense_fwd(const Tensor& input, const Tensor& weight, const Tensor& bias,
                        const Tensor& output) {
@@ -429,14 +405,14 @@ protected:
   static bool has_gpu_;
   static sref<Device> device_;
   static stream stream_;
-  static engine_handle backend_handle_;
+  static engine_handle engine_handle_;
   static std::unique_ptr<CuDNNEngine> engine_;
 };
 
 bool CuDNNEngineTest::has_gpu_ = false;
 sref<Device> CuDNNEngineTest::device_;
 stream CuDNNEngineTest::stream_ = nullptr;
-engine_handle CuDNNEngineTest::backend_handle_;
+engine_handle CuDNNEngineTest::engine_handle_;
 std::unique_ptr<CuDNNEngine> CuDNNEngineTest::engine_;
 
 TEST_F(CuDNNEngineTest, DenseFwdThrowsWhenUncached) {
@@ -454,7 +430,7 @@ TEST_F(CuDNNEngineTest, DenseFwdThrowsWhenUncached) {
 
   EXPECT_THROW(
       {
-        engine_->dense_fwd(backend_handle_, stats, nullptr, nullptr, nullptr, nullptr, nullptr,
+        engine_->dense_fwd(engine_handle_, stats, nullptr, nullptr, nullptr, nullptr, nullptr,
                            type_desc);
       },
       std::runtime_error);
@@ -477,7 +453,7 @@ TEST_F(CuDNNEngineTest, QueryDenseGraphReturnsValidWorkspace) {
       .compute_dtype = DType_t::FP32,
   };
 
-  WorkspaceReq req = engine_->query_dense_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
 
   EXPECT_GE(req.fwd_workspace, 0);
   EXPECT_GE(req.bwd_workspace, 0);
@@ -506,10 +482,10 @@ TEST_F(CuDNNEngineTest, DenseFwdReturnsCorrectResults) {
   fill_normal(bias, 0.0, 0.1);
   Tensor output({16, 32}, DType_t::FP32, getGPU());
 
-  WorkspaceReq req = engine_->query_dense_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
 
   Tensor workspace({req.fwd_workspace}, DType_t::BYTE, getGPU());
-  engine_->dense_fwd(backend_handle_, stats, input.data_as<void>(), weight.data_as<void>(),
+  engine_->dense_fwd(engine_handle_, stats, input.data_as<void>(), weight.data_as<void>(),
                      bias.data_as<void>(), output.data_as<void>(), workspace.data_as<void>(),
                      type_desc);
 
@@ -540,10 +516,10 @@ TEST_F(CuDNNEngineTest, DenseWgradReturnsCorrectResults) {
   Tensor grad_weight({out_features, in_features}, DType_t::FP32, getGPU());
   fill(grad_weight, 0.0f);
 
-  WorkspaceReq req = engine_->query_dense_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
 
   Tensor workspace({req.bwd_workspace}, DType_t::BYTE, getGPU());
-  engine_->dense_wgrad(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
+  engine_->dense_wgrad(engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
                        grad_weight.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   check_dense_wgrad(input, grad_output, grad_weight);
@@ -568,10 +544,10 @@ TEST_F(CuDNNEngineTest, DenseDgradReturnsCorrectResults) {
   fill_normal(weight, 0.0, 0.1);
   Tensor grad_input({16, 64}, DType_t::FP32, getGPU());
 
-  WorkspaceReq req = engine_->query_dense_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
 
   Tensor workspace({req.bwd_workspace}, DType_t::BYTE, getGPU());
-  engine_->dense_dgrad(backend_handle_, stats, grad_output.data_as<void>(), weight.data_as<void>(),
+  engine_->dense_dgrad(engine_handle_, stats, grad_output.data_as<void>(), weight.data_as<void>(),
                        grad_input.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   check_dense_dgrad(grad_output, weight, grad_input);
@@ -600,10 +576,10 @@ TEST_F(CuDNNEngineTest, DenseBgradReturnsCorrectResults) {
   fill(grad_bias, 0.0f);
   cudaDeviceSynchronize();
 
-  WorkspaceReq req = engine_->query_dense_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
 
   Tensor workspace({req.bwd_workspace}, DType_t::BYTE, getGPU());
-  engine_->dense_bgrad(backend_handle_, stats, grad_output.data_as<void>(),
+  engine_->dense_bgrad(engine_handle_, stats, grad_output.data_as<void>(),
                        grad_bias.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   check_dense_bgrad(grad_output, grad_bias);
@@ -641,10 +617,10 @@ TEST_F(CuDNNEngineTest, Conv2DWgradReturnsCorrectResult) {
   Tensor grad_weight({4, 3, 3, 3}, DType_t::FP32, getGPU());
   fill(grad_weight, 0.0f);
 
-  WorkspaceReq req = engine_->query_conv2d_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_conv2d_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace}, DType_t::BYTE, getGPU());
 
-  engine_->conv2d_wgrad(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
+  engine_->conv2d_wgrad(engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
                         grad_weight.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   check_conv2d_wgrad(input, grad_output, grad_weight, stats);
@@ -694,10 +670,10 @@ TEST_F(CuDNNEngineTest, Conv2DBgradReturnsCorrectResult) {
   Tensor grad_bias({out_channels}, DType_t::FP32, getGPU());
   fill(grad_bias, 0.0f);
 
-  WorkspaceReq req = engine_->query_conv2d_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_conv2d_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace}, DType_t::BYTE, getGPU());
 
-  engine_->conv2d_bgrad(backend_handle_, stats, grad_output.data_as<void>(),
+  engine_->conv2d_bgrad(engine_handle_, stats, grad_output.data_as<void>(),
                         grad_bias.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   check_conv2d_bgrad(grad_output, grad_bias, stats);
@@ -738,10 +714,10 @@ TEST_F(CuDNNEngineTest, BatchNormBwdReturnsCorrectResult) {
   fill(grad_gamma, 0.0);
   fill(grad_beta, 0.0);
 
-  WorkspaceReq req = engine_->query_batchnorm_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_batchnorm_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace}, DType_t::BYTE, getGPU());
 
-  engine_->batchnorm_bwd(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
+  engine_->batchnorm_bwd(engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
                          nullptr, gamma.data_as<void>(), grad_input.data_as<void>(),
                          grad_gamma.data_as<void>(), grad_beta.data_as<void>(),
                          mean.data_as<void>(), invar.data_as<void>(), workspace.data_as<void>(),
@@ -782,10 +758,10 @@ TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
   Tensor mean({batch_size, 1}, DType_t::FP32, getGPU());
   Tensor invar({batch_size, 1}, DType_t::FP32, getGPU());
   {
-    WorkspaceReq fwd_req = engine_->query_layernorm_graph(backend_handle_, stats, type_desc);
+    WorkspaceReq fwd_req = engine_->query_layernorm_graph(engine_handle_, stats, type_desc);
     Tensor fwd_workspace({fwd_req.fwd_workspace > 0 ? fwd_req.fwd_workspace : 1}, DType_t::BYTE,
                          getGPU());
-    engine_->layernorm_fwd(backend_handle_, stats, input.data_as<void>(), gamma.data_as<void>(),
+    engine_->layernorm_fwd(engine_handle_, stats, input.data_as<void>(), gamma.data_as<void>(),
                            beta.data_as<void>(), ln_output.data_as<void>(), mean.data_as<void>(),
                            invar.data_as<void>(), fwd_workspace.data_as<void>(), type_desc);
   }
@@ -796,10 +772,10 @@ TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
   fill(grad_gamma, 0.0f);
   fill(grad_beta, 0.0f);
 
-  WorkspaceReq req = engine_->query_layernorm_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_layernorm_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace}, DType_t::BYTE, getGPU());
 
-  engine_->layernorm_bwd(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
+  engine_->layernorm_bwd(engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
                          gamma.data_as<void>(), mean.data_as<void>(), invar.data_as<void>(),
                          grad_input.data_as<void>(), grad_gamma.data_as<void>(),
                          grad_beta.data_as<void>(), workspace.data_as<void>(), type_desc);
@@ -825,7 +801,7 @@ TEST_F(CuDNNEngineTest, AvgPoolFwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_avgpool_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_avgpool_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
   // NHWC layout: {N, H, W, C}
   Tensor input({2, 4, 4, 3}, DType_t::FP32, getGPU());
@@ -833,7 +809,7 @@ TEST_F(CuDNNEngineTest, AvgPoolFwdReturnsCorrectResult) {
   Tensor output({2, 2, 2, 3}, DType_t::FP32, getGPU());
 
   EXPECT_NO_THROW({
-    engine_->avgpool_fwd(backend_handle_, stats, input.data_as<void>(), output.data_as<void>(),
+    engine_->avgpool_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
                          workspace.data_as<void>(), type_desc);
   });
 
@@ -871,7 +847,7 @@ TEST_F(CuDNNEngineTest, AvgPoolBwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_avgpool_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_avgpool_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace}, DType_t::BYTE, getGPU());
   // NHWC layout: {N, H, W, C}
   Tensor grad_output({batch_size, output_h, output_w, channels}, DType_t::FP32, getGPU());
@@ -880,7 +856,7 @@ TEST_F(CuDNNEngineTest, AvgPoolBwdReturnsCorrectResult) {
   fill(grad_input, 0.0f);  // zero before accumulation
 
   EXPECT_NO_THROW({
-    engine_->avgpool_bwd(backend_handle_, stats, grad_output.data_as<void>(),
+    engine_->avgpool_bwd(engine_handle_, stats, grad_output.data_as<void>(),
                          grad_input.data_as<void>(), workspace.data_as<void>(), type_desc);
   });
 
@@ -918,7 +894,7 @@ TEST_F(CuDNNEngineTest, MaxPoolFwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_maxpool2d_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_maxpool2d_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
   Tensor input({batch_size, height, width, channels}, DType_t::FP32, getGPU());
   float input_host[] = {1.0f, 2.0f,  3.0f,  4.0f,  5.0f,  6.0f,  7.0f,  8.0f,
@@ -928,7 +904,7 @@ TEST_F(CuDNNEngineTest, MaxPoolFwdReturnsCorrectResult) {
   Tensor mask({batch_size, output_h, output_w, channels}, DType_t::INT32, getGPU());
 
   EXPECT_NO_THROW({
-    engine_->maxpool2d_fwd(backend_handle_, stats, input.data_as<void>(), output.data_as<void>(),
+    engine_->maxpool2d_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
                            mask.data_as<void>(), workspace.data_as<void>(), type_desc);
   });
 
@@ -966,7 +942,7 @@ TEST_F(CuDNNEngineTest, MaxPoolBwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_maxpool2d_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_maxpool2d_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getGPU());
 
   Tensor input({batch_size, height, width, channels}, DType_t::FP32, getGPU());
@@ -974,7 +950,7 @@ TEST_F(CuDNNEngineTest, MaxPoolBwdReturnsCorrectResult) {
   Tensor output({batch_size, output_h, output_w, channels}, DType_t::FP32, getGPU());
   Tensor mask({batch_size, output_h, output_w, channels}, DType_t::INT32, getGPU());
 
-  engine_->maxpool2d_fwd(backend_handle_, stats, input.data_as<void>(), output.data_as<void>(),
+  engine_->maxpool2d_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
                          mask.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   Tensor grad_output({batch_size, output_h, output_w, channels}, DType_t::FP32, getGPU());
@@ -983,7 +959,7 @@ TEST_F(CuDNNEngineTest, MaxPoolBwdReturnsCorrectResult) {
   fill(grad_input, 0.0f);
 
   EXPECT_NO_THROW({
-    engine_->maxpool2d_bwd(backend_handle_, stats, grad_output.data_as<void>(),
+    engine_->maxpool2d_bwd(engine_handle_, stats, grad_output.data_as<void>(),
                            grad_input.data_as<void>(), mask.data_as<void>(),
                            workspace.data_as<void>(), type_desc);
   });
@@ -1002,7 +978,7 @@ TEST_F(CuDNNEngineTest, ClassTokenFwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_class_token_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_class_token_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
 
   Tensor input({2, 3, 4}, DType_t::FP32, getGPU());
@@ -1011,7 +987,7 @@ TEST_F(CuDNNEngineTest, ClassTokenFwdReturnsCorrectResult) {
   Tensor output({2, 4, 4}, DType_t::FP32, getGPU());
 
   EXPECT_NO_THROW({
-    engine_->class_token_fwd(backend_handle_, stats, input.data_as<void>(), token.data_as<void>(),
+    engine_->class_token_fwd(engine_handle_, stats, input.data_as<void>(), token.data_as<void>(),
                              output.data_as<void>(), workspace.data_as<void>(), type_desc);
   });
 
@@ -1033,7 +1009,7 @@ TEST_F(CuDNNEngineTest, ClassTokenBwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_class_token_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_class_token_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getGPU());
 
   // Output seq_len is seq_len + 1 (prepended class token)
@@ -1044,7 +1020,7 @@ TEST_F(CuDNNEngineTest, ClassTokenBwdReturnsCorrectResult) {
   Tensor grad_token({embed_dim}, DType_t::FP32, getGPU());
   fill(grad_token, 0.0f);
 
-  engine_->class_token_bwd(backend_handle_, stats, grad_output.data_as<void>(),
+  engine_->class_token_bwd(engine_handle_, stats, grad_output.data_as<void>(),
                            grad_input.data_as<void>(), grad_token.data_as<void>(),
                            workspace.data_as<void>(), type_desc);
 
@@ -1063,7 +1039,7 @@ TEST_F(CuDNNEngineTest, DropoutFwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_dropout_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_dropout_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
   Tensor input({2, 3, 2, 2}, DType_t::FP32, getGPU());
   fill_normal(input, 0.0, 0.5);
@@ -1071,7 +1047,7 @@ TEST_F(CuDNNEngineTest, DropoutFwdReturnsCorrectResult) {
   Tensor mask({2, 3, 2, 2}, DType_t::BOOL, getGPU());
 
   EXPECT_NO_THROW({
-    engine_->dropout_fwd(backend_handle_, stats, input.data_as<void>(), output.data_as<void>(),
+    engine_->dropout_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
                          mask.data_as<bool>(), workspace.data_as<void>(), type_desc);
   });
 
@@ -1115,7 +1091,7 @@ TEST_F(CuDNNEngineTest, DropoutBwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_dropout_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_dropout_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getGPU());
 
   Tensor grad_output({batch_size, channels, spatial_h, spatial_w}, DType_t::FP32, getGPU());
@@ -1132,7 +1108,7 @@ TEST_F(CuDNNEngineTest, DropoutBwdReturnsCorrectResult) {
   }
 
   EXPECT_NO_THROW({
-    engine_->dropout_bwd(backend_handle_, stats, grad_output.data_as<void>(),
+    engine_->dropout_bwd(engine_handle_, stats, grad_output.data_as<void>(),
                          grad_input.data_as<void>(), mask.data_as<bool>(), bwd_scale,
                          workspace.data_as<void>(), type_desc);
   });
@@ -1165,7 +1141,7 @@ TEST_F(CuDNNEngineTest, EmbeddingFwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_embedding_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
 
   Tensor input({4}, DType_t::FP32, getGPU());
@@ -1173,7 +1149,7 @@ TEST_F(CuDNNEngineTest, EmbeddingFwdReturnsCorrectResult) {
   Tensor output({4, 8}, DType_t::FP32, getGPU());
 
   EXPECT_NO_THROW({
-    engine_->embedding_fwd(backend_handle_, stats, input.data_as<void>(), weight.data_as<void>(),
+    engine_->embedding_fwd(engine_handle_, stats, input.data_as<void>(), weight.data_as<void>(),
                            output.data_as<void>(), workspace.data_as<void>(), type_desc);
   });
 
@@ -1198,7 +1174,7 @@ TEST_F(CuDNNEngineTest, EmbeddingBwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_embedding_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getGPU());
 
   Tensor input({num_indices}, DType_t::FP32, getGPU());
@@ -1208,7 +1184,7 @@ TEST_F(CuDNNEngineTest, EmbeddingBwdReturnsCorrectResult) {
   Tensor grad_weight({vocab_size, embed_dim}, DType_t::FP32, getGPU());
   fill(grad_weight, 0.0f);
 
-  engine_->embedding_bwd(backend_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
+  engine_->embedding_bwd(engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
                          grad_weight.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   check_embedding_bwd(input, grad_output, grad_weight, stats);
@@ -1226,7 +1202,7 @@ TEST_F(CuDNNEngineTest, ReLUFwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_relu_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_relu_graph(engine_handle_, stats, type_desc);
   size_t ws_size = std::max(req.fwd_workspace, req.bwd_workspace);
   Tensor workspace({ws_size > 0 ? ws_size : 1}, DType_t::BYTE, getGPU());
 
@@ -1237,7 +1213,7 @@ TEST_F(CuDNNEngineTest, ReLUFwdReturnsCorrectResult) {
   Tensor mask({batch_size, spatial_size}, DType_t::BOOL, getGPU());
 
   EXPECT_NO_THROW({
-    engine_->relu_fwd(backend_handle_, stats, input.data_as<void>(), output.data_as<void>(),
+    engine_->relu_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
                       mask.data_as<bool>(), workspace.data_as<void>(), type_desc);
   });
 
@@ -1265,7 +1241,7 @@ TEST_F(CuDNNEngineTest, ReLUBwdReturnsCorrectResult) {
       .param_dtype = DType_t::FP32,
       .compute_dtype = DType_t::FP32,
   };
-  WorkspaceReq req = engine_->query_relu_graph(backend_handle_, stats, type_desc);
+  WorkspaceReq req = engine_->query_relu_graph(engine_handle_, stats, type_desc);
   size_t ws_size = std::max(req.fwd_workspace, req.bwd_workspace);
 
   Tensor workspace({ws_size > 0 ? ws_size : 1}, DType_t::BYTE, getGPU());
@@ -1284,7 +1260,7 @@ TEST_F(CuDNNEngineTest, ReLUBwdReturnsCorrectResult) {
   Tensor grad_input({batch_size, spatial_size}, DType_t::FP32, getGPU());
 
   EXPECT_NO_THROW({
-    engine_->relu_bwd(backend_handle_, stats, grad_output.data_as<void>(),
+    engine_->relu_bwd(engine_handle_, stats, grad_output.data_as<void>(),
                       grad_input.data_as<void>(), mask.data_as<bool>(), workspace.data_as<void>(),
                       type_desc);
   });

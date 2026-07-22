@@ -32,13 +32,13 @@ Vec<Tensor> SequentialImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &r
   if (layers_.size() % 2 == 0) {
     // assuming we are on the reverse side of input, flip so output of last layer is always opposite
     // side of input.
-    allocator_->flip();
+    ws_allocator_->flip();
   }
   for (size_t i = 0; i < layers_.size(); ++i) {
     current_outputs = layers_[i].forward(current_inputs, residuals["layer_" + std::to_string(i)]);
     current_inputs = Vec<Tensor>(current_outputs.begin(), current_outputs.end());
     if (i != layers_.size() - 1) {
-      allocator_->flip();
+      ws_allocator_->flip();
     }
   }
   return current_outputs;
@@ -52,13 +52,13 @@ Vec<Tensor> SequentialImpl::backward_impl(const Vec<Tensor> &grad_outputs, Resid
   Vec<Tensor> grad_inputs;
   if (layers_.size() % 2 == 0) {
     // flip so grad output of last layer is always opposite side of input.
-    allocator_->flip();
+    ws_allocator_->flip();
   }
   for (int i = static_cast<int>(layers_.size()) - 1; i >= 0; --i) {
     grad_inputs = layers_[i].backward(current_gradients, residuals["layer_" + std::to_string(i)]);
     current_gradients = Vec<Tensor>(grad_inputs.begin(), grad_inputs.end());
     if (i != 0) {
-      allocator_->flip();  // algorithm 1 definitely applies
+      ws_allocator_->flip();  // algorithm 1 definitely applies
     }
   }
   return grad_inputs;

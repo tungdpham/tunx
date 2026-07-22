@@ -72,21 +72,21 @@ Vec<Tensor> FlashAttentionBlockImpl::forward_impl(const Vec<Tensor> &inputs, Res
     residuals["input"] = input;
   }
 
-  Tensor attn_out = this->get_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
+  Tensor attn_out = this->make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
   residuals["attn_out"] = attn_out;
-  Tensor stats_tensor = this->get_tensor({batch_size, num_heads_, seq_len, 1}, DType_t::FP32);
+  Tensor stats_tensor = this->make_tensor({batch_size, num_heads_, seq_len, 1}, DType_t::FP32);
   residuals["stats_tensor"] = stats_tensor;
 
-  allocator_->flip();
+  ws_allocator_->flip();
 
-  Tensor attn_heads = this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                       io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor q_heads = this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                    io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor k_heads = this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                    io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor v_heads = this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                    io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor attn_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor q_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor k_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor v_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
 
   Tensor q = q_proj_.forward({input}, residuals["q_proj"])[0];
   Tensor k = k_proj_.forward({input}, residuals["k_proj"])[0];
@@ -106,16 +106,19 @@ Vec<Tensor> FlashAttentionBlockImpl::forward_impl(const Vec<Tensor> &inputs, Res
   DTypeDesc t_desc = type_desc;
   t_desc.compute_dtype = io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16;
 
-  engine_->transpose(backend_handle_, t_stats, q.data_as<void>(), q_heads.data_as<void>(), nullptr, t_desc);
-  engine_->transpose(backend_handle_, t_stats, k.data_as<void>(), k_heads.data_as<void>(), nullptr, t_desc);
-  engine_->transpose(backend_handle_, t_stats, v.data_as<void>(), v_heads.data_as<void>(), nullptr, t_desc);
+  engine_->transpose(engine_handle_, t_stats, q.data_as<void>(), q_heads.data_as<void>(), nullptr,
+                     t_desc);
+  engine_->transpose(engine_handle_, t_stats, k.data_as<void>(), k_heads.data_as<void>(), nullptr,
+                     t_desc);
+  engine_->transpose(engine_handle_, t_stats, v.data_as<void>(), v_heads.data_as<void>(), nullptr,
+                     t_desc);
 
   {
-    WorkspaceReq ws_req = engine_->query_sdpa_graph(backend_handle_, stats, type_desc);
+    WorkspaceReq ws_req = engine_->query_sdpa_graph(engine_handle_, stats, type_desc);
     size_t workspace_size = ws_req.fwd_workspace;
-    Tensor workspace = this->get_tensor({workspace_size}, DType_t::BYTE);
+    Tensor workspace = this->make_tensor({workspace_size}, DType_t::BYTE);
 
-    engine_->sdpa_fwd(backend_handle_, stats, q_heads.data_as<void>(), k_heads.data_as<void>(),
+    engine_->sdpa_fwd(engine_handle_, stats, q_heads.data_as<void>(), k_heads.data_as<void>(),
                       v_heads.data_as<void>(), attn_heads.data_as<void>(),
                       stats_tensor.data_as<void>(), workspace.data_as<void>(), type_desc);
   }
@@ -129,9 +132,10 @@ Vec<Tensor> FlashAttentionBlockImpl::forward_impl(const Vec<Tensor> &inputs, Res
   t_stats_rev.shape[2] = seq_len;
   t_stats_rev.shape[3] = head_dim_;
 
-  engine_->transpose(backend_handle_, t_stats_rev, attn_heads.data_as<void>(), attn_out.data_as<void>(), nullptr, t_desc);
+  engine_->transpose(engine_handle_, t_stats_rev, attn_heads.data_as<void>(),
+                     attn_out.data_as<void>(), nullptr, t_desc);
 
-  allocator_->flip();
+  ws_allocator_->flip();
 
   Tensor output = out_proj_.forward({attn_out}, residuals)[0];
   return {output};
@@ -164,17 +168,17 @@ Vec<Tensor> FlashAttentionBlockImpl::backward_impl(const Vec<Tensor> &grad_outpu
   Tensor &attn_out = residuals["attn_out"];
   Tensor &stats_tensor = residuals["stats_tensor"];
 
-  Tensor grad_input = this->get_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
+  Tensor grad_input = this->make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
 
-  allocator_->flip();
+  ws_allocator_->flip();
 
-  Tensor grad_q = this->get_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
-  Tensor grad_k = this->get_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
-  Tensor grad_v = this->get_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
+  Tensor grad_q = this->make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
+  Tensor grad_k = this->make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
+  Tensor grad_v = this->make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
 
   Tensor grad_attn_heads =
-      this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                       io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+      this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
 
   TransposeStats t_stats;
   t_stats.ndim = 4;
@@ -190,46 +194,51 @@ Vec<Tensor> FlashAttentionBlockImpl::backward_impl(const Vec<Tensor> &grad_outpu
 
   {
     Tensor grad_attn_out = out_proj_.backward({grad_output}, residuals["out_proj"])[0];
-    engine_->transpose(backend_handle_, t_stats, grad_attn_out.data_as<void>(), grad_attn_heads.data_as<void>(), nullptr, t_desc);
+    engine_->transpose(engine_handle_, t_stats, grad_attn_out.data_as<void>(),
+                       grad_attn_heads.data_as<void>(), nullptr, t_desc);
   }
 
   Tensor grad_q_heads =
-      this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                       io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+      this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
   Tensor grad_k_heads =
-      this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                       io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+      this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
   Tensor grad_v_heads =
-      this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                       io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+      this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
 
-  Tensor q_heads = this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                    io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor k_heads = this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                    io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor v_heads = this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                    io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor q_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor k_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor v_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
 
-  Tensor attn_heads = this->get_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                       io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor attn_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
 
   {
     Tensor q = q_proj_.forward({input}, residuals["q_proj"])[0];
     Tensor k = k_proj_.forward({input}, residuals["k_proj"])[0];
     Tensor v = v_proj_.forward({input}, residuals["v_proj"])[0];
 
-    engine_->transpose(backend_handle_, t_stats, q.data_as<void>(), q_heads.data_as<void>(), nullptr, t_desc);
-    engine_->transpose(backend_handle_, t_stats, k.data_as<void>(), k_heads.data_as<void>(), nullptr, t_desc);
-    engine_->transpose(backend_handle_, t_stats, v.data_as<void>(), v_heads.data_as<void>(), nullptr, t_desc);
-    engine_->transpose(backend_handle_, t_stats, attn_out.data_as<void>(), attn_heads.data_as<void>(), nullptr, t_desc);
+    engine_->transpose(engine_handle_, t_stats, q.data_as<void>(), q_heads.data_as<void>(), nullptr,
+                       t_desc);
+    engine_->transpose(engine_handle_, t_stats, k.data_as<void>(), k_heads.data_as<void>(), nullptr,
+                       t_desc);
+    engine_->transpose(engine_handle_, t_stats, v.data_as<void>(), v_heads.data_as<void>(), nullptr,
+                       t_desc);
+    engine_->transpose(engine_handle_, t_stats, attn_out.data_as<void>(),
+                       attn_heads.data_as<void>(), nullptr, t_desc);
   }
 
   {
-    WorkspaceReq ws_req = engine_->query_sdpa_graph(backend_handle_, stats, type_desc);
+    WorkspaceReq ws_req = engine_->query_sdpa_graph(engine_handle_, stats, type_desc);
     size_t workspace_size = ws_req.bwd_workspace;
-    Tensor workspace = this->get_tensor({workspace_size}, DType_t::BYTE);
+    Tensor workspace = this->make_tensor({workspace_size}, DType_t::BYTE);
 
-    engine_->sdpa_bwd(backend_handle_, stats, q_heads.data_as<void>(), k_heads.data_as<void>(),
+    engine_->sdpa_bwd(engine_handle_, stats, q_heads.data_as<void>(), k_heads.data_as<void>(),
                       v_heads.data_as<void>(), attn_heads.data_as<void>(),
                       grad_attn_heads.data_as<void>(), stats_tensor.data_as<void>(),
                       grad_q_heads.data_as<void>(), grad_k_heads.data_as<void>(),
@@ -245,11 +254,14 @@ Vec<Tensor> FlashAttentionBlockImpl::backward_impl(const Vec<Tensor> &grad_outpu
   t_stats_rev.shape[2] = seq_len;
   t_stats_rev.shape[3] = head_dim_;
 
-  engine_->transpose(backend_handle_, t_stats_rev, grad_q_heads.data_as<void>(), grad_q.data_as<void>(), nullptr, t_desc);
-  engine_->transpose(backend_handle_, t_stats_rev, grad_k_heads.data_as<void>(), grad_k.data_as<void>(), nullptr, t_desc);
-  engine_->transpose(backend_handle_, t_stats_rev, grad_v_heads.data_as<void>(), grad_v.data_as<void>(), nullptr, t_desc);
+  engine_->transpose(engine_handle_, t_stats_rev, grad_q_heads.data_as<void>(),
+                     grad_q.data_as<void>(), nullptr, t_desc);
+  engine_->transpose(engine_handle_, t_stats_rev, grad_k_heads.data_as<void>(),
+                     grad_k.data_as<void>(), nullptr, t_desc);
+  engine_->transpose(engine_handle_, t_stats_rev, grad_v_heads.data_as<void>(),
+                     grad_v.data_as<void>(), nullptr, t_desc);
 
-  allocator_->flip();
+  ws_allocator_->flip();
 
   Tensor grad_q_in = q_proj_.backward({grad_q}, residuals["q_proj"])[0];
   Tensor grad_k_in = k_proj_.backward({grad_k}, residuals["k_proj"])[0];
