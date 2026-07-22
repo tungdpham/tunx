@@ -99,7 +99,7 @@ signed main() {
   std::cout << "Max diff: " << max_diff << std::endl;
 
   // test backward
-  auto criterion = LossFactory::create_crossentropy();
+  auto criterion = LossFactory::create_cross_entropy();
   Tensor target = Tensor({128, OUTPUT_FEATURES}, DType_t::FP32, getGPU());
   fill_normal(target, 0.5f, 0.2f);
   Tensor grad = Tensor({128, OUTPUT_FEATURES}, DType_t::FP32, getGPU());

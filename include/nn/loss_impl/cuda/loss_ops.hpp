@@ -6,6 +6,7 @@
  */
 #pragma once
 
+#include "type/type.hpp"
 #ifdef TUNX_USE_CUDA
 #include <cuda_runtime.h>
 
@@ -16,53 +17,46 @@ namespace cuda {
 namespace loss {
 
 // CrossEntropy Loss (from probabilities)
-template <typename T>
-void compute_crossentropy_loss_probs(const T *predictions, const int *labels, float &loss,
-                                     size_t batch_size, size_t num_classes, T epsilon,
-                                     cudaStream_t stream);
+void compute_cross_entropy_loss_probs(DType_t type, const void *predictions, const int *labels,
+                                      float &loss, size_t batch_size, size_t num_classes,
+                                      double epsilon, cudaStream_t stream);
 
-template <typename T>
-void compute_crossentropy_gradient_probs(const T *predictions, const int *labels, T *grad_output,
-                                         size_t batch_size, size_t num_classes, T epsilon,
-                                         cudaStream_t stream);
+void compute_cross_entropy_gradient_probs(DType_t dtype, const void *predictions, const int *labels,
+                                          void *grad_output, size_t batch_size, size_t num_classes,
+                                          double epsilon, cudaStream_t stream);
 
 // CrossEntropy Loss (from logits)
-template <typename T>
-void compute_crossentropy_loss_logits(const T *logits, const int *labels, float &loss,
-                                      size_t batch_size, size_t num_classes,
-                                      cudaStream_t stream = 0);
+void compute_cross_entropy_loss_logits(DType_t dtype, const void *logits, const int *labels,
+                                       float &loss, size_t batch_size, size_t num_classes,
+                                       cudaStream_t stream = 0);
 
-template <typename T>
-void compute_crossentropy_gradient_logits(const T *logits, const int *labels, T *grad_output,
-                                          size_t batch_size, size_t num_classes,
-                                          cudaStream_t stream = 0);
+void compute_cross_entropy_gradient_logits(DType_t dtype, const void *logits, const int *labels,
+                                           void *grad_output, size_t batch_size, size_t num_classes,
+                                           cudaStream_t stream = 0);
 
 // MSE Loss
-template <typename T>
-void compute_mse_loss(const T *predictions, const T *targets, float &loss, size_t batch_size,
-                      size_t output_size, cudaStream_t stream);
+void compute_mse_loss(DType_t dtype, const void *predictions, const void *targets, float &loss,
+                      size_t batch_size, size_t output_size, cudaStream_t stream);
 
-template <typename T>
-void compute_mse_gradient(const T *predictions, const T *targets, T *grad_output, size_t batch_size,
-                          size_t output_size, cudaStream_t stream);
+void compute_mse_gradient(DType_t dtype, const void *predictions, const void *targets,
+                          void *grad_output, size_t batch_size, size_t output_size,
+                          cudaStream_t stream);
 
 // MAE Loss
-template <typename T>
-void compute_mae_loss(const T *predictions, const T *targets, float &loss, size_t batch_size,
-                      size_t output_size, cudaStream_t stream);
+void compute_mae_loss(DType_t dtype, const void *predictions, const void *targets, float &loss,
+                      size_t batch_size, size_t output_size, cudaStream_t stream);
 
-template <typename T>
-void compute_mae_gradient(const T *predictions, const T *targets, T *grad_output, size_t batch_size,
-                          size_t output_size, cudaStream_t stream);
+void compute_mae_gradient(DType_t dtype, const void *predictions, const void *targets,
+                          void *grad_output, size_t batch_size, size_t output_size,
+                          cudaStream_t stream);
 
 // Huber Loss
-template <typename T>
-void compute_huber_loss(const T *predictions, const T *targets, float &loss, size_t batch_size,
-                        size_t output_size, T delta, cudaStream_t stream);
+void compute_huber_loss(DType_t dtype, const void *predictions, const void *targets, float &loss,
+                        size_t batch_size, size_t output_size, double delta, cudaStream_t stream);
 
-template <typename T>
-void compute_huber_gradient(const T *predictions, const T *targets, T *grad_output,
-                            size_t batch_size, size_t output_size, T delta, cudaStream_t stream);
+void compute_huber_gradient(DType_t dtype, const void *predictions, const void *targets,
+                            void *grad_output, size_t batch_size, size_t output_size, double delta,
+                            cudaStream_t stream);
 
 }  // namespace loss
 }  // namespace cuda

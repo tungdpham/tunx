@@ -33,6 +33,6 @@
     "eta_min": 0.0
   },
   "loss": {
-    "type": "logsoftmax_crossentropy"
+    "type": "logsoftmax_cross_entropy"
   }
 }

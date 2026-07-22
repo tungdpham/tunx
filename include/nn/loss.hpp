@@ -75,7 +75,7 @@ public:
 
   LossConfig get_config() const override {
     LossConfig config;
-    config.type = "crossentropy";
+    config.type = "cross_entropy";
     config.name = "CrossEntropyLoss";
     config.set("use_logits", use_logits_);
     config.set("epsilon", epsilon_);
@@ -95,17 +95,6 @@ private:
 
   void compute_loss_impl(const Tensor &predictions, const Tensor &targets, float &loss,
                          stream s) override {
-    DISPATCH_DTYPE(predictions.dtype(), T, return compute_loss_t<T>(predictions, targets, loss, s));
-  }
-
-  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
-                             stream s) override {
-    DISPATCH_DTYPE(predictions.dtype(), T,
-                   return compute_gradient_t<T>(predictions, targets, gradient, s));
-  }
-
-  template <typename T>
-  void compute_loss_t(const Tensor &predictions, const Tensor &targets, float &loss, stream s) {
     auto &device = predictions.device();
     size_t num_classes = predictions.shape().back();
     size_t batch_size = 1;
@@ -116,38 +105,37 @@ private:
     if (use_logits_) {
       // Use numerically stable logits version
       if (predictions.device_type() == DeviceType::CPU) {
-        return create_cpu_task(device, s, cpu::loss::compute_crossentropy_loss_logits<T>,
-                               predictions.data_as<T>(), targets.data_as<int>(), loss, batch_size,
-                               num_classes);
+        return create_cpu_task(device, s, cpu::loss::compute_cross_entropy_loss_logits,
+                               predictions.dtype(), predictions.data_as<void>(),
+                               targets.data_as<int>(), loss, batch_size, num_classes);
       }
 #ifdef TUNX_USE_CUDA
       else if (predictions.device_type() == DeviceType::CUDA) {
-        return create_cuda_task(device, s, cuda::loss::compute_crossentropy_loss_logits<T>,
-                                predictions.data_as<T>(), targets.data_as<int>(), loss, batch_size,
-                                num_classes);
+        return create_cuda_task(device, s, cuda::loss::compute_cross_entropy_loss_logits,
+                                predictions.dtype(), predictions.data_as(), targets.data_as<int>(),
+                                loss, batch_size, num_classes);
       }
 #endif
     } else {
       // Use probabilities version
       if (predictions.device_type() == DeviceType::CPU) {
-        return create_cpu_task(device, s, cpu::loss::compute_crossentropy_loss_probs<T>,
-                               predictions.data_as<T>(), targets.data_as<int>(), loss, batch_size,
-                               num_classes, static_cast<T>(epsilon_));
+        return create_cpu_task(device, s, cpu::loss::compute_cross_entropy_loss_probs,
+                               predictions.dtype(), predictions.data_as(), targets.data_as<int>(),
+                               loss, batch_size, num_classes, epsilon_);
       }
 #ifdef TUNX_USE_CUDA
       else if (predictions.device_type() == DeviceType::CUDA) {
-        return create_cuda_task(device, s, cuda::loss::compute_crossentropy_loss_probs<T>,
-                                predictions.data_as<T>(), targets.data_as<int>(), loss, batch_size,
-                                num_classes, static_cast<T>(epsilon_));
+        return create_cuda_task(device, s, cuda::loss::compute_cross_entropy_loss_probs,
+                                predictions.dtype(), predictions.data_as(), targets.data_as<int>(),
+                                loss, batch_size, num_classes, epsilon_);
       }
 #endif
     }
     throw std::runtime_error("Unsupported device type for CrossEntropyLoss.");
   }
 
-  template <typename T>
-  void compute_gradient_t(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
-                          stream s) {
+  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
+                             stream s) override {
     auto &device = predictions.device();
     size_t num_classes = predictions.shape().back();
     size_t batch_size = 1;
@@ -158,31 +146,29 @@ private:
     if (use_logits_) {
       // Use numerically stable logits version
       if (predictions.device_type() == DeviceType::CPU) {
-        return create_cpu_task(device, s, cpu::loss::compute_crossentropy_gradient_logits<T>,
-                               predictions.data_as<T>(), targets.data_as<int>(),
-                               gradient.data_as<T>(), batch_size, num_classes);
+        return create_cpu_task(device, s, cpu::loss::compute_cross_entropy_gradient_logits,
+                               predictions.dtype(), predictions.data_as(), targets.data_as<int>(),
+                               gradient.data_as(), batch_size, num_classes);
       }
 #ifdef TUNX_USE_CUDA
       else if (predictions.device_type() == DeviceType::CUDA) {
-        return create_cuda_task(device, s, cuda::loss::compute_crossentropy_gradient_logits<T>,
-                                predictions.data_as<T>(), targets.data_as<int>(),
-                                gradient.data_as<T>(), batch_size, num_classes);
+        return create_cuda_task(device, s, cuda::loss::compute_cross_entropy_gradient_logits,
+                                predictions.dtype(), predictions.data_as(), targets.data_as<int>(),
+                                gradient.data_as(), batch_size, num_classes);
       }
 #endif
     } else {
       // Use probabilities version
       if (predictions.device_type() == DeviceType::CPU) {
-        return create_cpu_task(device, s, cpu::loss::compute_crossentropy_gradient_probs<T>,
-                               predictions.data_as<T>(), targets.data_as<int>(),
-                               gradient.data_as<T>(), batch_size, num_classes,
-                               static_cast<T>(epsilon_));
+        return create_cpu_task(device, s, cpu::loss::compute_cross_entropy_gradient_probs,
+                               predictions.dtype(), predictions.data_as(), targets.data_as<int>(),
+                               gradient.data_as(), batch_size, num_classes, epsilon_);
       }
 #ifdef TUNX_USE_CUDA
       else if (predictions.device_type() == DeviceType::CUDA) {
-        return create_cuda_task(device, s, cuda::loss::compute_crossentropy_gradient_probs<T>,
-                                predictions.data_as<T>(), targets.data_as<int>(),
-                                gradient.data_as<T>(), batch_size, num_classes,
-                                static_cast<T>(epsilon_));
+        return create_cuda_task(device, s, cuda::loss::compute_cross_entropy_gradient_probs,
+                                predictions.dtype(), predictions.data_as(), targets.data_as<int>(),
+                                gradient.data_as(), batch_size, num_classes, epsilon_);
       }
 #endif
     }
@@ -211,21 +197,6 @@ private:
     if (predictions.device() != targets.device()) {
       throw std::runtime_error("Predictions and targets must be on the same device for MSELoss.");
     }
-    DISPATCH_DTYPE(predictions.dtype(), T, return compute_loss_t<T>(predictions, targets, loss, s));
-  }
-
-  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
-                             stream s) override {
-    if (predictions.device() != targets.device() || predictions.device() != gradient.device()) {
-      throw std::runtime_error(
-          "Predictions, targets, and gradient must be on the same device for MSELoss.");
-    }
-    DISPATCH_DTYPE(predictions.dtype(), T,
-                   return compute_gradient_t<T>(predictions, targets, gradient, s));
-  }
-
-  template <typename T>
-  void compute_loss_t(const Tensor &predictions, const Tensor &targets, float &loss, stream s) {
     auto &device = predictions.device();
     size_t batch_size = predictions.shape()[0];
     size_t output_size = 1;
@@ -234,21 +205,26 @@ private:
     }
 
     if (predictions.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, s, cpu::loss::compute_mse_loss<T>, predictions.data_as<T>(),
-                             targets.data_as<T>(), loss, batch_size, output_size);
+      return create_cpu_task(device, s, cpu::loss::compute_mse_loss, predictions.dtype(),
+                             predictions.data_as(), targets.data_as(), loss, batch_size,
+                             output_size);
     }
 #ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, s, cuda::loss::compute_mse_loss<T>, predictions.data_as<T>(),
-                              targets.data_as<T>(), loss, batch_size, output_size);
+      return create_cuda_task(device, s, cuda::loss::compute_mse_loss, predictions.dtype(),
+                              predictions.data_as(), targets.data_as(), loss, batch_size,
+                              output_size);
     }
 #endif
     throw std::runtime_error("Unsupported device type for MSELoss.");
   }
 
-  template <typename T>
-  void compute_gradient_t(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
-                          stream s) {
+  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
+                             stream s) override {
+    if (predictions.device() != targets.device() || predictions.device() != gradient.device()) {
+      throw std::runtime_error(
+          "Predictions, targets, and gradient must be on the same device for MSELoss.");
+    }
     auto &device = predictions.device();
     gradient = Tensor(predictions.shape(), predictions.dtype(), predictions.device());
     size_t batch_size = predictions.shape()[0];
@@ -258,14 +234,14 @@ private:
     }
 
     if (predictions.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, s, cpu::loss::compute_mse_gradient<T>,
-                             predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
+      return create_cpu_task(device, s, cpu::loss::compute_mse_gradient, predictions.dtype(),
+                             predictions.data_as(), targets.data_as(), gradient.data_as(),
                              batch_size, output_size);
     }
 #ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, s, cuda::loss::compute_mse_gradient<T>,
-                              predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
+      return create_cuda_task(device, s, cuda::loss::compute_mse_gradient, predictions.dtype(),
+                              predictions.data_as(), targets.data_as(), gradient.data_as(),
                               batch_size, output_size);
     }
 #endif
@@ -294,21 +270,6 @@ private:
     if (predictions.device() != targets.device()) {
       throw std::runtime_error("Predictions and targets must be on the same device for MAELoss.");
     }
-    DISPATCH_DTYPE(predictions.dtype(), T, return compute_loss_t<T>(predictions, targets, loss, s));
-  }
-
-  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
-                             stream s) override {
-    if (predictions.device() != targets.device() || predictions.device() != gradient.device()) {
-      throw std::runtime_error(
-          "Predictions, targets, and gradient must be on the same device for MAELoss.");
-    }
-    DISPATCH_DTYPE(predictions.dtype(), T,
-                   return compute_gradient_t<T>(predictions, targets, gradient, s));
-  }
-
-  template <typename T>
-  void compute_loss_t(const Tensor &predictions, const Tensor &targets, float &loss, stream s) {
     auto &device = predictions.device();
     size_t batch_size = predictions.shape()[0];
     size_t output_size = 1;
@@ -317,21 +278,26 @@ private:
     }
 
     if (predictions.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, s, cpu::loss::compute_mae_loss<T>, predictions.data_as<T>(),
-                             targets.data_as<T>(), loss, batch_size, output_size);
+      return create_cpu_task(device, s, cpu::loss::compute_mae_loss, predictions.dtype(),
+                             predictions.data_as(), targets.data_as(), loss, batch_size,
+                             output_size);
     }
 #ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, s, cuda::loss::compute_mae_loss<T>, predictions.data_as<T>(),
-                              targets.data_as<T>(), loss, batch_size, output_size);
+      return create_cuda_task(device, s, cuda::loss::compute_mae_loss, predictions.dtype(),
+                              predictions.data_as(), targets.data_as(), loss, batch_size,
+                              output_size);
     }
 #endif
     throw std::runtime_error("Unsupported device type for MAELoss.");
   }
 
-  template <typename T>
-  void compute_gradient_t(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
-                          stream s) {
+  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
+                             stream s) override {
+    if (predictions.device() != targets.device() || predictions.device() != gradient.device()) {
+      throw std::runtime_error(
+          "Predictions, targets, and gradient must be on the same device for MAELoss.");
+    }
     auto &device = predictions.device();
     gradient = Tensor(predictions.shape(), predictions.dtype(), predictions.device());
     size_t batch_size = predictions.shape()[0];
@@ -341,14 +307,14 @@ private:
     }
 
     if (predictions.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, s, cpu::loss::compute_mae_gradient<T>,
-                             predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
+      return create_cpu_task(device, s, cpu::loss::compute_mae_gradient, predictions.dtype(),
+                             predictions.data_as(), targets.data_as(), gradient.data_as(),
                              batch_size, output_size);
     }
 #ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, s, cuda::loss::compute_mae_gradient<T>,
-                              predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
+      return create_cuda_task(device, s, cuda::loss::compute_mae_gradient, predictions.dtype(),
+                              predictions.data_as(), targets.data_as(), gradient.data_as(),
                               batch_size, output_size);
     }
 #endif
@@ -384,21 +350,6 @@ private:
     if (predictions.device() != targets.device()) {
       throw std::runtime_error("Predictions and targets must be on the same device for HuberLoss.");
     }
-    DISPATCH_DTYPE(predictions.dtype(), T, return compute_loss_t<T>(predictions, targets, loss, s));
-  }
-
-  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
-                             stream s) override {
-    if (predictions.device() != targets.device() || predictions.device() != gradient.device()) {
-      throw std::runtime_error(
-          "Predictions, targets, and gradient must be on the same device for HuberLoss.");
-    }
-    DISPATCH_DTYPE(predictions.dtype(), T,
-                   return compute_gradient_t<T>(predictions, targets, gradient, s));
-  }
-
-  template <typename T>
-  void compute_loss_t(const Tensor &predictions, const Tensor &targets, float &loss, stream s) {
     auto &device = predictions.device();
     size_t batch_size = predictions.shape()[0];
     size_t output_size = 1;
@@ -407,23 +358,26 @@ private:
     }
 
     if (predictions.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, s, cpu::loss::compute_huber_loss<T>, predictions.data_as<T>(),
-                             targets.data_as<T>(), loss, batch_size, output_size,
-                             static_cast<T>(delta_));
+      return create_cpu_task(device, s, cpu::loss::compute_huber_loss, predictions.dtype(),
+                             predictions.data_as(), targets.data_as(), loss, batch_size,
+                             output_size, delta_);
     }
 #ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, s, cuda::loss::compute_huber_loss<T>,
-                              predictions.data_as<T>(), targets.data_as<T>(), loss, batch_size,
-                              output_size, static_cast<T>(delta_));
+      return create_cuda_task(device, s, cuda::loss::compute_huber_loss, predictions.dtype(),
+                              predictions.data_as(), targets.data_as(), loss, batch_size,
+                              output_size, delta_);
     }
 #endif
     throw std::runtime_error("Unsupported device type for HuberLoss.");
   }
 
-  template <typename T>
-  void compute_gradient_t(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
-                          stream s) {
+  void compute_gradient_impl(const Tensor &predictions, const Tensor &targets, Tensor &gradient,
+                             stream s) override {
+    if (predictions.device() != targets.device() || predictions.device() != gradient.device()) {
+      throw std::runtime_error(
+          "Predictions, targets, and gradient must be on the same device for HuberLoss.");
+    }
     auto &device = predictions.device();
     gradient = Tensor(predictions.shape(), predictions.dtype(), predictions.device());
     size_t batch_size = predictions.shape()[0];
@@ -433,15 +387,15 @@ private:
     }
 
     if (predictions.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, s, cpu::loss::compute_huber_gradient<T>,
-                             predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
-                             batch_size, output_size, static_cast<T>(delta_));
+      return create_cpu_task(device, s, cpu::loss::compute_huber_gradient, predictions.dtype(),
+                             predictions.data_as(), targets.data_as(), gradient.data_as(),
+                             batch_size, output_size, delta_);
     }
 #ifdef TUNX_USE_CUDA
     else if (predictions.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, s, cuda::loss::compute_huber_gradient<T>,
-                              predictions.data_as<T>(), targets.data_as<T>(), gradient.data_as<T>(),
-                              batch_size, output_size, static_cast<T>(delta_));
+      return create_cuda_task(device, s, cuda::loss::compute_huber_gradient, predictions.dtype(),
+                              predictions.data_as(), targets.data_as(), gradient.data_as(),
+                              batch_size, output_size, delta_);
     }
 #endif
     throw std::runtime_error("Unsupported device type for HuberLoss.");
@@ -451,11 +405,11 @@ private:
 class LossFactory {
 public:
   static std::unique_ptr<Loss> create(const std::string &loss_type) {
-    if (loss_type == "crossentropy" || loss_type == "ce") {
+    if (loss_type == "cross_entropy" || loss_type == "ce") {
       return std::make_unique<CrossEntropyLoss>(true);  // Default to logits
     }
-    // Backward compatibility: logsoftmax_crossentropy -> CrossEntropyLoss with use_logits=true
-    if (loss_type == "logsoftmax_crossentropy" || loss_type == "logsoftmax_ce") {
+    // Backward compatibility: logsoftmax_cross_entropy -> CrossEntropyLoss with use_logits=true
+    if (loss_type == "logsoftmax_cross_entropy" || loss_type == "logsoftmax_ce") {
       return std::make_unique<CrossEntropyLoss>(true);
     }
     if (loss_type == "mse" || loss_type == "mean_squared_error") {
@@ -471,13 +425,13 @@ public:
   }
 
   static std::unique_ptr<Loss> create_from_config(const LossConfig &config) {
-    if (config.type == "crossentropy" || config.type == "ce") {
+    if (config.type == "cross_entropy" || config.type == "ce") {
       bool use_logits = config.get<bool>("use_logits", true);
       double epsilon = config.get<double>("epsilon", 1e-15);
       return std::make_unique<CrossEntropyLoss>(use_logits, epsilon);
     }
-    // Backward compatibility: logsoftmax_crossentropy -> CrossEntropyLoss with use_logits=true
-    if (config.type == "logsoftmax_crossentropy" || config.type == "logsoftmax_ce") {
+    // Backward compatibility: logsoftmax_cross_entropy -> CrossEntropyLoss with use_logits=true
+    if (config.type == "logsoftmax_cross_entropy" || config.type == "logsoftmax_ce") {
       return std::make_unique<CrossEntropyLoss>(true);
     }
     if (config.type == "mse" || config.type == "mean_squared_error") {
@@ -493,7 +447,8 @@ public:
     throw std::invalid_argument("Unknown loss type: " + config.type);
   }
 
-  static std::unique_ptr<Loss> create_crossentropy(bool use_logits = true, double epsilon = 1e-15) {
+  static std::unique_ptr<Loss> create_cross_entropy(bool use_logits = true,
+                                                    double epsilon = 1e-15) {
     return std::make_unique<CrossEntropyLoss>(use_logits, epsilon);
   }
 

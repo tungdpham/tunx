@@ -108,7 +108,7 @@ signed main() {
 
   Tensor data, labels;
 
-  auto criterion = LossFactory::create_crossentropy(true, 1e-15);
+  auto criterion = LossFactory::create_cross_entropy(true, 1e-15);
   auto optimizer = OptimizerFactory::create_adam(0.01f, 0.9f, 0.999f);
 
   optimizer->attach(graph);

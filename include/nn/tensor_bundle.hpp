@@ -36,6 +36,7 @@ public:
   const Tensor &operator[](const std::string &name) const { return inputs_.at(name); }
 
   void set(const std::string &name, const Tensor &tensor) { inputs_[name] = tensor; }
+  Tensor &get(const std::string &name) { return inputs_.at(name); }
   const Tensor &get(const std::string &name) const { return inputs_.at(name); }
   bool contains(const std::string &name) const { return inputs_.count(name) > 0; }
   size_t size() const { return inputs_.size(); }

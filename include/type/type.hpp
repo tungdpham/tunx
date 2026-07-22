@@ -62,8 +62,8 @@ template <>
 struct TypeTraits<int8> {
   static constexpr const char *name = "int8";
   static const float epsilon;
-  using ComputePrecision = int8;
-  using HigherPrecision = int32;
+  using ComputePrecision = fp32;
+  using HigherPrecision = fp32;
 };
 
 template <>

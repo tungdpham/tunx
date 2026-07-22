@@ -237,37 +237,40 @@ TEST_F(GraphPlannerStateTest, BackwardAccumulatesGradientsAcrossFanOut) {
   auto &allocator = PoolAllocator::instance(device_, stream_);
 
   Graph graph;
-  Node input = graph.make_node("input");
-  graph.set_input(input);
+  {
+    Node input = graph.make_node("input");
+    graph.set_input(input);
 
-  auto left_dense = Dense(1, 1, false, "left_dense");
-  auto right_dense = Dense(1, 1, false, "right_dense");
+    auto left_dense = Dense(1, 1, false, "left_dense");
+    auto right_dense = Dense(1, 1, false, "right_dense");
 
-  Node left = left_dense(input);
-  left->set_uid("left");
-  Node right = right_dense(input);
-  right->set_uid("right");
-  Node output = Add("merge")(left, right);
-  output->set_uid("output");
-  graph.set_output(output);
-  graph.compile(allocator);
-
-  fill(left_dense.params()[0].data(), 2.0f);
-  fill(right_dense.params()[0].data(), 3.0f);
+    Node left = left_dense(input);
+    left->set_uid("left");
+    Node right = right_dense(input);
+    right->set_uid("right");
+    Node output = Add("merge")(left, right);
+    output->set_uid("output");
+    graph.set_output(output);
+    graph.compile(allocator);
+    fill(left_dense.params()[0].data(), 2.0f);
+    fill(right_dense.params()[0].data(), 3.0f);
+  }
 
   Tensor input_tensor = Tensor({1, 1}, DType_t::FP32, getHost());
   fill(input_tensor, 1.0f);
   TensorBundle inputs{{"input", input_tensor}};
 
   TensorBundle outputs = graph.forward(inputs);
-  EXPECT_NEAR(outputs.get("output").data_as<float>()[0], 5.0f, 1e-5f);
+  Tensor output = outputs.get("output");
+  EXPECT_NEAR(output.data_as<float>()[0], 5.0f, 1e-5f);
 
   Tensor grad_output = Tensor({1, 1}, DType_t::FP32, getHost());
   fill(grad_output, 1.0f);
   TensorBundle output_grads{{"output", grad_output}};
 
   TensorBundle grad_inputs = graph.backward(output_grads);
-  EXPECT_NEAR(grad_inputs.get("input").data_as<float>()[0], 5.0f, 1e-5f);
+  Tensor grad_input = grad_inputs.get("input");
+  EXPECT_NEAR(grad_input.data_as<float>()[0], 5.0f, 1e-5f);
 }
 
 TEST_F(GraphPlannerStateTest, BackwardClearsAccumulatedGradientsBetweenPasses) {

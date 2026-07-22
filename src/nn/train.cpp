@@ -89,7 +89,7 @@ static void parse_scheduler_json(const nlohmann::json &j, SchedulerConfig &cfg) 
 }
 
 static void parse_loss_json(const nlohmann::json &j, LossConfig &cfg) {
-  cfg.type = j.value("type", cfg.type.empty() ? "logsoftmax_crossentropy" : cfg.type);
+  cfg.type = j.value("type", cfg.type.empty() ? "logsoftmax_cross_entropy" : cfg.type);
   for (auto &[k, v] : j.items()) {
     if (k == "type" || k == "name") continue;
     if (v.is_boolean())

@@ -55,7 +55,7 @@ signed main(int argc, char *argv[]) {
 
   Graph graph = load_or_create_graph(train_config.model_name, train_config.model_path, allocator);
 
-  auto criterion = LossFactory::create_crossentropy();
+  auto criterion = LossFactory::create_cross_entropy();
 
   try {
     auto res = validate_model(graph, val_dataset, criterion, train_config);
