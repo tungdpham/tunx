@@ -8,7 +8,7 @@
 
 #include <stdexcept>
 
-#include "ops/ops.hpp"
+#include "kernel/kernel.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -43,7 +43,7 @@ Vec<Tensor> DivImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residual
     residuals["b"] = b;
   }
 
-  DISPATCH_DTYPE(a.dtype(), T, { ops::div<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n); });
+  kernel::div(a.dtype(), a.data_ptr(), b.data_ptr(), output.data_ptr(), n);
 
   return {output};
 }
@@ -62,24 +62,23 @@ Vec<Tensor> DivImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &r
   Tensor grad_a = make_tensor(grad_out.shape(), this->io_dtype_);
   Tensor grad_b = make_tensor(grad_out.shape(), this->io_dtype_);
 
-  DISPATCH_DTYPE(grad_out.dtype(), T, {
-    // grad_a = grad_out / b
-    ops::div<T>(grad_out.data_ptr(), b.data_ptr(), grad_a.data_ptr(), n,
-                engine_handle_.get_stream());
+  // grad_a = grad_out / b
+  kernel::div(grad_out.dtype(), grad_out.data_ptr(), b.data_ptr(), grad_a.data_ptr(), n,
+              engine_handle_.get_stream());
 
-    Tensor b_sq = make_tensor(grad_out.shape(), this->io_dtype_);
-    ops::mul<T>(b.data_ptr(), b.data_ptr(), b_sq.data_ptr(), n, engine_handle_.get_stream());
+  Tensor b_sq = make_tensor(grad_out.shape(), this->io_dtype_);
+  kernel::mul(b.dtype(), b.data_ptr(), b.data_ptr(), b_sq.data_ptr(), n,
+              engine_handle_.get_stream());
 
-    Tensor numerator = make_tensor(grad_out.shape(), this->io_dtype_);
-    ops::mul<T>(grad_out.data_ptr(), a.data_ptr(), numerator.data_ptr(), n,
-                engine_handle_.get_stream());
+  Tensor numerator = make_tensor(grad_out.shape(), this->io_dtype_);
+  kernel::mul(grad_out.dtype(), grad_out.data_ptr(), a.data_ptr(), numerator.data_ptr(), n,
+              engine_handle_.get_stream());
 
-    ops::div<T>(numerator.data_ptr(), b_sq.data_ptr(), grad_b.data_ptr(), n,
-                engine_handle_.get_stream());
+  kernel::div(numerator.dtype(), numerator.data_ptr(), b_sq.data_ptr(), grad_b.data_ptr(), n,
+              engine_handle_.get_stream());
 
-    ops::mul_scalar<T>(grad_b.data_ptr(), static_cast<T>(-1), grad_b.data_ptr(), n,
-                       engine_handle_.get_stream());
-  });
+  kernel::mul_scalar(grad_b.dtype(), grad_b.data_ptr(), -1, grad_b.data_ptr(), n,
+                     engine_handle_.get_stream());
 
   return {grad_a, grad_b};
 }

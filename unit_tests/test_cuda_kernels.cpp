@@ -5,7 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "ops/cuda/kernels.hpp"
+#include "kernel/cuda/kernels.hpp"
 #include "type/type.hpp"
 
 using namespace tunx;
@@ -60,7 +60,7 @@ TEST_F(CudaKernelsTest, AddTest) {
     host_expected[i] = host_a[i] + host_b[i];
   }
 
-  ops::cuda::add(dev_a, dev_b, dev_c, size, 0);
+  kernel::cuda::add(DType_t::FP32, dev_a, dev_b, dev_c, size, 0);
   CompareCudaWithCPU(host_expected);
 }
 
@@ -69,7 +69,7 @@ TEST_F(CudaKernelsTest, SubTest) {
     host_expected[i] = host_a[i] - host_b[i];
   }
 
-  ops::cuda::sub(dev_a, dev_b, dev_c, size, 0);
+  kernel::cuda::sub(DType_t::FP32, dev_a, dev_b, dev_c, size, 0);
   CompareCudaWithCPU(host_expected);
 }
 
@@ -78,7 +78,7 @@ TEST_F(CudaKernelsTest, MulTest) {
     host_expected[i] = host_a[i] * host_b[i];
   }
 
-  ops::cuda::mul(dev_a, dev_b, dev_c, size, 0);
+  kernel::cuda::mul(DType_t::FP32, dev_a, dev_b, dev_c, size, 0);
   CompareCudaWithCPU(host_expected);
 }
 
@@ -87,7 +87,7 @@ TEST_F(CudaKernelsTest, DivTest) {
     host_expected[i] = host_a[i] / host_b[i];
   }
 
-  ops::cuda::div(dev_a, dev_b, dev_c, size, 0);
+  kernel::cuda::div(DType_t::FP32, dev_a, dev_b, dev_c, size, 0);
   CompareCudaWithCPU(host_expected);
 }
 
@@ -98,7 +98,7 @@ TEST_F(CudaKernelsTest, AddScalarTest) {
     host_expected[i] = host_a[i] + scalar;
   }
 
-  ops::cuda::add_scalar(dev_a, scalar, dev_c, size, 0);
+  kernel::cuda::add_scalar(DType_t::FP32, dev_a, scalar, dev_c, size, 0);
   CompareCudaWithCPU(host_expected);
 }
 
@@ -110,7 +110,7 @@ TEST_F(CudaKernelsTest, SqrtTest) {
 
   cudaMemcpy(dev_a, host_a.data(), size * sizeof(float), cudaMemcpyHostToDevice);
 
-  ops::cuda::sqrt(dev_a, dev_c, size, 0);
+  kernel::cuda::sqrt(DType_t::FP32, dev_a, dev_c, size, 0);
   CompareCudaWithCPU(host_expected);
 }
 
@@ -119,7 +119,7 @@ TEST_F(CudaKernelsTest, MaxTest) {
     host_expected[i] = std::max(host_a[i], host_b[i]);
   }
 
-  ops::cuda::max(dev_a, dev_b, dev_c, size, 0);
+  kernel::cuda::max(DType_t::FP32, dev_a, dev_b, dev_c, size, 0);
   CompareCudaWithCPU(host_expected);
 }
 
@@ -129,7 +129,7 @@ TEST_F(CudaKernelsTest, SumReductionTest) {
     expected_sum += host_a[i];
   }
 
-  float result = ops::cuda::sum(dev_a, size, 0);
+  float result = kernel::cuda::sum(DType_t::FP32, dev_a, size, 0);
   EXPECT_NEAR(result, expected_sum, 1e-3f);
 }
 
@@ -139,7 +139,7 @@ TEST_F(CudaKernelsTest, DotProductTest) {
     expected_dot += host_a[i] * host_b[i];
   }
 
-  float result = ops::cuda::dot_product(dev_a, dev_b, size, 0);
+  float result = kernel::cuda::dot_product(DType_t::FP32, dev_a, dev_b, size, 0);
   EXPECT_NEAR(result, expected_dot, std::max(1e-3f, std::abs(expected_dot) * 1e-5f));
 }
 
@@ -151,7 +151,7 @@ TEST_F(CudaKernelsTest, BatchNormOperationsTest) {
     host_expected[i] = (host_a[i] - sub_scalar) * mul_scalar;
   }
 
-  ops::cuda::sub_mul_scalar(dev_a, sub_scalar, mul_scalar, dev_c, size, 0);
+  kernel::cuda::sub_mul_scalar(DType_t::FP32, dev_a, sub_scalar, mul_scalar, dev_c, size, 0);
   CompareCudaWithCPU(host_expected);
 }
 
@@ -195,7 +195,7 @@ TEST_F(CudaKernelsDoubleTest, AddDoubleTest) {
     expected[i] = host_a[i] + host_b[i];
   }
 
-  ops::cuda::add(dev_a, dev_b, dev_c, size, 0);
+  kernel::cuda::add(DType_t::FP64, dev_a, dev_b, dev_c, size, 0);
   cudaMemcpy(host_c.data(), dev_c, size * sizeof(double), cudaMemcpyDeviceToHost);
   cudaDeviceSynchronize();
 

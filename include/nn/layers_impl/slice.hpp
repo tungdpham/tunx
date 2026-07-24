@@ -19,17 +19,9 @@ namespace tunx {
 namespace internal {
 class SliceImpl : public SISOLayerImpl {
 private:
-  std::unordered_map<size_t, Vec<size_t>> micro_batch_original_shapes_;
   size_t axis_;
   size_t start_;
   size_t length_;
-
-  template <typename IO_T, typename Param_T, typename Compute_T>
-  void slice_forward(const Tensor &input, Tensor &output, stream handle) const;
-
-  template <typename IO_T, typename Param_T, typename Compute_T>
-  void slice_backward(const Tensor &grad_output, Tensor &grad_input,
-                      const Vec<size_t> &original_shape, stream handle) const;
 
   Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
   Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;

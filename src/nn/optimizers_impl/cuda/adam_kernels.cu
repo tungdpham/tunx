@@ -6,7 +6,7 @@
  */
 #include "cuda/error_handler.cuh"
 #include "nn/optimizers_impl/cuda/adam_kernels.hpp"
-#include "type/cuda/vectorized_types.hpp"
+#include "type/cuda/vectorized_types.cuh"
 #include "type/type.hpp"
 
 #ifdef TUNX_USE_CUDA

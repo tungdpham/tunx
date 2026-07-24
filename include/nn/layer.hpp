@@ -365,17 +365,4 @@ auto make_layer(Args &&...args) -> LayerRef<LayerType> {
   return LayerRef<LayerType>(std::make_shared<LayerType>(std::forward<Args>(args)...));
 }
 
-#define DISPATCH_IO_DTYPE(method_name, ...)                                \
-  do {                                                                     \
-    DISPATCH_DTYPE(this->io_dtype_, IO_T, method_name<IO_T>(__VA_ARGS__)); \
-  } while (0)
-
-#define DISPATCH_ON_3_DTYPES_TO_METHOD(method_name, ...)                                   \
-  do {                                                                                     \
-    DISPATCH_DTYPE(                                                                        \
-        this->io_dtype_, IO_T,                                                             \
-        DISPATCH_DTYPE(this->param_dtype_, PARAM_T,                                        \
-                       DISPATCH_DTYPE(this->compute_dtype_, COMP_T,                        \
-                                      method_name<IO_T, PARAM_T, COMP_T>(__VA_ARGS__);))); \
-  } while (0)
 }  // namespace tunx

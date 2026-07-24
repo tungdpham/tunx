@@ -61,22 +61,10 @@ function(detect_gpu_arch)
     endif()
 endfunction()
 
-# Allow manual override via command line: -DCUDA_ARCH=sm_86
-set(CUDA_ARCH_MAX "89" CACHE STRING "Maximum CUDA architecture number to target")
-
 if(NOT DEFINED CUDA_ARCH)
     detect_gpu_arch()
     set(CUDA_ARCH ${DETECTED_CUDA_ARCH})
     set(CUDA_ARCH_NUMBER ${DETECTED_CUDA_ARCH_NUMBER})
-    
-    # Apply maximum architecture limit if specified
-    if(DEFINED CUDA_ARCH_MAX)
-        if(CUDA_ARCH_NUMBER GREATER ${CUDA_ARCH_MAX})
-            message(STATUS "CUDA architecture ${CUDA_ARCH_NUMBER} exceeds maximum allowed (${CUDA_ARCH_MAX}). Limiting to sm_${CUDA_ARCH_MAX}")
-            set(CUDA_ARCH_NUMBER ${CUDA_ARCH_MAX})
-            set(CUDA_ARCH "sm_${CUDA_ARCH_MAX}")
-        endif()
-    endif()
 else()
     message(STATUS "Using manually specified CUDA architecture: ${CUDA_ARCH}")
     string(REPLACE "sm_" "" CUDA_ARCH_NUMBER ${CUDA_ARCH})

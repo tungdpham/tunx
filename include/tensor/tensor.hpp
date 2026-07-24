@@ -14,8 +14,7 @@
 #include "device/dptr.hpp"
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
-#include "device/task.hpp"
-#include "ops/ops.hpp"
+#include "kernel/kernel.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -142,7 +141,7 @@ public:
                   *allocator_);
   }
 
-  void copy_to(Tensor &dest, stream flow = nullptr) const {
+  void copy_to(Tensor &dest, stream s = nullptr) const {
     if (data_size_ != dest.data_size_) {
       throw std::invalid_argument("Tensor copy_to: Shape mismatch between source and destination");
     }
@@ -150,7 +149,7 @@ public:
       throw std::invalid_argument(
           "Tensor copy_to: Data type mismatch between source and destination");
     }
-    DISPATCH_ANY_DTYPE(dtype_, T, return ops::cd_copy<T>(data_, dest.data_, data_size_, nullptr));
+    kernel::cd_copy(dtype_, data_, dest.data_, data_size_, s);
   }
 
   Tensor to_device(Device &target_device) const {

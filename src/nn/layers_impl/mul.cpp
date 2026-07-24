@@ -8,7 +8,7 @@
 
 #include <stdexcept>
 
-#include "ops/ops.hpp"
+#include "kernel/kernel.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -43,9 +43,8 @@ Vec<Tensor> MulImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residual
     residuals["b"] = b;
   }
 
-  DISPATCH_DTYPE(a.dtype(), T, {
-    ops::mul<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n, engine_handle_.get_stream());
-  });
+  kernel::mul(a.dtype(), a.data_ptr(), b.data_ptr(), output.data_ptr(), n,
+              engine_handle_.get_stream());
 
   return {output};
 }
@@ -64,9 +63,9 @@ Vec<Tensor> MulImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &r
   Tensor grad_b = make_tensor(grad_out.shape(), this->io_dtype_);
 
   DISPATCH_DTYPE(grad_out.dtype(), T, {
-    ops::mul<T>(grad_out.data_ptr(), b.data_ptr(), grad_a.data_ptr(), n,
+    kernel::mul(dtype_of<T>(), grad_out.data_ptr(), b.data_ptr(), grad_a.data_ptr(), n,
                 engine_handle_.get_stream());
-    ops::mul<T>(grad_out.data_ptr(), a.data_ptr(), grad_b.data_ptr(), n,
+    kernel::mul(dtype_of<T>(), grad_out.data_ptr(), a.data_ptr(), grad_b.data_ptr(), n,
                 engine_handle_.get_stream());
   });
 

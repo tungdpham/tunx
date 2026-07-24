@@ -8,7 +8,7 @@
 #include "cpu/tensor_ops.hpp"
 #include "device/stream.hpp"
 #include "device/task.hpp"
-#include "ops/ops.hpp"
+#include "kernel/kernel.hpp"
 #include "type/type.hpp"
 #ifdef TUNX_USE_CUDA
 #include "cuda/tensor_ops.hpp"
@@ -67,17 +67,13 @@ inline void load(Tensor &tensor, std::istream &in) {
 }
 
 inline void fill(Tensor &tensor, double value, stream stream = nullptr) {
-  DISPATCH_ANY_DTYPE(
-      tensor.dtype(), T,
-      ops::set_scalar<T>(tensor.data_ptr(), static_cast<T>(value), tensor.size(), stream));
+  kernel::set_scalar(tensor.dtype(), tensor.data_ptr(), value, tensor.size(), stream);
 }
 
 inline void fill_normal(Tensor &tensor, double mean, double stddev, unsigned long long seed,
                         stream stream = nullptr) {
-  DISPATCH_ANY_DTYPE(
-      tensor.dtype(), T,
-      ops::fill_random_normal<T>(tensor.data_ptr(), tensor.size(), static_cast<T>(mean),
-                                 static_cast<T>(stddev), seed, stream));
+  kernel::fill_random_normal(tensor.dtype(), tensor.data_ptr(), tensor.size(), mean, stddev, seed,
+                             stream);
 }
 
 inline void fill_normal(Tensor &tensor, double mean, double stddev, stream stream = nullptr) {
@@ -85,18 +81,14 @@ inline void fill_normal(Tensor &tensor, double mean, double stddev, stream strea
       std::chrono::high_resolution_clock::now().time_since_epoch().count() ^
       reinterpret_cast<uintptr_t>(tensor.data_as<void>()));
 
-  DISPATCH_ANY_DTYPE(
-      tensor.dtype(), T,
-      ops::fill_random_normal<T>(tensor.data_ptr(), tensor.size(), static_cast<T>(mean),
-                                 static_cast<T>(stddev), seed, stream));
+  kernel::fill_random_normal(tensor.dtype(), tensor.data_ptr(), tensor.size(), mean, stddev, seed,
+                             stream);
 }
 
 inline void fill_uniform(Tensor &tensor, double low, double high, unsigned long long seed,
                          stream stream = nullptr) {
-  DISPATCH_ANY_DTYPE(
-      tensor.dtype(), T,
-      ops::fill_random_uniform<T>(tensor.data_ptr(), tensor.size(), static_cast<T>(low),
-                                  static_cast<T>(high), seed, stream));
+  kernel::fill_random_uniform(tensor.dtype(), tensor.data_ptr(), tensor.size(), low, high, seed,
+                              stream);
 }
 
 inline void fill_uniform(Tensor &tensor, double low, double high, stream stream = nullptr) {
@@ -104,10 +96,8 @@ inline void fill_uniform(Tensor &tensor, double low, double high, stream stream 
       std::chrono::high_resolution_clock::now().time_since_epoch().count() ^
       reinterpret_cast<uintptr_t>(tensor.data_as<void>()));
 
-  DISPATCH_ANY_DTYPE(
-      tensor.dtype(), T,
-      ops::fill_random_uniform<T>(tensor.data_ptr(), tensor.size(), static_cast<T>(low),
-                                  static_cast<T>(high), seed, stream));
+  kernel::fill_random_uniform(tensor.dtype(), tensor.data_ptr(), tensor.size(), low, high, seed,
+                              stream);
 }
 
 inline void im2col(const Tensor &input, Tensor &col_data, size_t kernel_h, size_t kernel_w,
@@ -140,25 +130,21 @@ inline void im2col(const Tensor &input, Tensor &col_data, size_t kernel_h, size_
   size_t output_h = (padded_h - kernel_h) / stride_h + 1;
   size_t output_w = (padded_w - kernel_w) / stride_w + 1;
 
-  auto im2col_t_func = [&](auto type_dummy) -> void {
-    using T = decltype(type_dummy);
-    if (input.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_im2col<T>, input.data_as<T>(),
-                             col_data.data_as<T>(), batch_size, channels, height, width, kernel_h,
-                             kernel_w, stride_h, stride_w, pad_h, pad_w, output_h, output_w);
-    }
+  if (input.device_type() == DeviceType::CPU) {
+    return create_cpu_task(device, stream, tunx::cpu::im2col, dtype, input.data_as(),
+                           col_data.data_as(), batch_size, channels, height, width, kernel_h,
+                           kernel_w, stride_h, stride_w, pad_h, pad_w, output_h, output_w);
+  }
 #ifdef TUNX_USE_CUDA
-    else if (input.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_im2col<T>, input.data_as<T>(),
-                              col_data.data_as<T>(), batch_size, channels, height, width, kernel_h,
-                              kernel_w, stride_h, stride_w, pad_h, pad_w, output_h, output_w);
-    }
+  else if (input.device_type() == DeviceType::CUDA) {
+    return create_cuda_task(device, stream, tunx::cuda::im2col, dtype, input.data_as(),
+                            col_data.data_as(), batch_size, channels, height, width, kernel_h,
+                            kernel_w, stride_h, stride_w, pad_h, pad_w, output_h, output_w);
+  }
 #endif
-    else {
-      throw std::runtime_error("im2col: Unsupported device type");
-    }
-  };
-  DISPATCH_ANY_DTYPE(dtype, T, return im2col_t_func(T{}));
+  else {
+    throw std::runtime_error("im2col: Unsupported device type");
+  }
 }
 
 inline void col2im(const Tensor &col_data, Tensor &result_data, size_t batch_size, size_t channels,
@@ -178,30 +164,23 @@ inline void col2im(const Tensor &col_data, Tensor &result_data, size_t batch_siz
   size_t output_h = (padded_h - kernel_h) / stride_h + 1;
   size_t output_w = (padded_w - kernel_w) / stride_w + 1;
 
-  auto col2im_func = [&](auto type_dummy) -> void {
-    using T = decltype(type_dummy);
-    const T *col_data_ptr = col_data.data_as<T>();
-    T *result_data_ptr = result_data.data_as<T>();
-
-    auto &device = col_data.device();
-    if (col_data.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_col2im<T>, col_data_ptr,
-                             result_data_ptr, batch_size, channels, height, width, kernel_h,
-                             kernel_w, stride_h, stride_w, pad_h, pad_w, output_h, output_w);
-    }
+  auto &device = col_data.device();
+  if (col_data.device_type() == DeviceType::CPU) {
+    return create_cpu_task(device, stream, tunx::cpu::col2im, dtype, col_data.data_as<void>(),
+                           result_data.data_as<void>(), batch_size, channels, height, width,
+                           kernel_h, kernel_w, stride_h, stride_w, pad_h, pad_w, output_h,
+                           output_w);
+  }
 #ifdef TUNX_USE_CUDA
-    else if (col_data.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_col2im<T>, col_data_ptr,
-                              result_data_ptr, batch_size, channels, height, width, kernel_h,
-                              kernel_w, stride_h, stride_w, pad_h, pad_w, output_h, output_w);
-    }
+  else if (col_data.device_type() == DeviceType::CUDA) {
+    return create_cuda_task(device, stream, tunx::cuda::col2im, dtype, col_data.data_as(),
+                            result_data.data_as(), batch_size, channels, height, width, kernel_h,
+                            kernel_w, stride_h, stride_w, pad_h, pad_w, output_h, output_w);
+  }
 #endif
-    else {
-      throw std::runtime_error("col2im: Unsupported device type");
-    }
-  };
-
-  DISPATCH_ANY_DTYPE(dtype, T, return col2im_func(T{}));
+  else {
+    throw std::runtime_error("col2im: Unsupported device type");
+  }
 }
 
 inline void pad(const Tensor &input, Tensor &result, size_t pad_h, size_t pad_w, double value = 0.0,
@@ -225,28 +204,21 @@ inline void pad(const Tensor &input, Tensor &result, size_t pad_h, size_t pad_w,
   size_t height = shape[2];
   size_t width = shape[3];
 
-  auto pad_func = [&](auto type_dummy) -> void {
-    using T = decltype(type_dummy);
-    const T *input_data = input.data_as<T>();
-    T *result_data = result.data_as<T>();
-
-    auto &device = input.device();
-    if (input.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_pad<T>, input_data, result_data,
-                             batch_size, channels, height, width, pad_h, pad_w, value);
-    }
+  auto &device = input.device();
+  if (input.device_type() == DeviceType::CPU) {
+    return create_cpu_task(device, stream, tunx::cpu::pad, dtype, input.data_as(), result.data_as(),
+                           batch_size, channels, height, width, pad_h, pad_w, value);
+  }
 #ifdef TUNX_USE_CUDA
-    else if (input.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_pad<T>, input_data, result_data,
-                              batch_size, channels, height, width, pad_h, pad_w, value);
-    }
+  else if (input.device_type() == DeviceType::CUDA) {
+    return create_cuda_task(device, stream, tunx::cuda::pad, dtype, input.data_as(),
+                            result.data_as(), batch_size, channels, height, width, pad_h, pad_w,
+                            value);
+  }
 #endif
-    else {
-      throw std::runtime_error("pad: Unsupported device type");
-    }
-  };
-
-  DISPATCH_ANY_DTYPE(dtype, T, return pad_func(T{}));
+  else {
+    throw std::runtime_error("pad: Unsupported device type");
+  }
 }
 
 inline void unpad(const Tensor &input, Tensor &result, size_t pad_h, size_t pad_w,
@@ -277,28 +249,20 @@ inline void unpad(const Tensor &input, Tensor &result, size_t pad_h, size_t pad_
   size_t height = padded_height - 2 * pad_h;
   size_t width = padded_width - 2 * pad_w;
 
-  auto unpad_func = [&](auto type_dummy) -> void {
-    using T = decltype(type_dummy);
-    const T *input_data = input.data_as<T>();
-    T *result_data = result.data_as<T>();
-
-    auto &device = input.device();
-    if (input.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_unpad<T>, input_data, result_data,
-                             batch_size, channels, height, width, pad_h, pad_w);
-    }
+  auto &device = input.device();
+  if (input.device_type() == DeviceType::CPU) {
+    return create_cpu_task(device, stream, tunx::cpu::unpad, dtype, input.data_as(),
+                           result.data_as(), batch_size, channels, height, width, pad_h, pad_w);
+  }
 #ifdef TUNX_USE_CUDA
-    else if (input.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_unpad<T>, input_data, result_data,
-                              batch_size, channels, height, width, pad_h, pad_w);
-    }
+  else if (input.device_type() == DeviceType::CUDA) {
+    return create_cuda_task(device, stream, tunx::cuda::unpad, dtype, input.data_as(),
+                            result.data_as(), batch_size, channels, height, width, pad_h, pad_w);
+  }
 #endif
-    else {
-      throw std::runtime_error("unpad: Unsupported device type");
-    }
-  };
-
-  DISPATCH_ANY_DTYPE(dtype, T, return unpad_func(T{}));
+  else {
+    throw std::runtime_error("unpad: Unsupported device type");
+  }
 }
 
 inline void crop(const Tensor &input, Tensor &result, size_t start_h, size_t start_w, size_t end_h,
@@ -329,30 +293,22 @@ inline void crop(const Tensor &input, Tensor &result, size_t start_h, size_t sta
   size_t new_height = end_h - start_h + 1;
   size_t new_width = end_w - start_w + 1;
 
-  auto crop_func = [&](auto type_dummy) -> void {
-    using T = decltype(type_dummy);
-    const T *input_data = input.data_as<T>();
-    T *result_data = result.data_as<T>();
-
-    auto &device = input.device();
-    if (input.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_crop<T>, input_data, result_data,
-                             batch_size, channels, height, width, start_h, start_w, new_height,
-                             new_width);
-    }
+  auto &device = input.device();
+  if (input.device_type() == DeviceType::CPU) {
+    return create_cpu_task(device, stream, tunx::cpu::crop, dtype, input.data_as(),
+                           result.data_as(), batch_size, channels, height, width, start_h, start_w,
+                           new_height, new_width);
+  }
 #ifdef TUNX_USE_CUDA
-    else if (input.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_crop<T>, input_data, result_data,
-                              batch_size, channels, height, width, start_h, start_w, new_height,
-                              new_width);
-    }
+  else if (input.device_type() == DeviceType::CUDA) {
+    return create_cuda_task(device, stream, tunx::cuda::crop, dtype, input.data_as(),
+                            result.data_as(), batch_size, channels, height, width, start_h, start_w,
+                            new_height, new_width);
+  }
 #endif
-    else {
-      throw std::runtime_error("crop: Unsupported device type");
-    }
-  };
-
-  DISPATCH_ANY_DTYPE(dtype, T, return crop_func(T{}));
+  else {
+    throw std::runtime_error("crop: Unsupported device type");
+  }
 }
 
 inline void slice_batch(const Tensor &input, Tensor &result, size_t start_batch, size_t end_batch,
@@ -384,28 +340,24 @@ inline void slice_batch(const Tensor &input, Tensor &result, size_t start_batch,
   size_t copy_size = (end_batch - start_batch) * batch_stride;
   DType_t dtype = input.dtype();
 
-  auto slice_batch_func = [&](auto type_dummy) -> void {
-    using T = decltype(type_dummy);
-    const T *input_data = input.data_as<T>();
-    T *result_data = result.data_as<T>();
-
-    auto &device = input.device();
-    if (input.device_type() == DeviceType::CPU) {
-      return create_cpu_task(device, stream, ops::cpu::copy<T>,
-                             &input_data[start_batch * batch_stride], result_data, copy_size);
-    }
+  auto &device = input.device();
+  if (input.device_type() == DeviceType::CPU) {
+    return create_cpu_task(
+        device, stream, kernel::cpu::copy, dtype,
+        input.data_as<char>() + start_batch * batch_stride * get_dtype_size(dtype),
+        result.data_as(), copy_size);
+  }
 #ifdef TUNX_USE_CUDA
-    else if (input.device_type() == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, ops::cuda::copy<T>,
-                              &input_data[start_batch * batch_stride], result_data, copy_size);
-    }
+  else if (input.device_type() == DeviceType::CUDA) {
+    return create_cuda_task(
+        device, stream, kernel::cuda::copy, dtype,
+        input.data_as<char>() + start_batch * batch_stride * get_dtype_size(dtype),
+        result.data_as(), copy_size);
+  }
 #endif
-    else {
-      throw std::runtime_error("slice_batch: Unsupported device type");
-    }
-  };
-
-  DISPATCH_ANY_DTYPE(dtype, T, return slice_batch_func(T{}));
+  else {
+    throw std::runtime_error("slice_batch: Unsupported device type");
+  }
 }
 
 inline void split(const Tensor &input, Vec<Tensor> &results, size_t num_splits,
@@ -419,50 +371,44 @@ inline void split(const Tensor &input, Vec<Tensor> &results, size_t num_splits,
 
   DType_t dtype = input.dtype();
 
-  auto split_func = [&](auto type_dummy) -> void {
-    using T = decltype(type_dummy);
+  results.clear();
+  results.reserve(num_splits);
+  size_t split_size = batch_size / num_splits;
 
-    results.clear();
-    results.reserve(num_splits);
-    size_t split_size = batch_size / num_splits;
+  size_t batch_stride = 1;
+  for (size_t j = 1; j < shape.size(); ++j) {
+    batch_stride *= shape[j];
+  }
 
-    size_t batch_stride = 1;
-    for (size_t j = 1; j < shape.size(); ++j) {
-      batch_stride *= shape[j];
+  for (size_t i = 0; i < num_splits; ++i) {
+    size_t start = i * split_size;
+    size_t end = (i == num_splits - 1) ? batch_size : start + split_size;
+
+    Vec<size_t> split_shape = shape;
+    split_shape[0] = end - start;
+
+    Tensor split_tensor = Tensor(split_shape, input.dtype(), input.allocator());
+
+    size_t copy_size = (end - start) * batch_stride;
+
+    auto &device = input.device();
+    if (input.device_type() == DeviceType::CPU) {
+      create_cpu_task(device, stream, kernel::cpu::copy, dtype,
+                      input.data_as<char>() + start * batch_stride * get_dtype_size(dtype),
+                      split_tensor.data_as(), copy_size);
     }
-
-    for (size_t i = 0; i < num_splits; ++i) {
-      size_t start = i * split_size;
-      size_t end = (i == num_splits - 1) ? batch_size : start + split_size;
-
-      Vec<size_t> split_shape = shape;
-      split_shape[0] = end - start;
-
-      Tensor split_tensor = Tensor(split_shape, input.dtype(), input.allocator());
-
-      const T *input_data = input.data_as<T>();
-      T *result_data = split_tensor.data_as<T>();
-      size_t copy_size = (end - start) * batch_stride;
-
-      auto &device = input.device();
-      if (input.device_type() == DeviceType::CPU) {
-        create_cpu_task(device, stream, ops::cpu::copy<T>, &input_data[start * batch_stride],
-                        result_data, copy_size);
-      }
 #ifdef TUNX_USE_CUDA
-      else if (input.device_type() == DeviceType::CUDA) {
-        create_cuda_task(device, stream, ops::cuda::copy<T>, &input_data[start * batch_stride],
-                         result_data, copy_size);
-      }
-#endif
-      else {
-        throw std::runtime_error("split: Unsupported device type");
-      }
-      results.push_back(split_tensor);
+    else if (input.device_type() == DeviceType::CUDA) {
+      create_cuda_task(device, stream, kernel::cuda::copy, dtype,
+                       input.data_as<char>() + start * batch_stride * get_dtype_size(dtype),
+                       split_tensor.data_as(), copy_size);
     }
-  };
-
-  DISPATCH_ANY_DTYPE(dtype, T, return split_func(T{}));
+#endif
+    else {
+      throw std::runtime_error("split: Unsupported device type");
+    }
+    results.push_back(split_tensor);
+  }
 }
 
 inline void transpose_2d(const Tensor &input, Tensor &output, size_t rows, size_t cols,
@@ -477,30 +423,22 @@ inline void transpose_2d(const Tensor &input, Tensor &output, size_t rows, size_
 
   DType_t dtype = input.dtype();
 
-  auto transpose_2d_func = [&](auto type_dummy) -> void {
-    using T = decltype(type_dummy);
-    const T *input_data = input.data_as<T>();
-    T *output_data = output.data_as<T>();
+  auto &device = input.device();
+  auto device_type = device.device_type();
 
-    auto &device = input.device();
-    auto device_type = device.device_type();
-
-    if (device_type == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_transpose_2d<T>, input_data,
-                             output_data, rows, cols);
-    }
+  if (device_type == DeviceType::CPU) {
+    return create_cpu_task(device, stream, tunx::cpu::transpose_2d, dtype, input.data_as(),
+                           output.data_as(), rows, cols);
+  }
 #ifdef TUNX_USE_CUDA
-    else if (device_type == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_transpose_2d<T>, input_data,
-                              output_data, rows, cols);
-    }
+  else if (device_type == DeviceType::CUDA) {
+    return create_cuda_task(device, stream, tunx::cuda::transpose_2d, dtype, input.data_as(),
+                            output.data_as(), rows, cols);
+  }
 #endif
-    else {
-      throw std::runtime_error("transpose_2d: Unsupported device type");
-    }
-  };
-
-  DISPATCH_ANY_DTYPE(dtype, T, return transpose_2d_func(T{}));
+  else {
+    throw std::runtime_error("transpose_2d: Unsupported device type");
+  }
 }
 
 inline void nchw_to_cnhw(const Tensor &input, Tensor &output, size_t n, size_t c, size_t h,
@@ -515,30 +453,22 @@ inline void nchw_to_cnhw(const Tensor &input, Tensor &output, size_t n, size_t c
 
   DType_t dtype = input.dtype();
 
-  auto nchw_to_cnhw_func = [&](auto type_dummy) -> void {
-    using T = decltype(type_dummy);
-    const T *input_data = input.data_as<T>();
-    T *output_data = output.data_as<T>();
+  auto &device = input.device();
+  auto device_type = device.device_type();
 
-    auto &device = input.device();
-    auto device_type = device.device_type();
-
-    if (device_type == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_nchw_to_cnhw<T>, input_data,
-                             output_data, n, c, h, w);
-    }
+  if (device_type == DeviceType::CPU) {
+    return create_cpu_task(device, stream, tunx::cpu::nchw_to_cnhw, dtype, input.data_as(),
+                           output.data_as(), n, c, h, w);
+  }
 #ifdef TUNX_USE_CUDA
-    else if (device_type == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_nchw_to_cnhw<T>, input_data,
-                              output_data, n, c, h, w);
-    }
+  else if (device_type == DeviceType::CUDA) {
+    return create_cuda_task(device, stream, tunx::cuda::nchw_to_cnhw, dtype, input.data_as(),
+                            output.data_as(), n, c, h, w);
+  }
 #endif
-    else {
-      throw std::runtime_error("nchw_to_cnhw: Unsupported device type");
-    }
-  };
-
-  DISPATCH_ANY_DTYPE(dtype, T, return nchw_to_cnhw_func(T{}));
+  else {
+    throw std::runtime_error("nchw_to_cnhw: Unsupported device type");
+  }
 }
 
 inline void cnhw_to_nchw(const Tensor &input, Tensor &output, size_t n, size_t c, size_t h,
@@ -553,30 +483,22 @@ inline void cnhw_to_nchw(const Tensor &input, Tensor &output, size_t n, size_t c
 
   DType_t dtype = input.dtype();
 
-  auto cnhw_to_nchw_func = [&](auto type_dummy) -> void {
-    using T = decltype(type_dummy);
-    const T *input_data = input.data_as<T>();
-    T *output_data = output.data_as<T>();
+  auto &device = input.device();
+  auto device_type = device.device_type();
 
-    auto &device = input.device();
-    auto device_type = device.device_type();
-
-    if (device_type == DeviceType::CPU) {
-      return create_cpu_task(device, stream, tunx::cpu::cpu_cnhw_to_nchw<T>, input_data,
-                             output_data, n, c, h, w);
-    }
+  if (device_type == DeviceType::CPU) {
+    return create_cpu_task(device, stream, tunx::cpu::cnhw_to_nchw, dtype, input.data_as(),
+                           output.data_as(), n, c, h, w);
+  }
 #ifdef TUNX_USE_CUDA
-    else if (device_type == DeviceType::CUDA) {
-      return create_cuda_task(device, stream, tunx::cuda::cuda_cnhw_to_nchw<T>, input_data,
-                              output_data, n, c, h, w);
-    }
+  else if (device_type == DeviceType::CUDA) {
+    return create_cuda_task(device, stream, tunx::cuda::cnhw_to_nchw, dtype, input.data_as(),
+                            output.data_as(), n, c, h, w);
+  }
 #endif
-    else {
-      throw std::runtime_error("cnhw_to_nchw: Unsupported device type");
-    }
-  };
-
-  DISPATCH_ANY_DTYPE(dtype, T, return cnhw_to_nchw_func(T{}));
+  else {
+    throw std::runtime_error("cnhw_to_nchw: Unsupported device type");
+  }
 }
 
 inline void check_equals(const Tensor &t1, const Tensor &t2, bool &result, double eps = 1e-5,
@@ -595,8 +517,9 @@ inline void check_equals(const Tensor &t1, const Tensor &t2, bool &result, doubl
 
   DType_t dtype = t1.dtype();
 
-  DISPATCH_ANY_DTYPE(dtype, T,
-                     return ops::check_equals<T>(t1.data_ptr(), t2.data_ptr(), result, eps));
+  DISPATCH_ANY_DTYPE(
+      dtype, T,
+      return kernel::check_equals(dtype_of<T>(), t1.data_ptr(), t2.data_ptr(), result, eps));
 }
 
 inline void print_tensor(const Tensor &tensor, size_t num_elements_, std::string_view label) {

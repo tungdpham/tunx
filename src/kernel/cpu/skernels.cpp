@@ -1,4 +1,4 @@
-#include "ops/cpu/skernels.hpp"
+#include "kernel/cpu/skernels.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -12,7 +12,7 @@
 #endif
 
 namespace tunx {
-namespace ops {
+namespace kernel {
 namespace cpu {
 namespace fp {
 #ifdef __AVX2__
@@ -1491,5 +1491,5 @@ void fill_random_normal(float *data, size_t size, float mean, float stddev,
 
 }  // namespace fp
 }  // namespace cpu
-}  // namespace ops
+}  // namespace kernel
 }  // namespace tunx

@@ -8,7 +8,7 @@
 
 #include <stdexcept>
 
-#include "ops/ops.hpp"
+#include "kernel/kernel.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -37,8 +37,7 @@ Vec<Tensor> AddImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residual
 
   Tensor output = make_tensor(a.shape(), a.dtype());
   size_t n = a.size();
-  DISPATCH_DTYPE(a.dtype(), T, { ops::add<T>(a.data_ptr(), b.data_ptr(), output.data_ptr(), n); });
-
+  kernel::add(a.dtype(), a.data_ptr(), b.data_ptr(), output.data_ptr(), n);
   return {output};
 }
 

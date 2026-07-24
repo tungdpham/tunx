@@ -16,7 +16,8 @@
 #include "device/device.hpp"
 #include "device/dptr.hpp"
 #include "device/stream.hpp"
-#include "ops/ops.hpp"
+#include "kernel/kernel.hpp"
+#include "type/type.hpp"
 
 namespace tunx {
 class Sizer : public IArchiver<Sizer> {
@@ -39,11 +40,13 @@ class Writer : public IArchiver<Writer> {
 private:
   dptr buffer_;
   size_t offset_;
+  stream s_;
 
 public:
   Writer(dptr& buffer)
       : buffer_(buffer),
-        offset_(0) {}
+        offset_(0),
+        s_(nullptr) {}
 
   template <typename T>
   void archive_impl(const T* data, size_t count, Device& device) {
@@ -53,11 +56,15 @@ public:
                                            offset_, sizeof(T) * count, buffer_.capacity()));
     }
     const dptr src(const_cast<T*>(data), sizeof(T) * count, device);
-    ops::cd_copy<unsigned char>(src, buffer_ + offset_, sizeof(T) * count, nullptr);
+    kernel::cd_copy(DType_t::BYTE, src, buffer_ + offset_, sizeof(T) * count, s_);
     offset_ += sizeof(T) * count;
   }
 
   size_t bytes_written() const { return offset_; }
+
+  void set_stream(stream s) { s_ = s; }
+
+  stream get_stream() { return s_; }
 };
 
 // Reader - For deserialization
@@ -66,24 +73,28 @@ private:
   const dptr& buffer_;
   size_t offset_;
   Endianness endianness_;
+  stream s_;
 
 public:
   Reader(const dptr& buffer)
       : buffer_(buffer),
         offset_(0),
-        endianness_(host_endianness) {}
+        endianness_(host_endianness),
+        s_(nullptr) {}
 
   template <typename T>
   void archive_impl(T* data, size_t count, Device& device) {
     dptr dst(data, sizeof(T) * count, device);
-    ops::cd_copy<unsigned char>(buffer_ + offset_, dst, sizeof(T) * count, nullptr);
+    kernel::cd_copy(DType_t::BYTE, buffer_ + offset_, dst, sizeof(T) * count, s_);
     if (endianness_ != device.get_endianness()) {
-      ops::bswap<T>(dst, dst, count, nullptr);
+      kernel::bswap(dtype_of<T>(), dst, dst, count, nullptr);
     }
     offset_ += sizeof(T) * count;
   }
 
   void set_endianess(Endianness endianness) { endianness_ = endianness; }
+
+  void set_stream(stream s) { s_ = s; }
 
   size_t bytes_read() const { return offset_; }
 };

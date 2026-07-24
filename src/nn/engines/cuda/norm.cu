@@ -10,7 +10,7 @@
 
 #include "cuda/helpers.cuh"
 #include "nn/engines/cuda_engine.hpp"
-#include "type/cuda/vectorized_types.hpp"
+#include "type/cuda/vectorized_types.cuh"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -45,7 +45,7 @@ __inline__ __device__ T blockReduceSum(T val) {
 
 template <typename IO_T, typename Param_T, typename Compute_T>
 __global__ void norm_add_bias_kernel(IO_T* output, const Param_T* bias, size_t batch_size,
-                                      size_t output_features) {
+                                     size_t output_features) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int total_size = batch_size * output_features;
 

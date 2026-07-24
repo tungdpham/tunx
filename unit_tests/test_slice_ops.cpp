@@ -1,9 +1,9 @@
-#include "nn/layers_impl/cpu/slice_ops.hpp"
+#include "nn/layers_impl/cpu/slice_kernel.hpp"
 
 #ifdef TUNX_USE_CUDA
 #include <cuda_runtime.h>
 
-#include "nn/layers_impl/cuda/slice_ops.hpp"
+#include "nn/layers_impl/cuda/slice_kernel.hpp"
 #endif
 
 #include <gtest/gtest.h>

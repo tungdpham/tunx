@@ -199,8 +199,7 @@ inline Result validate_semi_async_epoch(Coordinator &coordinator,
   return {total_val_loss / val_batches, (total_val_correct / val_dataset->size()) * 100.0f};
 }
 
-inline void train_semi_async_step(Coordinator &coordinator,
-                                  std::unique_ptr<Dataset> &train_dataset,
+inline void train_semi_async_step(Coordinator &coordinator, std::unique_ptr<Dataset> &train_dataset,
                                   const std::unique_ptr<Loss> &criterion,
                                   const TrainingConfig &config, CsvLogger &logger) {
   train_dataset->shuffle();
@@ -342,8 +341,8 @@ inline void train_model(Coordinator &coordinator, std::unique_ptr<Dataset> &trai
         auto epoch_total_start = std::chrono::high_resolution_clock::now();
 
         auto train_start = std::chrono::high_resolution_clock::now();
-        auto [train_loss, train_acc] =
-            train_semi_async_epoch(coordinator, train_dataset, criterion, config, logger, epoch + 1);
+        auto [train_loss, train_acc] = train_semi_async_epoch(coordinator, train_dataset, criterion,
+                                                              config, logger, epoch + 1);
         auto train_end = std::chrono::high_resolution_clock::now();
 
         auto val_start = std::chrono::high_resolution_clock::now();

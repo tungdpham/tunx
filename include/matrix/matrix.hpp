@@ -11,12 +11,13 @@
 #include <random>
 
 #include "device/sref.hpp"
+#include "type/type.hpp"
 #ifdef __AVX2__
 #include <immintrin.h>
 #endif
 #include <cstdlib>
 
-#include "ops/ops.hpp"
+#include "kernel/kernel.hpp"
 #ifdef _WIN32
 #include <malloc.h>
 #endif
@@ -58,7 +59,7 @@ public:
         device_(device) {
     allocate_aligned(rows_ * cols_);
     if (data.get<T>() != nullptr) {
-      ops::copy<T>(data, data_, rows_ * cols_);
+      kernel::copy(dtype_of<T>(), data, data_, rows_ * cols_);
     }
   }
 
@@ -67,7 +68,7 @@ public:
         cols_(other.cols_),
         device_(other.device_) {
     allocate_aligned(rows_ * cols_);
-    ops::copy<T>(other.data_, data_, rows_ * cols_);
+    kernel::copy(dtype_of<T>(), other.data_, data_, rows_ * cols_);
   }
 
   Matrix(Matrix<T> &&other) noexcept
@@ -100,7 +101,7 @@ public:
   const T *data() const { return static_cast<const T *>(data_.get<T>()); }
   T *data() { return static_cast<T *>(data_.get<T>()); }
 
-  void fill(T value) { ops::set_scalar(data_, value, rows_ * cols_); }
+  void fill(T value) { kernel::set_scalar(dtype_of<T>(), data_, value, rows_ * cols_); }
 
   inline Matrix<T> operator+(const Matrix<T> &other) const {
     if (rows_ != other.rows_ || cols_ != other.cols_) {
@@ -109,7 +110,7 @@ public:
     Matrix<T> result(rows_, cols_);
     size_t size = rows_ * cols_;
 
-    ops::add<T>(data_, other.data_, result.data_, size);
+    kernel::add(dtype_of<T>(), data_, other.data_, result.data_, size);
     return result;
   }
 
@@ -119,7 +120,7 @@ public:
     }
     size_t size = rows_ * cols_;
 
-    ops::add<T>(data_, other.data_, data_, size);
+    kernel::add(dtype_of<T>(), data_, other.data_, data_, size);
     return *this;
   }
 
@@ -130,7 +131,7 @@ public:
     Matrix<T> result(rows_, cols_);
     size_t size = rows_ * cols_;
 
-    ops::sub<T>(data_, other.data_, result.data_, size);
+    kernel::sub(dtype_of<T>(), data_, other.data_, result.data_, size);
     return result;
   }
 
@@ -140,7 +141,7 @@ public:
     }
     size_t size = rows_ * cols_;
 
-    ops::sub<T>(data_, other.data_, data_, size);
+    kernel::sub(dtype_of<T>(), data_, other.data_, data_, size);
 
     return *this;
   }
@@ -149,14 +150,14 @@ public:
     Matrix<T> result(rows_, cols_);
     size_t size = rows_ * cols_;
 
-    ops::mul_scalar(data_, scalar, result.data_, size);
+    kernel::mul_scalar(dtype_of<T>(), data_, scalar, result.data_, size);
     return result;
   }
 
   inline Matrix<T> &operator*=(T scalar) {
     size_t size = rows_ * cols_;
 
-    ops::mul_scalar(data_, scalar, data_, size);
+    kernel::mul_scalar(dtype_of<T>(), data_, scalar, data_, size);
     return *this;
   }
 
@@ -167,7 +168,7 @@ public:
     Matrix<T> result(rows_, cols_);
     size_t size = rows_ * cols_;
 
-    ops::div_scalar(data_, scalar, result.data_, size);
+    kernel::div_scalar(dtype_of<T>(), data_, scalar, result.data_, size);
     return result;
   }
 
@@ -177,7 +178,7 @@ public:
     }
     size_t size = rows_ * cols_;
 
-    ops::div_scalar(data_, scalar, data_, size);
+    kernel::div_scalar(dtype_of<T>(), data_, scalar, data_, size);
 
     return *this;
   }
@@ -189,7 +190,7 @@ public:
     Matrix<T> result(rows_, other.cols_);
     result.fill(0.0);
 
-    ops::mul<T>(data_, other.data_, result.data_, size());
+    kernel::mul(dtype_of<T>(), data_, other.data_, result.data_, size());
     return result;
   }
 
@@ -219,13 +220,13 @@ public:
   }
 
   void fill_random_uniform(T range) {
-    ops::fill_random_uniform(data_, rows_ * cols_, -range, range,
-                             static_cast<unsigned long long>(std::random_device{}()));
+    kernel::fill_random_uniform(dtype_of<T>(), data_, rows_ * cols_, -range, range,
+                                static_cast<unsigned long long>(std::random_device{}()));
   }
 
   void fill_random_normal(T mean, T stddev) {
-    ops::fill_random_normal(data_, rows_ * cols_, mean, stddev,
-                            static_cast<unsigned long long>(std::random_device{}()));
+    kernel::fill_random_normal(dtype_of<T>(), data_, rows_ * cols_, mean, stddev,
+                               static_cast<unsigned long long>(std::random_device{}()));
   }
 };
 }  // namespace tunx

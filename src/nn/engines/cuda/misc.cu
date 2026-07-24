@@ -9,7 +9,7 @@
 #include <ctime>
 
 #include "nn/engines/cuda_engine.hpp"
-#include "type/cuda/vectorized_types.hpp"
+#include "type/cuda/vectorized_types.cuh"
 #include "type/type.hpp"
 
 namespace tunx {

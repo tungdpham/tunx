@@ -323,6 +323,11 @@ inline DType_t string_to_dtype(const std::string &dtype_str) {
       __VA_ARGS__;                                           \
       break;                                                 \
     }                                                        \
+    case DType_t::BYTE: {                                    \
+      using type_alias = uchar;                              \
+      __VA_ARGS__;                                           \
+      break;                                                 \
+    }                                                        \
     case DType_t::FP16: {                                    \
       using type_alias = fp16;                               \
       __VA_ARGS__;                                           \

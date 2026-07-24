@@ -257,7 +257,7 @@ struct Sqrt<unsigned long> {
 
 template <typename T>
 struct Rsqrt {
-  __device__ T operator()(T a) const { return (T)1 / sqrt(a); }
+  __device__ T operator()(T a) const { return (T)rsqrtf((float)a); }
 };
 template <>
 struct Rsqrt<float> {

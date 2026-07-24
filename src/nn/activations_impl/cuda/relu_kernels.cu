@@ -2,7 +2,7 @@
 #include <cuda_runtime.h>
 
 #include "nn/activations_impl/cuda/relu_kernels.hpp"
-#include "type/cuda/vectorized_types.hpp"
+#include "type/cuda/vectorized_types.cuh"
 #include "type/type.hpp"
 
 #ifdef TUNX_USE_CUDA

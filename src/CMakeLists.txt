@@ -101,24 +101,24 @@ if(NOT MSVC)
 endif()
 
 # Operations Module
-file(GLOB_RECURSE TUNX_OPS_SOURCES 
-    "ops/*.cpp"
-    "ops/*.cu"
+file(GLOB_RECURSE TUNX_KERNEL_SOURCES 
+    "kernel/*.cpp"
+    "kernel/*.cu"
 )
-add_library(tunx_ops STATIC ${TUNX_OPS_SOURCES})
-target_include_directories(tunx_ops PUBLIC 
+add_library(tunx_kernel STATIC ${TUNX_KERNEL_SOURCES})
+target_include_directories(tunx_kernel PUBLIC 
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
 if(ENABLE_CUDA)
-    set_target_properties(tunx_ops PROPERTIES 
+    set_target_properties(tunx_kernel PROPERTIES 
         CUDA_ARCHITECTURES ${CMAKE_CUDA_ARCHITECTURES}
         CUDA_STANDARD 20
     )
 endif()
-target_link_libraries(tunx_ops PUBLIC tunx_device tunx_threading tunx_type)
+target_link_libraries(tunx_kernel PUBLIC tunx_device tunx_threading tunx_type)
 if(ENABLE_CUDA)
-    target_link_libraries(tunx_ops PUBLIC tunx_cuda CUDA::cudart CUDA::cublas)
+    target_link_libraries(tunx_kernel PUBLIC tunx_cuda CUDA::cudart CUDA::cublas)
 endif()
 
 # Matrix module
@@ -130,7 +130,7 @@ target_include_directories(tunx_matrix PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(tunx_matrix PUBLIC tunx_device tunx_ops tunx_type)
+target_link_libraries(tunx_matrix PUBLIC tunx_device tunx_kernel tunx_type)
 if(NOT MSVC)
     target_link_libraries(tunx_matrix PUBLIC m)
 endif()
@@ -151,7 +151,7 @@ if(ENABLE_CUDA)
         CUDA_STANDARD 20
     )
 endif()
-target_link_libraries(tunx_tensor PUBLIC tunx_matrix tunx_ops tunx_device tunx_type)
+target_link_libraries(tunx_tensor PUBLIC tunx_matrix tunx_kernel tunx_device tunx_type)
 if(NOT MSVC)
     target_link_libraries(tunx_tensor PUBLIC m)
 endif()
@@ -285,7 +285,7 @@ if(ENABLE_CUDA)
     )
 endif()
 target_link_libraries(tunx_nn PUBLIC 
-    tunx_tensor tunx_utils tunx_data_loading tunx_data_augmentation tunx_math tunx_device tunx_ops tunx_threading tunx_type tunx_logging tunx_common
+    tunx_tensor tunx_utils tunx_data_loading tunx_data_augmentation tunx_math tunx_device tunx_kernel tunx_threading tunx_type tunx_logging tunx_common
 )
 if(ENABLE_CUDA)
     target_link_libraries(tunx_nn PUBLIC CUDA::cudart CUDA::cublas)
@@ -335,7 +335,7 @@ target_link_libraries(tunx_distributed PUBLIC nlohmann_json::nlohmann_json ${IBV
 target_compile_definitions(tunx_distributed PUBLIC ASIO_STANDALONE)
 
 # Main consolidated module setup
-set(tunx_MODULES tunx_type tunx_device tunx_threading tunx_ops tunx_logging tunx_matrix tunx_tensor tunx_data_augmentation tunx_data_loading tunx_nn tunx_utils tunx_math tunx_distributed tunx_profiling tunx_partitioner)
+set(tunx_MODULES tunx_type tunx_device tunx_threading tunx_kernel tunx_logging tunx_matrix tunx_tensor tunx_data_augmentation tunx_data_loading tunx_nn tunx_utils tunx_math tunx_distributed tunx_profiling tunx_partitioner)
 if(ENABLE_CUDA)
     list(APPEND tunx_MODULES tunx_cuda)
 endif()

@@ -21,10 +21,8 @@
 namespace tunx {
 
 /**
- * @brief Residual block implementing skip connections: output = F(x) + x
- *
- * Supports both identity shortcuts (when input/output dimensions match)
- * and projection shortcuts (1x1 conv when dimensions differ).
+ * @brief Residual block implementing f(x) = g(x) + h(x) (g is main path function and h is shortcut)
+ * @note g(x) and h(x) must output matching dimensions for addition.
  */
 class ResidualBlockImpl : public Block {
 private:

@@ -10,14 +10,14 @@
 #include <stdexcept>
 #include <string>
 
+#include "kernel/kernel.hpp"
+#include "nn/engines/engine_handle.hpp"
 #include "nn/layer.hpp"
 #include "nn/stats/stats.hpp"
-#include "ops/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
 
-// Constructor
 FlashAttentionBlockImpl::FlashAttentionBlockImpl(size_t embed_dim, size_t num_heads, bool is_causal,
                                                  const std::string &name)
     : Block(name),
@@ -68,25 +68,25 @@ Vec<Tensor> FlashAttentionBlockImpl::forward_impl(const Vec<Tensor> &inputs, Res
       .compute_dtype = compute_dtype_,
   };
 
-  if (this->is_training_) {
+  if (is_training_) {
     residuals["input"] = input;
   }
 
-  Tensor attn_out = this->make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
+  Tensor attn_out = make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
   residuals["attn_out"] = attn_out;
-  Tensor stats_tensor = this->make_tensor({batch_size, num_heads_, seq_len, 1}, DType_t::FP32);
+  Tensor stats_tensor = make_tensor({batch_size, num_heads_, seq_len, 1}, DType_t::FP32);
   residuals["stats_tensor"] = stats_tensor;
 
   ws_allocator_->flip();
 
-  Tensor attn_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor q_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor k_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor v_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor attn_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                  io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor q_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                               io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor k_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                               io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor v_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                               io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
 
   Tensor q = q_proj_.forward({input}, residuals["q_proj"])[0];
   Tensor k = k_proj_.forward({input}, residuals["k_proj"])[0];
@@ -116,7 +116,7 @@ Vec<Tensor> FlashAttentionBlockImpl::forward_impl(const Vec<Tensor> &inputs, Res
   {
     WorkspaceReq ws_req = engine_->query_sdpa_graph(engine_handle_, stats, type_desc);
     size_t workspace_size = ws_req.fwd_workspace;
-    Tensor workspace = this->make_tensor({workspace_size}, DType_t::BYTE);
+    Tensor workspace = make_tensor({workspace_size}, DType_t::BYTE);
 
     engine_->sdpa_fwd(engine_handle_, stats, q_heads.data_as<void>(), k_heads.data_as<void>(),
                       v_heads.data_as<void>(), attn_heads.data_as<void>(),
@@ -168,17 +168,16 @@ Vec<Tensor> FlashAttentionBlockImpl::backward_impl(const Vec<Tensor> &grad_outpu
   Tensor &attn_out = residuals["attn_out"];
   Tensor &stats_tensor = residuals["stats_tensor"];
 
-  Tensor grad_input = this->make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
+  Tensor grad_input = make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
 
   ws_allocator_->flip();
 
-  Tensor grad_q = this->make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
-  Tensor grad_k = this->make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
-  Tensor grad_v = this->make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
+  Tensor grad_q = make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
+  Tensor grad_k = make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
+  Tensor grad_v = make_tensor({batch_size, seq_len, embed_dim_}, io_dtype_);
 
-  Tensor grad_attn_heads =
-      this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor grad_attn_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                       io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
 
   TransposeStats t_stats;
   t_stats.ndim = 4;
@@ -198,25 +197,22 @@ Vec<Tensor> FlashAttentionBlockImpl::backward_impl(const Vec<Tensor> &grad_outpu
                        grad_attn_heads.data_as<void>(), nullptr, t_desc);
   }
 
-  Tensor grad_q_heads =
-      this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor grad_k_heads =
-      this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor grad_v_heads =
-      this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor grad_q_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                    io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor grad_k_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                    io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor grad_v_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                    io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
 
-  Tensor q_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor k_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
-  Tensor v_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                     io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor q_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                               io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor k_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                               io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor v_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                               io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
 
-  Tensor attn_heads = this->make_tensor({batch_size, num_heads_, seq_len, head_dim_},
-                                        io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
+  Tensor attn_heads = make_tensor({batch_size, num_heads_, seq_len, head_dim_},
+                                  io_dtype_ == DType_t::FP32 ? DType_t::FP32 : DType_t::BF16);
 
   {
     Tensor q = q_proj_.forward({input}, residuals["q_proj"])[0];
@@ -236,7 +232,7 @@ Vec<Tensor> FlashAttentionBlockImpl::backward_impl(const Vec<Tensor> &grad_outpu
   {
     WorkspaceReq ws_req = engine_->query_sdpa_graph(engine_handle_, stats, type_desc);
     size_t workspace_size = ws_req.bwd_workspace;
-    Tensor workspace = this->make_tensor({workspace_size}, DType_t::BYTE);
+    Tensor workspace = make_tensor({workspace_size}, DType_t::BYTE);
 
     engine_->sdpa_bwd(engine_handle_, stats, q_heads.data_as<void>(), k_heads.data_as<void>(),
                       v_heads.data_as<void>(), attn_heads.data_as<void>(),
@@ -269,18 +265,18 @@ Vec<Tensor> FlashAttentionBlockImpl::backward_impl(const Vec<Tensor> &grad_outpu
 
   size_t size = grad_q_in.size();
 
-  DISPATCH_IO_DTYPE(ops::add, grad_q_in.data_ptr(), grad_k_in.data_ptr(), grad_input.data_ptr(),
-                    size, nullptr);
-  DISPATCH_IO_DTYPE(ops::add, grad_input.data_ptr(), grad_v_in.data_ptr(), grad_input.data_ptr(),
-                    size, nullptr);
+  kernel::add(grad_q_in.dtype(), grad_q_in.data_ptr(), grad_k_in.data_ptr(), grad_input.data_ptr(),
+              size, engine_handle_.get_stream());
+  kernel::add(grad_input.dtype(), grad_input.data_ptr(), grad_v_in.data_ptr(),
+              grad_input.data_ptr(), size, engine_handle_.get_stream());
 
   return {grad_input};
 }
 
 LayerConfig FlashAttentionBlockImpl::get_config() const {
   LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
+  config.name = name_;
+  config.type = type();
   config.set("embed_dim", embed_dim_);
   config.set("num_heads", num_heads_);
   return config;

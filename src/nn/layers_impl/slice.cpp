@@ -25,35 +25,24 @@ Tensor SliceImpl::forward_impl(const Tensor &input, Residuals &residuals) {
   Vec<size_t> output_shape = compute_output_shape(input.shape());
   Tensor output = make_tensor(output_shape, io_dtype_);
 
-  DISPATCH_ON_3_DTYPES_TO_METHOD(slice_forward, input, output, engine_handle_.get_stream());
+  // TODO: implement slice forward in engines.
+  throw std::runtime_error("SliceImpl: unimplemented");
+
   return output;
 }
 
 Tensor SliceImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
   const Tensor &shape_tensor = residuals["original_shape"];
-  if (!shape_tensor) {
-    throw std::runtime_error("No cached original shape found for backward pass in SliceImpl");
-  }
   Vec<size_t> original_shape(shape_tensor.size());
   std::copy(shape_tensor.data_as<size_t>(), shape_tensor.data_as<size_t>() + shape_tensor.size(),
             original_shape.begin());
 
   Tensor grad_input = make_tensor(original_shape, io_dtype_);
 
-  DISPATCH_ON_3_DTYPES_TO_METHOD(slice_backward, grad_output, grad_input, original_shape,
-                                 engine_handle_.get_stream());
+  // TODO: implement slice backward in engines.
+  throw std::runtime_error("SliceImpl: unimplemented");
+
   return grad_input;
-}
-
-template <typename IO_T, typename Param_T, typename Compute_T>
-void SliceImpl::slice_forward(const Tensor &input, Tensor &output, stream handle) const {
-  throw std::runtime_error("Not implemented");
-}
-
-template <typename IO_T, typename Param_T, typename Compute_T>
-void SliceImpl::slice_backward(const Tensor &grad_output, Tensor &grad_input,
-                               const Vec<size_t> &original_shape, stream handle) const {
-  throw std::runtime_error("Not implemented");
 }
 
 Vec<size_t> SliceImpl::compute_output_shape(const Vec<size_t> &input_shape) const {

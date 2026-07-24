@@ -11,10 +11,10 @@
 
 #include <cstddef>
 
+#include "kernel/kernel.hpp"
 #include "nn/activations.hpp"
 #include "nn/layer.hpp"
 #include "nn/layer_factory.hpp"
-#include "ops/ops.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
@@ -77,13 +77,15 @@ Vec<Tensor> ResidualBlockImpl::forward_impl(const Vec<Tensor> &inputs, Residuals
     if (final_activation_) {
       std::string pre_act_key = "pre_activation_" + std::to_string(i);
       Tensor pre_act = make_tensor(main_outputs[i].shape(), io_dtype_);
-      DISPATCH_IO_DTYPE(ops::add, main_outputs[i].data_ptr(), shortcut_outputs[i].data_ptr(),
-                        pre_act.data_ptr(), outputs[i].size());
+      kernel::add(main_outputs[i].dtype(), main_outputs[i].data_ptr(),
+                  shortcut_outputs[i].data_ptr(), pre_act.data_ptr(), outputs[i].size(),
+                  engine_handle_.get_stream());
       residuals[pre_act_key] = pre_act;
       final_activation_->apply(pre_act, outputs[i]);
     } else {
-      DISPATCH_IO_DTYPE(ops::add, main_outputs[i].data_ptr(), shortcut_outputs[i].data_ptr(),
-                        outputs[i].data_ptr(), outputs[i].size());
+      kernel::add(main_outputs[i].dtype(), main_outputs[i].data_ptr(),
+                  shortcut_outputs[i].data_ptr(), outputs[i].data_ptr(), outputs[i].size(),
+                  engine_handle_.get_stream());
     }
   }
   return outputs;
@@ -118,8 +120,9 @@ Vec<Tensor> ResidualBlockImpl::backward_impl(const Vec<Tensor> &grad_outputs,
   Vec<Tensor> grad_inputs(main_grad_inputs.size());
   for (size_t i = 0; i < grad_inputs.size(); ++i) {
     grad_inputs[i] = this->make_tensor(main_grad_inputs[i].shape(), main_grad_inputs[i].dtype());
-    DISPATCH_IO_DTYPE(ops::add, main_grad_inputs[i].data_ptr(), shortcut_grad_inputs[i].data_ptr(),
-                      grad_inputs[i].data_ptr(), grad_inputs[i].size(), nullptr);
+    kernel::add(main_grad_inputs[i].dtype(), main_grad_inputs[i].data_ptr(),
+                shortcut_grad_inputs[i].data_ptr(), grad_inputs[i].data_ptr(),
+                grad_inputs[i].size(), engine_handle_.get_stream());
   }
   return grad_inputs;
 }
