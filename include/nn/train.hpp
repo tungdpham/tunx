@@ -10,7 +10,6 @@
 
 #include "data_loading/dataset.hpp"
 #include "data_loading/regression_dataset.hpp"
-#include "device/device_type.hpp"
 #include "nn/csv_logger.hpp"
 #include "nn/graph.hpp"
 #include "nn/loss.hpp"
