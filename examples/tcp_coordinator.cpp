@@ -61,7 +61,7 @@ int main(int argc, char *argv[]) {
   TCPConfig tcp_config;
   tcp_config.load_from_json(config_path);
 
-  tunx::Device &device = DeviceManager::instance().get(train_config.device_id);
+  Device &device = DeviceManager::instance().get(train_config.device_id);
   auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
   Graph graph = load_or_create_graph(train_config.model_name, train_config.model_path, allocator);

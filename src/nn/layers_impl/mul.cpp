@@ -8,7 +8,7 @@
 
 #include <stdexcept>
 
-#include "kernel/kernel.hpp"
+#include "tensor/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -36,15 +36,13 @@ Vec<Tensor> MulImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residual
   }
 
   Tensor output = make_tensor(a.shape(), io_dtype_);
-  size_t n = a.size();
 
   if (this->is_training_) {
     residuals["a"] = a;
     residuals["b"] = b;
   }
 
-  kernel::mul(a.dtype(), a.data_ptr(), b.data_ptr(), output.data_ptr(), n,
-              engine_handle_.get_stream());
+  mul(a, b, output, engine_handle_.get_stream());
 
   return {output};
 }
@@ -56,18 +54,13 @@ Vec<Tensor> MulImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &r
   const Tensor &grad_out = grad_outputs[0];
   const Tensor &a = residuals["a"];
   const Tensor &b = residuals["b"];
-  size_t n = grad_out.size();
 
   // grad_a = grad_out * b,  grad_b = grad_out * a
   Tensor grad_a = make_tensor(grad_out.shape(), this->io_dtype_);
   Tensor grad_b = make_tensor(grad_out.shape(), this->io_dtype_);
 
-  DISPATCH_DTYPE(grad_out.dtype(), T, {
-    kernel::mul(dtype_of<T>(), grad_out.data_ptr(), b.data_ptr(), grad_a.data_ptr(), n,
-                engine_handle_.get_stream());
-    kernel::mul(dtype_of<T>(), grad_out.data_ptr(), a.data_ptr(), grad_b.data_ptr(), n,
-                engine_handle_.get_stream());
-  });
+  mul(grad_out, b, grad_a, engine_handle_.get_stream());
+  mul(grad_out, a, grad_b, engine_handle_.get_stream());
 
   return {grad_a, grad_b};
 }

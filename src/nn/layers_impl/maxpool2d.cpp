@@ -9,7 +9,7 @@
 #include <cstddef>
 #include <stdexcept>
 
-#include "tensor/tensor_ops.hpp"
+#include "tensor/ops.hpp"
 
 namespace tunx {
 namespace internal {

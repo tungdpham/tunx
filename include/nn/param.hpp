@@ -6,8 +6,8 @@
 
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {

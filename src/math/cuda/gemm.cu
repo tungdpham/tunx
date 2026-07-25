@@ -85,7 +85,7 @@ void gemm_ex(const A_T* A, const B_T* B, C_T* C, size_t M, size_t N, size_t K, c
   if (status != CUBLAS_STATUS_SUCCESS) {
     throw std::runtime_error("cublasGemmEx failed with status: " + std::to_string(status));
   }
-  tunx::cuda::checkCudaError(cudaGetLastError(), "gemm_ex", __FILE__, __LINE__);
+  cuda::checkCudaError(cudaGetLastError(), "gemm_ex", __FILE__, __LINE__);
 }
 
 template <typename A_T, typename B_T, typename C_T, typename Compute_T>
@@ -108,7 +108,7 @@ void gemm_strided_batched_ex(const A_T* A, const B_T* B, C_T* C, size_t M, size_
     throw std::runtime_error("cublasGemmStridedBatchedEx failed with status: " +
                              std::to_string(status));
   }
-  tunx::cuda::checkCudaError(cudaGetLastError(), "gemm_strided_batched_ex", __FILE__, __LINE__);
+  cuda::checkCudaError(cudaGetLastError(), "gemm_strided_batched_ex", __FILE__, __LINE__);
 }
 
 #define INSTANTIATE_CUBLAS_GEMM(A_T, B_T, C_T, Compute_T)                                     \

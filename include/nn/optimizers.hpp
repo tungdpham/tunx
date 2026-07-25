@@ -23,8 +23,8 @@
 #include "optimizers_impl/cuda/adam_kernels.hpp"
 #include "optimizers_impl/cuda/sgd_kernels.hpp"
 #endif
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 
 namespace tunx {
 

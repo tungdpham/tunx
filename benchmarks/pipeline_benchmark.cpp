@@ -5,6 +5,7 @@
 #include "nn/layers_impl/batchnorm.hpp"
 #include "nn/layers_impl/conv2d.hpp"
 #include "nn/layers_impl/maxpool2d.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 
 using namespace tunx;

@@ -617,7 +617,7 @@ void d2h_copy(DType_t dtype, const void* a, void* c, size_t size, cudaStream_t s
   DISPATCH_ANY_DTYPE(dtype, T, func(T{}));
 }
 
-void set_scalar(DType_t dtype, void* c, double scalar, size_t size, cudaStream_t stream) {
+void fill(DType_t dtype, void* c, double scalar, size_t size, cudaStream_t stream) {
   auto func = [&]<typename T>(T type_dummy) {
     T* c_cast = static_cast<T*>(c);
     T scalar_cast = static_cast<T>(scalar);
@@ -636,7 +636,7 @@ void set_scalar(DType_t dtype, void* c, double scalar, size_t size, cudaStream_t
       int blocks = get_num_blocks(size);
       set_scalar_kernel<<<blocks, BLOCK_SIZE, 0, stream>>>(c_cast, scalar_cast, size);
     }
-    tunx::cuda::checkCudaError(cudaGetLastError(), "set_scalar", __FILE__, __LINE__);
+    tunx::cuda::checkCudaError(cudaGetLastError(), "fill", __FILE__, __LINE__);
   };
   DISPATCH_ANY_DTYPE(dtype, T, func(T{}));
 }
@@ -651,28 +651,28 @@ void zero(DType_t dtype, void* c, size_t size, cudaStream_t stream) {
   DISPATCH_ANY_DTYPE(dtype, T, func(T{}));
 }
 
-void fill_random_uniform(DType_t dtype, void* data, size_t size, double min_val, double max_val,
-                         unsigned long long seed, cudaStream_t stream) {
+void fill_uniform(DType_t dtype, void* data, size_t size, double min_val, double max_val,
+                  unsigned long long seed, cudaStream_t stream) {
   auto func = [&]<typename T>(T type_dummy) {
     T* data_cast = static_cast<T*>(data);
     if (size == 0) return;
     int blocks = get_num_blocks(size);
     fill_random_uniform_kernel<<<blocks, BLOCK_SIZE, 0, stream>>>(data_cast, size, min_val, max_val,
                                                                   seed);
-    tunx::cuda::checkCudaError(cudaGetLastError(), "fill_random_uniform", __FILE__, __LINE__);
+    tunx::cuda::checkCudaError(cudaGetLastError(), "fill_uniform", __FILE__, __LINE__);
   };
   DISPATCH_DTYPE(dtype, T, func(T{}));
 }
 
-void fill_random_normal(DType_t dtype, void* data, size_t size, double mean, double stddev,
-                        unsigned long long seed, cudaStream_t stream) {
+void fill_normal(DType_t dtype, void* data, size_t size, double mean, double stddev,
+                 unsigned long long seed, cudaStream_t stream) {
   auto func = [&]<typename T>(T type_dummy) {
     T* data_cast = static_cast<T*>(data);
     if (size == 0) return;
     int blocks = get_num_blocks(size);
     fill_random_normal_kernel<<<blocks, BLOCK_SIZE, 0, stream>>>(data_cast, size, mean, stddev,
                                                                  seed);
-    tunx::cuda::checkCudaError(cudaGetLastError(), "fill_random_normal", __FILE__, __LINE__);
+    tunx::cuda::checkCudaError(cudaGetLastError(), "fill_normal", __FILE__, __LINE__);
   };
   DISPATCH_DTYPE(dtype, T, func(T{}));
 }

@@ -571,7 +571,7 @@ __global__ void layernorm_bwd_kernel(const T* grad_output, const T* input, const
     sum_dl_dnorm += dl_dnorm;
     sum_dl_dnorm_x_hat += dl_dnorm * x_hat;
 
-    if constexpr (tunx::is_floating<T>::value) {
+    if constexpr (is_floating<T>::value) {
       if (grad_gamma) {
         cuda::gpu_atomic_add(&grad_gamma[c], go[c] * x_hat);
       }

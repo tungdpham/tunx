@@ -15,6 +15,7 @@
 #include <thread>
 
 #include "data_loading/dataset.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
@@ -112,8 +113,8 @@ private:
         batch.valid = dataset_.get_batch(batch_size_, batch.data, batch.labels);
 
         if (batch.valid) {
-          batch.data = batch.data.clone();
-          batch.labels = batch.labels.clone();
+          batch.data = clone(batch.data);
+          batch.labels = clone(batch.labels);
         }
 
         {

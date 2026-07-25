@@ -14,6 +14,7 @@
 #include "device/pool_allocator.hpp"
 #include "distributed/message.hpp"
 #include "distributed/tcp_communicator.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "threading/thread_wrapper.hpp"
 
@@ -172,7 +173,7 @@ int main(int argc, char *argv[]) {
 
   for (int i = 0; i < 4; i++) {
     Tensor tensor = Tensor(master_tensor.shape(), DType_t::FP32, getHost());
-    master_tensor.copy_to(tensor);
+    copy(master_tensor, tensor);
     Job job;
     job.pid = 10;
     job.data = TensorBundle({

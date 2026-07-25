@@ -27,7 +27,7 @@ DropoutImpl::DropoutImpl(float dropout_rate, const std::string &name)
 Tensor DropoutImpl::forward_impl(const Tensor &input, Residuals &residuals) {
   if (!this->is_training_) {
     Tensor output = make_tensor(input.shape(), io_dtype_);
-    input.copy_to(output);
+    copy(input, output, engine_handle_.get_stream());
     return output;
   }
 

@@ -1,8 +1,8 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 
 using namespace tunx;
 
@@ -188,7 +188,7 @@ TEST_F(TensorTest, CloneOperation) {
   Tensor original = Tensor({1, 1, 2, 2}, DType_t::FP32);
   fill(original, 5.0f);
 
-  Tensor cloned = original.clone();
+  Tensor cloned = clone(original);
 
   EXPECT_TRUE(original.shape() == cloned.shape());
   EXPECT_FLOAT_EQ(cloned.at<float>({0, 0, 0, 0}), 5.0f);

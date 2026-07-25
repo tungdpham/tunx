@@ -15,7 +15,7 @@
 #include <string>
 
 #include "nn/engines/iengine.hpp"
-#include "tensor/tensor_ops.hpp"
+#include "tensor/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {

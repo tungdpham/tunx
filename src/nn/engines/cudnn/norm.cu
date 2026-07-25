@@ -736,8 +736,8 @@ void CuDNNEngine::batchnorm_bwd(engine_handle backend_handle, const BatchNormSta
   ensure_ok(status, "batchnorm backward execute");
 
   size_t num_elements = stats.channels;
-  tunx::cuda::axpy(grad_gamma_temp, grad_gamma, num_elements, type_desc.param_dtype, stream);
-  tunx::cuda::axpy(grad_beta_temp, grad_beta, num_elements, type_desc.param_dtype, stream);
+  cuda::axpy(grad_gamma_temp, grad_gamma, num_elements, type_desc.param_dtype, stream);
+  cuda::axpy(grad_beta_temp, grad_beta, num_elements, type_desc.param_dtype, stream);
 }
 
 void CuDNNEngine::layernorm_fwd(engine_handle backend_handle, const LayerNormStats& stats,
@@ -840,8 +840,8 @@ void CuDNNEngine::layernorm_bwd(engine_handle backend_handle, const LayerNormSta
   ensure_ok(status, "layernorm bwd execute");
 
   size_t num_elements = stats.channels;
-  tunx::cuda::axpy(grad_gamma_temp, grad_gamma, num_elements, type_desc.param_dtype, stream);
-  tunx::cuda::axpy(grad_beta_temp, grad_beta, num_elements, type_desc.param_dtype, stream);
+  cuda::axpy(grad_gamma_temp, grad_gamma, num_elements, type_desc.param_dtype, stream);
+  cuda::axpy(grad_beta_temp, grad_beta, num_elements, type_desc.param_dtype, stream);
 }
 
 }  // namespace tunx

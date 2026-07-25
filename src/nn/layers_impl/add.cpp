@@ -8,7 +8,7 @@
 
 #include <stdexcept>
 
-#include "kernel/kernel.hpp"
+#include "tensor/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -36,8 +36,7 @@ Vec<Tensor> AddImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residual
   }
 
   Tensor output = make_tensor(a.shape(), a.dtype());
-  size_t n = a.size();
-  kernel::add(a.dtype(), a.data_ptr(), b.data_ptr(), output.data_ptr(), n);
+  add(a, b, output);
   return {output};
 }
 
@@ -49,8 +48,8 @@ Vec<Tensor> AddImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &r
   Tensor grad_a = make_tensor(grad_out.shape(), this->io_dtype_);
   Tensor grad_b = make_tensor(grad_out.shape(), this->io_dtype_);
 
-  grad_out.copy_to(grad_a);
-  grad_out.copy_to(grad_b);
+  copy(grad_out, grad_a, engine_handle_.get_stream());
+  copy(grad_out, grad_b, engine_handle_.get_stream());
 
   return {grad_a, grad_b};
 }

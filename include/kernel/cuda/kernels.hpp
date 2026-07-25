@@ -36,7 +36,7 @@ void mul_scalar(DType_t dtype, const void *a, double scalar, void *c, size_t siz
 void div_scalar(DType_t dtype, const void *a, double scalar, void *c, size_t size,
                 cudaStream_t stream);
 
-void set_scalar(DType_t dtype, void *c, double scalar, size_t size, cudaStream_t stream);
+void fill(DType_t dtype, void *c, double scalar, size_t size, cudaStream_t stream);
 
 void axpy(DType_t dtype, double alpha, const void *x, void *y, size_t size, cudaStream_t stream);
 
@@ -86,11 +86,11 @@ void sub_mul_scalar(DType_t dtype, const void *a, double sub_scalar, double mul_
 void mul_add_scalar(DType_t dtype, const void *a, double mul_scalar, double add_scalar, void *c,
                     size_t size, cudaStream_t stream);
 
-void fill_random_uniform(DType_t dtype, void *data, size_t size, double min_val, double max_val,
-                         unsigned long long seed, cudaStream_t stream);
+void fill_uniform(DType_t dtype, void *data, size_t size, double min_val, double max_val,
+                  unsigned long long seed, cudaStream_t stream);
 
-void fill_random_normal(DType_t dtype, void *data, size_t size, double mean, double stddev,
-                        unsigned long long seed, cudaStream_t stream);
+void fill_normal(DType_t dtype, void *data, size_t size, double mean, double stddev,
+                 unsigned long long seed, cudaStream_t stream);
 
 void cast(DType_t a_dtype, DType_t b_dtype, const void *a, void *b, size_t size,
           cudaStream_t stream);

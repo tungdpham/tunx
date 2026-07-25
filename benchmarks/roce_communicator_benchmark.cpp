@@ -11,6 +11,7 @@
 
 #include "distributed/message.hpp"
 #include "distributed/roce_communicator.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "threading/thread_wrapper.hpp"
 

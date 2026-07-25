@@ -18,6 +18,7 @@
 #include "device/stream.hpp"
 #include "nn/engines/cpu_engine.hpp"
 #include "nn/engines/engine_handle.hpp"
+#include "tensor/ops.hpp"
 #ifdef TUNX_USE_CUDA
 #include "nn/engines/cuda_engine.hpp"
 #include "nn/engines/cudnn_engine.hpp"
@@ -30,10 +31,10 @@ namespace tunx {
 
 static Engine get_default_engine(Device &device) {
   switch (device.device_type()) {
-    case tunx::DeviceType::CPU:
+    case DeviceType::CPU:
       return make_engine<CPUEngine>();
 #ifdef TUNX_USE_CUDA
-    case tunx::DeviceType::CUDA:
+    case DeviceType::CUDA:
 #ifdef TUNX_USE_CUDNN
       return make_engine<CuDNNEngine>();
 #endif
@@ -214,7 +215,7 @@ TensorBundle Graph::forward(TensorBundle &input_map, size_t pid) {
     auto node = it->second;
     Tensor device_tensor = tensor;
     if (tensor.device() != this->device()) {
-      device_tensor = tensor.to_device(this->device());
+      device_tensor = to_device(tensor, device(), engine_handle_.get_stream());
     }
     it->second->set_data(pid, device_tensor, out_degree_[node]);
   }
@@ -269,7 +270,8 @@ TensorBundle Graph::backward(TensorBundle &output_grad_map, size_t pid) {
     auto node = it->second;
     Tensor device_tensor = tensor;
     if (tensor.device() != this->device()) {
-      device_tensor = tensor.to_device(this->device());
+      // device_tensor = tensor.to_device(this->device());
+      device_tensor = to_device(tensor, device(), engine_handle_.get_stream());
     }
     it->second->set_grad(pid, device_tensor, in_degree_[node]);
   }

@@ -8,7 +8,7 @@
 
 #include <fmt/core.h>
 
-#include <stdexcept>
+#include <cassert>
 #include <type_traits>
 
 #include "common/archiver.hpp"
@@ -51,12 +51,9 @@ public:
   template <typename T>
   void archive_impl(const T* data, size_t count, Device& device) {
     static_assert(std::is_trivially_copyable<T>::value, "...");
-    if (offset_ + sizeof(T) * count > buffer_.capacity()) {
-      throw std::runtime_error(fmt::format("Writer overflow: Offset {}, Size: {}, Capacity: {}",
-                                           offset_, sizeof(T) * count, buffer_.capacity()));
-    }
+    assert(offset_ + sizeof(T) * count <= buffer_.capacity() && "Writer overflow");
     const dptr src(const_cast<T*>(data), sizeof(T) * count, device);
-    kernel::cd_copy(DType_t::BYTE, src, buffer_ + offset_, sizeof(T) * count, s_);
+    kernel::copy(src, buffer_ + offset_, sizeof(T) * count, s_);
     offset_ += sizeof(T) * count;
   }
 
@@ -85,9 +82,9 @@ public:
   template <typename T>
   void archive_impl(T* data, size_t count, Device& device) {
     dptr dst(data, sizeof(T) * count, device);
-    kernel::cd_copy(DType_t::BYTE, buffer_ + offset_, dst, sizeof(T) * count, s_);
+    kernel::copy(buffer_ + offset_, dst, sizeof(T) * count, s_);
     if (endianness_ != device.get_endianness()) {
-      kernel::bswap(dtype_of<T>(), dst, dst, count, nullptr);
+      kernel::bswap(dtype_of<T>(), dst, dst, count, s_);
     }
     offset_ += sizeof(T) * count;
   }

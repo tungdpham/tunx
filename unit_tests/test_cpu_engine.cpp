@@ -10,8 +10,8 @@
 #include "device/device_manager.hpp"
 #include "engine_test_utils.hpp"
 #include "nn/engines/cpu_engine.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 #include "tensor_test_utils.hpp"
 
 using namespace tunx;
@@ -51,11 +51,11 @@ TEST_F(CPUEngineTest, DenseFwdReturnsCorrectResults) {
   };
 
   Tensor input({batch_size, in_features}, DType_t::FP32, getHost());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor weight({out_features, in_features}, DType_t::FP32, getHost());
-  fill_normal(weight, 0.0, 0.1);
+  fill_normal(weight, 0.0, 0.1, 12345ULL);
   Tensor bias({out_features}, DType_t::FP32, getHost());
-  fill_normal(bias, 0.0, 0.1);
+  fill_normal(bias, 0.0, 0.1, 12345ULL);
   Tensor output({batch_size, out_features}, DType_t::FP32, getHost());
 
   WorkspaceReq req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
@@ -92,9 +92,9 @@ TEST_F(CPUEngineTest, DenseWgradReturnsCorrectResults) {
   };
 
   Tensor input({batch_size, in_features}, DType_t::FP32, getHost());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor grad_output({batch_size, out_features}, DType_t::FP32, getHost());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor grad_weight_temp({out_features, in_features}, DType_t::FP32, getHost());
   fill(grad_weight_temp, 0.0f);
   Tensor grad_weight({out_features, in_features}, DType_t::FP32, getHost());
@@ -134,9 +134,9 @@ TEST_F(CPUEngineTest, DenseDgradReturnsCorrectResults) {
   };
 
   Tensor grad_output({batch_size, out_features}, DType_t::FP32, getHost());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor weight({out_features, in_features}, DType_t::FP32, getHost());
-  fill_normal(weight, 0.0, 0.1);
+  fill_normal(weight, 0.0, 0.1, 12345ULL);
   Tensor grad_input({batch_size, in_features}, DType_t::FP32, getHost());
 
   WorkspaceReq req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
@@ -172,7 +172,7 @@ TEST_F(CPUEngineTest, DenseBgradReturnsCorrectResults) {
   };
 
   Tensor grad_output({batch_size, out_features}, DType_t::FP32, getHost());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor grad_bias_temp({out_features}, DType_t::FP32, getHost());
   fill(grad_bias_temp, 0.0f);
   Tensor grad_bias({out_features}, DType_t::FP32, getHost());
@@ -220,9 +220,9 @@ TEST_F(CPUEngineTest, Conv2DWgradReturnsCorrectResult) {
   size_t output_w = (stats.input_w + 2 * stats.pad_w - stats.kernel_w) / stats.stride_w + 1;
 
   Tensor input({2, 8, 8, 3}, DType_t::FP32, getHost());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor grad_output({2, output_h, output_w, 4}, DType_t::FP32, getHost());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
 
   Tensor grad_weight_temp({4, 3, 3, 3}, DType_t::FP32, getHost());
   fill(grad_weight_temp, 0.0f);
@@ -274,7 +274,7 @@ TEST_F(CPUEngineTest, Conv2DBgradReturnsCorrectResult) {
 
   Tensor grad_output({stats.batch_size, output_h, output_w, stats.out_channels}, DType_t::FP32,
                      getHost());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
 
   Tensor grad_bias_temp({stats.out_channels}, DType_t::FP32, getHost());
   fill(grad_bias_temp, 0.0f);
@@ -314,11 +314,11 @@ TEST_F(CPUEngineTest, BatchNormBwdReturnsCorrectResult) {
   };
 
   Tensor input({2, 8, 8, 4}, DType_t::FP32, getHost());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor grad_output({2, 8, 8, 4}, DType_t::FP32, getHost());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor gamma({4}, DType_t::FP32, getHost());
-  fill_normal(gamma, 1.0, 0.1);
+  fill_normal(gamma, 1.0, 0.1, 12345ULL);
   Tensor mean({4}, DType_t::FP32, getHost());
   fill(mean, 0.0f);
   Tensor invar({4}, DType_t::FP32, getHost());
@@ -375,11 +375,11 @@ TEST_F(CPUEngineTest, LayerNormBwdReturnsCorrectResult) {
   };
 
   Tensor input({stats.batch_size, stats.channels}, DType_t::FP32, getHost());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor grad_output({stats.batch_size, stats.channels}, DType_t::FP32, getHost());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor gamma({stats.channels}, DType_t::FP32, getHost());
-  fill_normal(gamma, 1.0, 0.1);
+  fill_normal(gamma, 1.0, 0.1, 12345ULL);
 
   Tensor beta({stats.channels}, DType_t::FP32, getHost());
   fill(beta, 0.0f);
@@ -443,7 +443,7 @@ TEST_F(CPUEngineTest, AvgPoolFwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_avgpool_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getHost());
   Tensor input({2, 4, 4, 3}, DType_t::FP32, getHost());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor output({2, 2, 2, 3}, DType_t::FP32, getHost());
 
   engine_->avgpool_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
@@ -479,7 +479,7 @@ TEST_F(CPUEngineTest, AvgPoolBwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_avgpool_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getHost());
   Tensor grad_output({2, 2, 2, 3}, DType_t::FP32, getHost());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor grad_input({2, 4, 4, 3}, DType_t::FP32, getHost());
   fill(grad_input, 0.0f);
 
@@ -560,7 +560,7 @@ TEST_F(CPUEngineTest, MaxPoolBwdReturnsCorrectResult) {
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getHost());
 
   Tensor input({2, 4, 4, 3}, DType_t::FP32, getHost());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor output({2, 2, 2, 3}, DType_t::FP32, getHost());
   Tensor mask({2, 2, 2, 3}, DType_t::INT32, getHost());
 
@@ -568,7 +568,7 @@ TEST_F(CPUEngineTest, MaxPoolBwdReturnsCorrectResult) {
                          mask.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   Tensor grad_output({2, 2, 2, 3}, DType_t::FP32, getHost());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor grad_input({2, 4, 4, 3}, DType_t::FP32, getHost());
   fill(grad_input, 0.0f);
 
@@ -602,7 +602,7 @@ TEST_F(CPUEngineTest, ClassTokenFwdReturnsCorrectResult) {
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getHost());
 
   Tensor input({2, 3, 4}, DType_t::FP32, getHost());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor token({2, 4}, DType_t::FP32, getHost());
   Tensor output({2, 4, 4}, DType_t::FP32, getHost());
 
@@ -633,7 +633,7 @@ TEST_F(CPUEngineTest, ClassTokenBwdReturnsCorrectResult) {
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getHost());
 
   Tensor grad_output({2, 4, 4}, DType_t::FP32, getHost());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor grad_input({2, 3, 4}, DType_t::FP32, getHost());
   Tensor grad_token_temp({4}, DType_t::FP32, getHost());
   fill(grad_token_temp, 0.0f);
@@ -675,7 +675,7 @@ TEST_F(CPUEngineTest, EmbeddingFwdReturnsCorrectResult) {
   float host_input[] = {1.0f, 2.0f, 1.0f, 0.0f};
   std::memcpy(input.data_as<void>(), host_input, sizeof(host_input));
   Tensor weight({10, 8}, DType_t::FP32, getHost());
-  fill_normal(weight, 0.0, 0.5);
+  fill_normal(weight, 0.0, 0.5, 12345ULL);
   Tensor output({4, 8}, DType_t::FP32, getHost());
 
   engine_->embedding_fwd(engine_handle_, stats, input.data_as<void>(), weight.data_as<void>(),
@@ -709,7 +709,7 @@ TEST_F(CPUEngineTest, EmbeddingBwdReturnsCorrectResult) {
   float host_input[] = {1.0f, 2.0f, 1.0f, 0.0f};
   std::memcpy(input.data_as<void>(), host_input, sizeof(host_input));
   Tensor grad_output({4, 8}, DType_t::FP32, getHost());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor grad_weight_temp({10, 8}, DType_t::FP32, getHost());
   fill(grad_weight_temp, 0.0f);
   Tensor grad_weight({10, 8}, DType_t::FP32, getHost());
@@ -743,7 +743,7 @@ TEST_F(CPUEngineTest, ReLUFwdReturnsCorrectResult) {
   Tensor workspace({ws_size}, DType_t::BYTE, getHost());
 
   Tensor input({16, 256}, DType_t::FP32, getHost());
-  fill_normal(input, 0.0, 1.0);
+  fill_normal(input, 0.0, 1.0, 12345ULL);
   Tensor output({16, 256}, DType_t::FP32, getHost());
   Tensor mask({16, 256}, DType_t::BOOL, getHost());
 
@@ -812,7 +812,7 @@ TEST_F(CPUEngineTest, DropoutFwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_dropout_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getHost());
   Tensor input({2, 3, 2, 2}, DType_t::FP32, getHost());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor output({2, 3, 2, 2}, DType_t::FP32, getHost());
   Tensor mask({2, 3, 2, 2}, DType_t::BOOL, getHost());
 
@@ -854,7 +854,7 @@ TEST_F(CPUEngineTest, DropoutBwdReturnsCorrectResult) {
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getHost());
 
   Tensor grad_output({batch_size, channels, spatial_h, spatial_w}, DType_t::FP32, getHost());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor grad_input({batch_size, channels, spatial_h, spatial_w}, DType_t::FP32, getHost());
   Tensor mask({batch_size, channels, spatial_h, spatial_w}, DType_t::BOOL, getHost());
 

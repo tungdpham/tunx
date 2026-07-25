@@ -211,15 +211,14 @@ public:
           Job &job = forward_msg.get<Job>();
           Tensor predictions = job.data.get("output");
           Tensor targets = microbatch_labels[job.pid];
-          Tensor device_targets = targets.to_device(predictions.device());
+          Tensor device_targets = to_device(targets, predictions.device());
           float loss = 0.0f;
           criterion->compute_loss(predictions, device_targets, loss);
           loss *= (1.0f / num_microbatches);  // Average loss across microbatches
           total_corrects += compute_class_corrects(predictions, device_targets);
 
           total_loss += loss;
-          PoolAllocator &allocator =
-              PoolAllocator::instance(predictions.device(), nullptr);
+          PoolAllocator &allocator = PoolAllocator::instance(predictions.device(), nullptr);
           Tensor grad_output(predictions.shape(), predictions.dtype(), allocator);
           criterion->compute_gradient(predictions, device_targets, grad_output);
           grad_output *= 1.0 / (num_microbatches * accumulation_steps);
@@ -275,7 +274,7 @@ public:
           Job &job = forward_msg.get<Job>();
           Tensor predictions = job.data.get("output");
           Tensor targets = microbatch_labels[job.pid];
-          Tensor device_targets = targets.to_device(predictions.device());
+          Tensor device_targets = to_device(targets, predictions.device());
           float loss = 0.0f;
           criterion->compute_loss(predictions, device_targets, loss);
           loss *= (1.0f / num_microbatches);  // Average loss across microbatches
@@ -340,7 +339,7 @@ public:
       Job &job = forward_msg.get<Job>();
       Tensor predictions = job.data.get("output");
       Tensor targets = microbatch_labels[i];
-      Tensor device_targets = targets.to_device(predictions.device());
+      Tensor device_targets = to_device(targets, predictions.device());
 
       float loss = 0.0f;
       criterion->compute_loss(predictions, device_targets, loss);
@@ -418,7 +417,7 @@ public:
       Job &job = forward_msg.get<Job>();
       Tensor predictions = job.data.get("output");
       Tensor targets = microbatch_labels[i];
-      Tensor device_targets = targets.to_device(predictions.device());
+      Tensor device_targets = to_device(targets, predictions.device());
 
       float loss = 0.0f;
       criterion->compute_loss(predictions, device_targets, loss);

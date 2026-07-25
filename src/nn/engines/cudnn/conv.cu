@@ -478,7 +478,7 @@ void CuDNNEngine::conv2d_wgrad(engine_handle backend_handle, const Conv2DStats& 
 
   size_t num_elements =
       static_cast<size_t>(stats.out_channels) * stats.in_channels * stats.kernel_h * stats.kernel_w;
-  tunx::cuda::axpy(grad_weight_temp, grad_weight, num_elements, type_desc.param_dtype, stream);
+  cuda::axpy(grad_weight_temp, grad_weight, num_elements, type_desc.param_dtype, stream);
 }
 
 void CuDNNEngine::conv2d_bgrad(engine_handle backend_handle, const Conv2DStats& stats,
@@ -520,7 +520,7 @@ void CuDNNEngine::conv2d_bgrad(engine_handle backend_handle, const Conv2DStats& 
 
   size_t num_elements = stats.out_channels;
 
-  tunx::cuda::axpy(grad_bias_temp, grad_bias, num_elements, type_desc.param_dtype, stream);
+  cuda::axpy(grad_bias_temp, grad_bias, num_elements, type_desc.param_dtype, stream);
 }
 
 }  // namespace tunx

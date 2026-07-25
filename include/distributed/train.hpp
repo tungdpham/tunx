@@ -15,7 +15,7 @@
 #include "data_loading/batch_prefetcher.hpp"
 #include "nn/csv_logger.hpp"
 #include "nn/train.hpp"
-#include "tensor/tensor_ops.hpp"
+#include "tensor/ops.hpp"
 #include "threading/thread_wrapper.hpp"
 #include "type/type.hpp"
 

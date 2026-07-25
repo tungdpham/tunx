@@ -116,8 +116,8 @@ void initializeDefaultDevices();
 Device &getGPU(size_t gpu_index = 0);
 Device &getHost();
 
-inline std::ostream &operator<<(std::ostream &os, const tunx::DeviceID &device_id) {
-  os << tunx::device_type_to_string(device_id.type) << ":" << device_id.id;
+inline std::ostream &operator<<(std::ostream &os, const DeviceID &device_id) {
+  os << device_type_to_string(device_id.type) << ":" << device_id.id;
   return os;
 }
 

@@ -8,7 +8,7 @@
 
 #include <stdexcept>
 
-#include "kernel/kernel.hpp"
+#include "tensor/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -36,14 +36,13 @@ Vec<Tensor> DivImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residual
   }
 
   Tensor output = make_tensor(a.shape(), io_dtype_);
-  size_t n = a.size();
 
   if (this->is_training_) {
     residuals["a"] = a;
     residuals["b"] = b;
   }
 
-  kernel::div(a.dtype(), a.data_ptr(), b.data_ptr(), output.data_ptr(), n);
+  div(a, b, output);
 
   return {output};
 }
@@ -55,7 +54,6 @@ Vec<Tensor> DivImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &r
   const Tensor &grad_out = grad_outputs[0];
   const Tensor &a = residuals["a"];
   const Tensor &b = residuals["b"];
-  size_t n = grad_out.size();
 
   // grad_a = grad_out / b
   // grad_b = -(grad_out * a) / b^2
@@ -63,22 +61,15 @@ Vec<Tensor> DivImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &r
   Tensor grad_b = make_tensor(grad_out.shape(), this->io_dtype_);
 
   // grad_a = grad_out / b
-  kernel::div(grad_out.dtype(), grad_out.data_ptr(), b.data_ptr(), grad_a.data_ptr(), n,
-              engine_handle_.get_stream());
+  div(grad_out, b, grad_a, engine_handle_.get_stream());
 
   Tensor b_sq = make_tensor(grad_out.shape(), this->io_dtype_);
-  kernel::mul(b.dtype(), b.data_ptr(), b.data_ptr(), b_sq.data_ptr(), n,
-              engine_handle_.get_stream());
+  mul(b, b, b_sq, engine_handle_.get_stream());
 
   Tensor numerator = make_tensor(grad_out.shape(), this->io_dtype_);
-  kernel::mul(grad_out.dtype(), grad_out.data_ptr(), a.data_ptr(), numerator.data_ptr(), n,
-              engine_handle_.get_stream());
-
-  kernel::div(numerator.dtype(), numerator.data_ptr(), b_sq.data_ptr(), grad_b.data_ptr(), n,
-              engine_handle_.get_stream());
-
-  kernel::mul_scalar(grad_b.dtype(), grad_b.data_ptr(), -1, grad_b.data_ptr(), n,
-                     engine_handle_.get_stream());
+  mul(grad_out, a, numerator, engine_handle_.get_stream());
+  div(numerator, b_sq, grad_b, engine_handle_.get_stream());
+  mul_scalar(grad_b, -1, grad_b, engine_handle_.get_stream());
 
   return {grad_a, grad_b};
 }

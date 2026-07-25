@@ -5,7 +5,7 @@
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/dense.hpp"
-#include "tensor/tensor_ops.hpp"
+#include "tensor/ops.hpp"
 #include "tensor_test_utils.hpp"
 #include "type/type.hpp"
 
@@ -81,18 +81,18 @@ TEST_F(BF16Test, Dense) {
   auto bf16_params = bf16_dense.params();
   auto fp32_params = fp32_dense.params();
   for (size_t i = 0; i < bf16_params.size(); ++i) {
-    Tensor cpu_bf16_param = bf16_params[i].data().to_host();
-    Tensor cpu_fp32_param = fp32_params[i].data().to_host();
+    Tensor cpu_bf16_param = to_host(bf16_params[i].data());
+    Tensor cpu_fp32_param = to_host(fp32_params[i].data());
     bf16 *bf16_data = cpu_bf16_param.data_as<bf16>();
     float *fp32_data = cpu_fp32_param.data_as<float>();
     for (size_t j = 0; j < cpu_bf16_param.size(); ++j) {
       fp32_data[j] = static_cast<float>(bf16_data[j]);
     }
-    cpu_fp32_param.copy_to(fp32_params[i].data());
+    copy(cpu_fp32_param, fp32_params[i].data());
   }
 
   Tensor bf16_input = Tensor({32, 128}, DType_t::BF16, getHost());
-  fill_normal(bf16_input, 0.0f, 1.0f);
+  fill_normal(bf16_input, 0.0f, 1.0f, 12345ULL);
   Tensor fp32_input = Tensor({32, 128}, DType_t::FP32, getHost());
 
   bf16 *input_data = bf16_input.data_as<bf16>();
@@ -101,14 +101,14 @@ TEST_F(BF16Test, Dense) {
     input_data_fp32[i] = static_cast<float>(input_data[i]);
   }
 
-  Tensor device_fp32_input = fp32_input.to_device(device_);
-  Tensor device_bf16_input = bf16_input.to_device(device_);
+  Tensor device_fp32_input = to_device(fp32_input, device_);
+  Tensor device_bf16_input = to_device(bf16_input, device_);
 
   Tensor output_fp32 = fp32_dense.forward({device_fp32_input})[0];
   Tensor output_bf16 = bf16_dense.forward({device_bf16_input})[0];
 
-  Tensor cpu_output_fp32 = output_fp32.to_host();
-  Tensor cpu_output_bf16 = output_bf16.to_host();
+  Tensor cpu_output_fp32 = to_host(output_fp32);
+  Tensor cpu_output_bf16 = to_host(output_bf16);
 
   compare_tensor(cpu_output_bf16, cpu_output_fp32, 1e-2);
 }

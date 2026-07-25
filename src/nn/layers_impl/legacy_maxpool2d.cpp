@@ -10,7 +10,7 @@
 #include <stdexcept>
 
 #include "nn/engines/iengine.hpp"
-#include "tensor/tensor_ops.hpp"
+#include "tensor/ops.hpp"
 
 namespace tunx {
 namespace internal {

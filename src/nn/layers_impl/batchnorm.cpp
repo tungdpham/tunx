@@ -14,8 +14,8 @@
 #include "nn/engines/iengine.hpp"
 #include "nn/layer.hpp"
 #include "nn/stats/stats.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {

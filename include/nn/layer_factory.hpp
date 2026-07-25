@@ -33,7 +33,7 @@
 #include "nn/layers_impl/mul.hpp"
 #include "nn/layers_impl/sub.hpp"
 #include "nn/param.hpp"
-#include "tensor/tensor_ops.hpp"
+#include "tensor/ops.hpp"
 
 namespace tunx {
 inline Node operator+(const Node &a, const Node &b) {

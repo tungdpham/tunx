@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "augmentation.hpp"
-#include "tensor/tensor_ops.hpp"
+#include "tensor/ops.hpp"
 #include "threading/thread_handler.hpp"
 
 namespace tunx {

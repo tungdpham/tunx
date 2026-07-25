@@ -1,5 +1,5 @@
 #include "cuda/error_handler.cuh"
-#include "tensor/cuda/tensor_ops.hpp"
+#include "tensor/cuda/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {

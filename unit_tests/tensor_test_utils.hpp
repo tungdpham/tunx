@@ -3,6 +3,7 @@
 #include <fmt/core.h>
 #include <gtest/gtest.h>
 
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
 
@@ -24,8 +25,8 @@ void compare_array_t(const OutputType* output, const ExpectedType* expected, siz
 }
 
 inline void compare_tensor(const Tensor& output, const Tensor& expected, double eps = 1e-3) {
-  Tensor host_output = output.to_host();
-  Tensor host_expected = expected.to_host();
+  Tensor host_output = to_host(output);
+  Tensor host_expected = to_host(expected);
   EXPECT_EQ(host_output.size(), expected.size());
 
   DType_t output_dtype = host_output.dtype();

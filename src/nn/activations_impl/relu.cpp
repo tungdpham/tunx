@@ -8,6 +8,7 @@
 
 #include <cassert>
 
+#include "device/task.hpp"
 #include "nn/activations_impl/cpu/relu_kernels.hpp"
 #include "tensor/tensor.hpp"
 #ifdef TUNX_USE_CUDA

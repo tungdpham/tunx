@@ -962,7 +962,7 @@ void div_scalar(const double *a, double scalar, double *c, size_t size) {
 #endif
 }
 
-void set_scalar(double *c, double scalar, size_t size) {
+void fill(double *c, double scalar, size_t size) {
 #ifdef __AVX2__
   if (reinterpret_cast<uintptr_t>(c) % 32 == 0) {
     avx2_aligned_set_scalar(c, scalar, size);
@@ -1224,8 +1224,8 @@ double sum_squared_diff(const double *a, double mean, size_t size) {
 #endif
 }
 
-void fill_random_uniform(double *data, size_t size, double min_val, double max_val,
-                         unsigned long long seed) {
+void fill_uniform(double *data, size_t size, double min_val, double max_val,
+                  unsigned long long seed) {
   std::mt19937_64 gen(seed);
   std::uniform_real_distribution<double> dist(min_val, max_val);
   for (size_t i = 0; i < size; ++i) {
@@ -1233,8 +1233,7 @@ void fill_random_uniform(double *data, size_t size, double min_val, double max_v
   }
 }
 
-void fill_random_normal(double *data, size_t size, double mean, double stddev,
-                        unsigned long long seed) {
+void fill_normal(double *data, size_t size, double mean, double stddev, unsigned long long seed) {
   std::mt19937_64 gen(seed);
   std::normal_distribution<double> dist(mean, stddev);
   for (size_t i = 0; i < size; ++i) {

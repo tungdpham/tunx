@@ -8,7 +8,7 @@
 
 #include <stdexcept>
 
-#include "kernel/kernel.hpp"
+#include "tensor/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -36,10 +36,7 @@ Vec<Tensor> SubImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residual
   }
 
   Tensor output = make_tensor(a.shape(), io_dtype_);
-  size_t n = a.size();
-
-  kernel::sub(a.dtype(), a.data_ptr(), b.data_ptr(), output.data_ptr(), n,
-              engine_handle_.get_stream());
+  sub(a, b, output, engine_handle_.get_stream());
 
   return {output};
 }
@@ -49,16 +46,13 @@ Vec<Tensor> SubImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &r
     throw std::runtime_error("SubImpl: expected exactly 1 grad output");
   }
   const Tensor &grad_out = grad_outputs[0];
-  size_t n = grad_out.size();
 
   // grad_a = grad_out, grad_b = -grad_out
   Tensor grad_a = make_tensor(grad_out.shape(), this->io_dtype_);
   Tensor grad_b = make_tensor(grad_out.shape(), this->io_dtype_);
 
-  kernel::copy(grad_a.dtype(), grad_out.data_ptr(), grad_a.data_ptr(), n,
-               engine_handle_.get_stream());
-  kernel::mul_scalar(grad_out.dtype(), grad_out.data_ptr(), -1.0, grad_b.data_ptr(), n,
-                     engine_handle_.get_stream());
+  copy(grad_out, grad_a, engine_handle_.get_stream());
+  mul_scalar(grad_out, -1.0, grad_b, engine_handle_.get_stream());
 
   return {grad_a, grad_b};
 }

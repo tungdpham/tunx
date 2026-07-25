@@ -18,8 +18,8 @@
 #include "device/stream.hpp"
 #include "engine_test_utils.hpp"
 #include "nn/engines/cudnn_engine.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 #include "tensor_test_utils.hpp"
 #include "type/type.hpp"
 
@@ -64,15 +64,15 @@ protected:
     size_t in_features = input.shape()[1];
     size_t out_features = output.shape()[1];
 
-    Tensor input_host = input.to_host();
-    Tensor weight_host = weight.to_host();
-    Tensor bias_host = bias.to_host();
+    Tensor input_host = to_host(input);
+    Tensor weight_host = to_host(weight);
+    Tensor bias_host = to_host(bias);
 
     math_dense_fwd(input_host.data_as<float>(), weight_host.data_as<float>(),
                    bias_host.data_as<float>(), expected_output.data_as<float>(), batch_size,
                    in_features, out_features);
 
-    Tensor output_host = output.to_host();
+    Tensor output_host = to_host(output);
 
     compare_tensor(output_host, expected_output);
   }
@@ -86,13 +86,13 @@ protected:
     size_t in_features = input.shape()[1];
     size_t out_features = grad_output.shape()[1];
 
-    Tensor input_host = input.to_host();
-    Tensor grad_out_host = grad_output.to_host();
+    Tensor input_host = to_host(input);
+    Tensor grad_out_host = to_host(grad_output);
 
     math_dense_wgrad(input_host.data_as<float>(), grad_out_host.data_as<float>(),
                      expected_grad_weight.data_as<float>(), batch_size, in_features, out_features);
 
-    Tensor output_host = grad_weight.to_host();
+    Tensor output_host = to_host(grad_weight);
 
     compare_tensor(output_host, expected_grad_weight);
   }
@@ -105,13 +105,13 @@ protected:
     size_t in_features = grad_input.shape()[1];
     size_t out_features = grad_output.shape()[1];
 
-    Tensor grad_out_host = grad_output.to_host();
-    Tensor weight_host = weight.to_host();
+    Tensor grad_out_host = to_host(grad_output);
+    Tensor weight_host = to_host(weight);
 
     math_dense_dgrad(grad_out_host.data_as<float>(), weight_host.data_as<float>(),
                      expected_grad_input.data_as<float>(), batch_size, in_features, out_features);
 
-    Tensor output_host = grad_input.to_host();
+    Tensor output_host = to_host(grad_input);
 
     compare_tensor(output_host, expected_grad_input);
   }
@@ -123,12 +123,12 @@ protected:
     size_t batch_size = grad_output.shape()[0];
     size_t out_features = grad_output.shape()[1];
 
-    Tensor grad_out_host = grad_output.to_host();
+    Tensor grad_out_host = to_host(grad_output);
 
     math_dense_bgrad(grad_out_host.data_as<float>(), expected_grad_bias.data_as<float>(),
                      batch_size, out_features);
 
-    Tensor output_host = grad_bias.to_host();
+    Tensor output_host = to_host(grad_bias);
 
     compare_tensor(output_host, expected_grad_bias);
   }
@@ -145,8 +145,8 @@ protected:
     size_t output_h = (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
     size_t output_w = (stats.input_w + 2 * stats.pad_w - stats.kernel_w) / stats.stride_w + 1;
 
-    Tensor input_host = input.to_host();
-    Tensor grad_out_host = grad_output.to_host();
+    Tensor input_host = to_host(input);
+    Tensor grad_out_host = to_host(grad_output);
 
     math_conv2d_wgrad_naive(grad_out_host.data_as<float>(), input_host.data_as<float>(),
                             expected_grad_weight.data_as<float>(), stats.batch_size, stats.input_h,
@@ -154,7 +154,7 @@ protected:
                             stats.kernel_w, stats.stride_h, stats.stride_w, stats.pad_h,
                             stats.pad_w, output_h, output_w);
 
-    compare_tensor(grad_weight.to_host(), expected_grad_weight);
+    compare_tensor(to_host(grad_weight), expected_grad_weight);
   }
 
   void check_conv2d_bgrad(const Tensor& grad_output, const Tensor& grad_bias,
@@ -166,12 +166,12 @@ protected:
     size_t output_h = (stats.input_h + 2 * stats.pad_h - stats.kernel_h) / stats.stride_h + 1;
     size_t output_w = (stats.input_w + 2 * stats.pad_w - stats.kernel_w) / stats.stride_w + 1;
 
-    Tensor grad_out_host = grad_output.to_host();
+    Tensor grad_out_host = to_host(grad_output);
 
     math_conv2d_bgrad_naive(grad_out_host.data_as<float>(), expected_grad_bias.data_as<float>(),
                             stats.batch_size, stats.out_channels, output_h, output_w);
 
-    compare_tensor(grad_bias.to_host(), expected_grad_bias);
+    compare_tensor(to_host(grad_bias), expected_grad_bias);
   }
 
   void check_batchnorm_bwd(const Tensor& grad_output, const Tensor& input, const Tensor& gamma,
@@ -192,11 +192,11 @@ protected:
     size_t C = stats.channels;
     size_t S = stats.height * stats.width;
 
-    Tensor grad_out_host = grad_output.to_host();
-    Tensor input_host = input.to_host();
-    Tensor gamma_host = gamma.to_host();
-    Tensor mean_host = mean.to_host();
-    Tensor invar_host = invar.to_host();
+    Tensor grad_out_host = to_host(grad_output);
+    Tensor input_host = to_host(input);
+    Tensor gamma_host = to_host(gamma);
+    Tensor mean_host = to_host(mean);
+    Tensor invar_host = to_host(invar);
 
     // NHWC batchnorm backward: input layout is {N, H, W, C}
     math_batchnorm_bwd(grad_out_host.data_as<float>(), input_host.data_as<float>(),
@@ -205,9 +205,9 @@ protected:
                        expected_grad_beta.data_as<float>(), expected_grad_input.data_as<float>(),
                        (const bool*)nullptr, N, C, S, true, false);
 
-    compare_tensor(grad_input.to_host(), expected_grad_input);
-    compare_tensor(grad_gamma.to_host(), expected_grad_gamma);
-    compare_tensor(grad_beta.to_host(), expected_grad_beta);
+    compare_tensor(to_host(grad_input), expected_grad_input);
+    compare_tensor(to_host(grad_gamma), expected_grad_gamma);
+    compare_tensor(to_host(grad_beta), expected_grad_beta);
   }
 
   void check_layernorm_bwd(const Tensor& grad_output, const Tensor& input, const Tensor& gamma,
@@ -223,24 +223,24 @@ protected:
     fill(expected_grad_gamma, 0.0f);
     fill(expected_grad_beta, 0.0f);
 
-    Tensor grad_out_host = grad_output.to_host();
-    Tensor input_host = input.to_host();
-    Tensor gamma_host = gamma.to_host();
+    Tensor grad_out_host = to_host(grad_output);
+    Tensor input_host = to_host(input);
+    Tensor gamma_host = to_host(gamma);
 
     math_layernorm_bwd(grad_out_host.data_as<float>(), input_host.data_as<float>(),
                        gamma_host.data_as<float>(), expected_grad_input.data_as<float>(),
                        expected_grad_gamma.data_as<float>(), expected_grad_beta.data_as<float>(),
                        stats.batch_size, stats.channels, static_cast<float>(stats.epsilon));
 
-    compare_tensor(grad_input.to_host(), expected_grad_input);
-    compare_tensor(grad_gamma.to_host(), expected_grad_gamma);
-    compare_tensor(grad_beta.to_host(), expected_grad_beta);
+    compare_tensor(to_host(grad_input), expected_grad_input);
+    compare_tensor(to_host(grad_gamma), expected_grad_gamma);
+    compare_tensor(to_host(grad_beta), expected_grad_beta);
   }
 
   void check_avgpool_fwd(const Tensor& input, const Tensor& output, const AvgPool2DStats& stats) {
     Tensor expected_output(output.shape(), output.dtype(), DeviceAllocator::instance(getHost()));
     // NHWC: input shape is {N, H, W, C}
-    Tensor input_host = input.to_host();
+    Tensor input_host = to_host(input);
 
     size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
     size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
@@ -250,7 +250,7 @@ protected:
                      stats.pool_w, stats.stride_h, stats.stride_w, stats.pad_h, stats.pad_w,
                      output_h, output_w);
 
-    compare_tensor(output.to_host(), expected_output);
+    compare_tensor(to_host(output), expected_output);
   }
 
   void check_avgpool_bwd(const Tensor& grad_output, const Tensor& grad_input,
@@ -259,7 +259,7 @@ protected:
                                DeviceAllocator::instance(getHost()));
     fill(expected_grad_input, 0.0f);
     // NHWC: grad_output shape is {N, OH, OW, C}
-    Tensor grad_out_host = grad_output.to_host();
+    Tensor grad_out_host = to_host(grad_output);
 
     size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
     size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
@@ -269,15 +269,15 @@ protected:
                      stats.pool_w, stats.stride_h, stats.stride_w, stats.pad_h, stats.pad_w,
                      output_h, output_w);
 
-    compare_tensor(grad_input.to_host(), expected_grad_input);
-    compare_tensor(grad_input.to_host(), expected_grad_input);
+    compare_tensor(to_host(grad_input), expected_grad_input);
+    compare_tensor(to_host(grad_input), expected_grad_input);
   }
 
   void check_maxpool_fwd(const Tensor& input, const Tensor& output, const Tensor& mask,
                          const MaxPool2DStats& stats) {
     Tensor expected_output(output.shape(), output.dtype(), DeviceAllocator::instance(getHost()));
     Tensor expected_mask(mask.shape(), mask.dtype(), DeviceAllocator::instance(getHost()));
-    Tensor input_host = input.to_host();
+    Tensor input_host = to_host(input);
 
     size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
     size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
@@ -287,8 +287,8 @@ protected:
                        stats.width, stats.channels, stats.pool_h, stats.pool_w, stats.stride_h,
                        stats.stride_w, stats.pad_h, stats.pad_w, output_h, output_w);
 
-    compare_tensor(output.to_host(), expected_output);
-    compare_tensor(mask.to_host(), expected_mask);
+    compare_tensor(to_host(output), expected_output);
+    compare_tensor(to_host(mask), expected_mask);
   }
 
   void check_maxpool_bwd(const Tensor& grad_output, const Tensor& grad_input, const Tensor& mask,
@@ -297,8 +297,8 @@ protected:
                                DeviceAllocator::instance(getHost()));
     fill(expected_grad_input, 0.0f);
 
-    Tensor grad_out_host = grad_output.to_host();
-    Tensor mask_host = mask.to_host();
+    Tensor grad_out_host = to_host(grad_output);
+    Tensor mask_host = to_host(mask);
 
     size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
     size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
@@ -308,21 +308,21 @@ protected:
                        output_w, stats.height, stats.width, stats.pool_w, stats.stride_h,
                        stats.stride_w, stats.pad_h, stats.pad_w);
 
-    compare_tensor(grad_input.to_host(), expected_grad_input);
+    compare_tensor(to_host(grad_input), expected_grad_input);
   }
 
   void check_class_token_fwd(const Tensor& input, const Tensor& token, const Tensor& output,
                              const ClassTokenStats& stats) {
     Tensor expected_output(output.shape(), output.dtype(), DeviceAllocator::instance(getHost()));
 
-    Tensor input_host = input.to_host();
-    Tensor token_host = token.to_host();
+    Tensor input_host = to_host(input);
+    Tensor token_host = to_host(token);
 
     math_class_token_fwd(input_host.data_as<float>(), token_host.data_as<float>(),
                          expected_output.data_as<float>(), stats.batch_size, stats.seq_len,
                          stats.embed_dim);
 
-    compare_tensor(output.to_host(), expected_output);
+    compare_tensor(to_host(output), expected_output);
   }
 
   void check_class_token_bwd(const Tensor& grad_output, const Tensor& grad_input,
@@ -333,28 +333,28 @@ protected:
                                DeviceAllocator::instance(getHost()));
     fill(expected_grad_token, 0.0f);
 
-    Tensor grad_out_host = grad_output.to_host();
+    Tensor grad_out_host = to_host(grad_output);
 
     math_class_token_bwd(grad_out_host.data_as<float>(), expected_grad_input.data_as<float>(),
                          expected_grad_token.data_as<float>(), stats.batch_size, stats.seq_len,
                          stats.embed_dim);
 
-    compare_tensor(grad_input.to_host(), expected_grad_input);
-    compare_tensor(grad_token.to_host(), expected_grad_token);
+    compare_tensor(to_host(grad_input), expected_grad_input);
+    compare_tensor(to_host(grad_token), expected_grad_token);
   }
 
   void check_dropout_fwd(const Tensor& input, const Tensor& mask, const Tensor& output,
                          const DropoutStats& stats) {
     Tensor expected_output(output.shape(), output.dtype(), DeviceAllocator::instance(getHost()));
 
-    Tensor input_host = input.to_host();
-    Tensor mask_host = mask.to_host();
+    Tensor input_host = to_host(input);
+    Tensor mask_host = to_host(mask);
 
     math_dropout_fwd(input_host.data_as<float>(), expected_output.data_as<float>(),
                      mask_host.data_as<bool>(), stats.batch_size, stats.channels,
                      stats.spatial_size, static_cast<float>(stats.dropout_rate));
 
-    compare_tensor(output.to_host(), expected_output);
+    compare_tensor(to_host(output), expected_output);
   }
 
   void check_dropout_bwd(const Tensor& grad_output, const Tensor& mask, const Tensor& grad_input,
@@ -362,28 +362,28 @@ protected:
     Tensor expected_grad_input(grad_input.shape(), grad_input.dtype(),
                                DeviceAllocator::instance(getHost()));
 
-    Tensor grad_out_host = grad_output.to_host();
-    Tensor mask_host = mask.to_host();
+    Tensor grad_out_host = to_host(grad_output);
+    Tensor mask_host = to_host(mask);
 
     math_dropout_bwd(grad_out_host.data_as<float>(), expected_grad_input.data_as<float>(),
                      mask_host.data_as<bool>(), stats.batch_size, stats.channels,
                      stats.spatial_size, static_cast<float>(1.0 / (1.0 - stats.dropout_rate)));
 
-    compare_tensor(grad_input.to_host(), expected_grad_input);
+    compare_tensor(to_host(grad_input), expected_grad_input);
   }
 
   void check_embedding_fwd(const Tensor& input, const Tensor& weight, const Tensor& output,
                            const EmbeddingStats& stats) {
     Tensor expected_output(output.shape(), output.dtype(), DeviceAllocator::instance(getHost()));
 
-    Tensor input_host = input.to_host();
-    Tensor weight_host = weight.to_host();
+    Tensor input_host = to_host(input);
+    Tensor weight_host = to_host(weight);
 
     math_embedding_fwd(input_host.data_as<float>(), weight_host.data_as<float>(),
                        expected_output.data_as<float>(), stats.num_indices, stats.vocab_size,
                        stats.embed_dim, stats.padding_idx);
 
-    compare_tensor(output.to_host(), expected_output);
+    compare_tensor(to_host(output), expected_output);
   }
 
   void check_embedding_bwd(const Tensor& input, const Tensor& grad_output,
@@ -392,14 +392,14 @@ protected:
                                 DeviceAllocator::instance(getHost()));
     fill(expected_grad_weight, 0.0f);
 
-    Tensor input_host = input.to_host();
-    Tensor grad_out_host = grad_output.to_host();
+    Tensor input_host = to_host(input);
+    Tensor grad_out_host = to_host(grad_output);
 
     math_embedding_bwd(input_host.data_as<float>(), grad_out_host.data_as<float>(),
                        expected_grad_weight.data_as<float>(), stats.num_indices, stats.vocab_size,
                        stats.embed_dim, stats.padding_idx);
 
-    compare_tensor(grad_weight.to_host(), expected_grad_weight);
+    compare_tensor(to_host(grad_weight), expected_grad_weight);
   }
 
   static bool has_gpu_;
@@ -475,11 +475,11 @@ TEST_F(CuDNNEngineTest, DenseFwdReturnsCorrectResults) {
   };
 
   Tensor input({16, 64}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor weight({32, 64}, DType_t::FP32, getGPU());  // [output_features, input_features]
-  fill_normal(weight, 0.0, 0.1);
+  fill_normal(weight, 0.0, 0.1, 12345ULL);
   Tensor bias({32}, DType_t::FP32, getGPU());
-  fill_normal(bias, 0.0, 0.1);
+  fill_normal(bias, 0.0, 0.1, 12345ULL);
   Tensor output({16, 32}, DType_t::FP32, getGPU());
 
   WorkspaceReq req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
@@ -510,9 +510,9 @@ TEST_F(CuDNNEngineTest, DenseWgradReturnsCorrectResults) {
   };
 
   Tensor input({batch_size, in_features}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor grad_output({batch_size, out_features}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor grad_weight({out_features, in_features}, DType_t::FP32, getGPU());
   fill(grad_weight, 0.0f);
 
@@ -539,9 +539,9 @@ TEST_F(CuDNNEngineTest, DenseDgradReturnsCorrectResults) {
   };
 
   Tensor grad_output({16, 32}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor weight({32, 64}, DType_t::FP32, getGPU());  // [output_features, input_features]
-  fill_normal(weight, 0.0, 0.1);
+  fill_normal(weight, 0.0, 0.1, 12345ULL);
   Tensor grad_input({16, 64}, DType_t::FP32, getGPU());
 
   WorkspaceReq req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
@@ -571,7 +571,7 @@ TEST_F(CuDNNEngineTest, DenseBgradReturnsCorrectResults) {
   };
 
   Tensor grad_output({batch_size, out_features}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor grad_bias({out_features}, DType_t::FP32, getGPU());
   fill(grad_bias, 0.0f);
   cudaDeviceSynchronize();
@@ -609,9 +609,9 @@ TEST_F(CuDNNEngineTest, Conv2DWgradReturnsCorrectResult) {
 
   // NHWC layout: {N, H, W, C}
   Tensor input({2, 8, 8, 3}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor grad_output({2, 8, 8, 4}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
 
   // Weight layout: {OC, KH, KW, IC}
   Tensor grad_weight({4, 3, 3, 3}, DType_t::FP32, getGPU());
@@ -665,7 +665,7 @@ TEST_F(CuDNNEngineTest, Conv2DBgradReturnsCorrectResult) {
 
   // NHWC layout: {N, H, W, C}
   Tensor grad_output({batch_size, output_h, output_w, out_channels}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
 
   Tensor grad_bias({out_channels}, DType_t::FP32, getGPU());
   fill(grad_bias, 0.0f);
@@ -698,11 +698,11 @@ TEST_F(CuDNNEngineTest, BatchNormBwdReturnsCorrectResult) {
 
   // NHWC layout: {N, H, W, C}
   Tensor input({2, 8, 8, 4}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor grad_output({2, 8, 8, 4}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor gamma({4}, DType_t::FP32, getGPU());
-  fill_normal(gamma, 1.0, 0.1);
+  fill_normal(gamma, 1.0, 0.1, 12345ULL);
   Tensor mean({4}, DType_t::FP32, getGPU());
   fill(mean, 0.0f);
   Tensor invar({4}, DType_t::FP32, getGPU());
@@ -745,11 +745,11 @@ TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
   };
 
   Tensor input({batch_size, channels}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor grad_output({batch_size, channels}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor gamma({channels}, DType_t::FP32, getGPU());
-  fill_normal(gamma, 1.0, 0.1);
+  fill_normal(gamma, 1.0, 0.1, 12345ULL);
 
   // Run layernorm forward first to capture real mean and inv_variance
   Tensor beta({channels}, DType_t::FP32, getGPU());
@@ -805,7 +805,7 @@ TEST_F(CuDNNEngineTest, AvgPoolFwdReturnsCorrectResult) {
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
   // NHWC layout: {N, H, W, C}
   Tensor input({2, 4, 4, 3}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor output({2, 2, 2, 3}, DType_t::FP32, getGPU());
 
   EXPECT_NO_THROW({
@@ -851,7 +851,7 @@ TEST_F(CuDNNEngineTest, AvgPoolBwdReturnsCorrectResult) {
   Tensor workspace({req.bwd_workspace}, DType_t::BYTE, getGPU());
   // NHWC layout: {N, H, W, C}
   Tensor grad_output({batch_size, output_h, output_w, channels}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor grad_input({batch_size, height, width, channels}, DType_t::FP32, getGPU());
   fill(grad_input, 0.0f);  // zero before accumulation
 
@@ -946,7 +946,7 @@ TEST_F(CuDNNEngineTest, MaxPoolBwdReturnsCorrectResult) {
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getGPU());
 
   Tensor input({batch_size, height, width, channels}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor output({batch_size, output_h, output_w, channels}, DType_t::FP32, getGPU());
   Tensor mask({batch_size, output_h, output_w, channels}, DType_t::INT32, getGPU());
 
@@ -954,7 +954,7 @@ TEST_F(CuDNNEngineTest, MaxPoolBwdReturnsCorrectResult) {
                          mask.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   Tensor grad_output({batch_size, output_h, output_w, channels}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor grad_input({batch_size, height, width, channels}, DType_t::FP32, getGPU());
   fill(grad_input, 0.0f);
 
@@ -982,7 +982,7 @@ TEST_F(CuDNNEngineTest, ClassTokenFwdReturnsCorrectResult) {
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
 
   Tensor input({2, 3, 4}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor token({2, 4}, DType_t::FP32, getGPU());
   Tensor output({2, 4, 4}, DType_t::FP32, getGPU());
 
@@ -1015,7 +1015,7 @@ TEST_F(CuDNNEngineTest, ClassTokenBwdReturnsCorrectResult) {
   // Output seq_len is seq_len + 1 (prepended class token)
   size_t output_seq_len = seq_len + 1;
   Tensor grad_output({batch_size, output_seq_len, embed_dim}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor grad_input({batch_size, seq_len, embed_dim}, DType_t::FP32, getGPU());
   Tensor grad_token({embed_dim}, DType_t::FP32, getGPU());
   fill(grad_token, 0.0f);
@@ -1042,7 +1042,7 @@ TEST_F(CuDNNEngineTest, DropoutFwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_dropout_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
   Tensor input({2, 3, 2, 2}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor output({2, 3, 2, 2}, DType_t::FP32, getGPU());
   Tensor mask({2, 3, 2, 2}, DType_t::BOOL, getGPU());
 
@@ -1057,8 +1057,8 @@ TEST_F(CuDNNEngineTest, DropoutFwdReturnsCorrectResult) {
   std::vector<uint8> mask_raw(mask_elements);
   cudaMemcpy(mask_raw.data(), mask.data_as<bool>(), mask_elements * sizeof(bool),
              cudaMemcpyDeviceToHost);
-  Tensor input_host = input.to_host();
-  Tensor output_host = output.to_host();
+  Tensor input_host = to_host(input);
+  Tensor output_host = to_host(output);
   float scale = 1.0f / (1.0f - static_cast<float>(stats.dropout_rate));
   const float* in_data = input_host.data_as<float>();
   const float* out_data = output_host.data_as<float>();
@@ -1095,7 +1095,7 @@ TEST_F(CuDNNEngineTest, DropoutBwdReturnsCorrectResult) {
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getGPU());
 
   Tensor grad_output({batch_size, channels, spatial_h, spatial_w}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor grad_input({batch_size, channels, spatial_h, spatial_w}, DType_t::FP32, getGPU());
   Tensor mask({batch_size, channels, spatial_h, spatial_w}, DType_t::BOOL, getGPU());
   // Fill mask: alternate true/false
@@ -1117,8 +1117,8 @@ TEST_F(CuDNNEngineTest, DropoutBwdReturnsCorrectResult) {
   std::vector<uint8> mask_raw(mask_elements);
   cudaMemcpy(mask_raw.data(), mask.data_as<bool>(), mask_elements * sizeof(bool),
              cudaMemcpyDeviceToHost);
-  Tensor grad_output_host = grad_output.to_host();
-  Tensor grad_input_host = grad_input.to_host();
+  Tensor grad_output_host = to_host(grad_output);
+  Tensor grad_input_host = to_host(grad_input);
   const float* go_data = grad_output_host.data_as<float>();
   const float* gi_data = grad_input_host.data_as<float>();
   for (size_t i = 0; i < mask_elements; ++i) {
@@ -1180,7 +1180,7 @@ TEST_F(CuDNNEngineTest, EmbeddingBwdReturnsCorrectResult) {
   Tensor input({num_indices}, DType_t::FP32, getGPU());
   cudaMemcpy(input.data_as<void>(), host_input, sizeof(host_input), cudaMemcpyHostToDevice);
   Tensor grad_output({num_indices, embed_dim}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor grad_weight({vocab_size, embed_dim}, DType_t::FP32, getGPU());
   fill(grad_weight, 0.0f);
 
@@ -1207,7 +1207,7 @@ TEST_F(CuDNNEngineTest, ReLUFwdReturnsCorrectResult) {
   Tensor workspace({ws_size > 0 ? ws_size : 1}, DType_t::BYTE, getGPU());
 
   Tensor input({batch_size, spatial_size}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 1.0);
+  fill_normal(input, 0.0, 1.0, 12345ULL);
 
   Tensor output({batch_size, spatial_size}, DType_t::FP32, getGPU());
   Tensor mask({batch_size, spatial_size}, DType_t::BOOL, getGPU());
@@ -1217,8 +1217,8 @@ TEST_F(CuDNNEngineTest, ReLUFwdReturnsCorrectResult) {
                       mask.data_as<bool>(), workspace.data_as<void>(), type_desc);
   });
 
-  Tensor input_host = input.to_host();
-  Tensor output_host = output.to_host();
+  Tensor input_host = to_host(input);
+  Tensor output_host = to_host(output);
   const float* in_data = input_host.data_as<float>();
   const float* out_data = output_host.data_as<float>();
   for (size_t i = 0; i < input.size(); ++i) {
@@ -1265,7 +1265,7 @@ TEST_F(CuDNNEngineTest, ReLUBwdReturnsCorrectResult) {
                       type_desc);
   });
 
-  Tensor grad_input_host = grad_input.to_host();
+  Tensor grad_input_host = to_host(grad_input);
   const float* gi_data = grad_input_host.data_as<float>();
   for (size_t i = 0; i < mask_elements; ++i) {
     float expected = (i % 2 == 0) ? 1.0f : 0.0f;

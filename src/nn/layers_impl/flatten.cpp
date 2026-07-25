@@ -8,6 +8,8 @@
 
 #include <stdexcept>
 
+#include "nn/engines/engine_handle.hpp"
+
 namespace tunx {
 namespace internal {
 
@@ -24,12 +26,11 @@ Tensor FlattenImpl::forward_impl(const Tensor &input, Residuals &residuals) {
   Vec<size_t> output_shape = compute_output_shape(input.shape());
   Tensor output = make_tensor(output_shape, io_dtype_);
 
-  input.copy_to(output);
+  copy(input, output, engine_handle_.get_stream());
   return output;
 }
 
 Tensor FlattenImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  // const Vec<size_t> &original_shape = residuals["original_shape"];
   const Tensor &shape_tensor = residuals["original_shape"];
   if (!shape_tensor) {
     throw std::runtime_error("No cached original shape found for backward pass in FlattenImpl");
@@ -37,14 +38,8 @@ Tensor FlattenImpl::backward_impl(const Tensor &grad_output, Residuals &residual
   Vec<size_t> original_shape(shape_tensor.size());
   std::copy(shape_tensor.data_as<size_t>(), shape_tensor.data_as<size_t>() + shape_tensor.size(),
             original_shape.begin());
-
-  size_t expected_size =
-      std::accumulate(original_shape.begin(), original_shape.end(), 1, std::multiplies<size_t>());
-  if (grad_output.size() != expected_size) {
-    throw std::runtime_error("Gradient size does not match original input size in FlattenImpl");
-  }
   Tensor grad_input = make_tensor(original_shape, io_dtype_);
-  grad_output.copy_to(grad_input);
+  copy(grad_output, grad_input, engine_handle_.get_stream());
   return grad_input;
 }
 

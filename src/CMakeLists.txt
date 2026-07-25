@@ -121,20 +121,6 @@ if(ENABLE_CUDA)
     target_link_libraries(tunx_kernel PUBLIC tunx_cuda CUDA::cudart CUDA::cublas)
 endif()
 
-# Matrix module
-file(GLOB_RECURSE TUNX_MATRIX_SOURCES 
-    "matrix/*.cpp"
-)
-add_library(tunx_matrix STATIC ${TUNX_MATRIX_SOURCES})
-target_include_directories(tunx_matrix PUBLIC 
-    $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-)
-target_link_libraries(tunx_matrix PUBLIC tunx_device tunx_kernel tunx_type)
-if(NOT MSVC)
-    target_link_libraries(tunx_matrix PUBLIC m)
-endif()
-
 # Tensor module
 file(GLOB_RECURSE TUNX_TENSOR_SOURCES 
     "tensor/*.cpp"
@@ -151,7 +137,7 @@ if(ENABLE_CUDA)
         CUDA_STANDARD 20
     )
 endif()
-target_link_libraries(tunx_tensor PUBLIC tunx_matrix tunx_kernel tunx_device tunx_type)
+target_link_libraries(tunx_tensor PUBLIC tunx_kernel tunx_device tunx_type)
 if(NOT MSVC)
     target_link_libraries(tunx_tensor PUBLIC m)
 endif()
@@ -224,7 +210,7 @@ target_include_directories(tunx_data_loading PUBLIC
     $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
-target_link_libraries(tunx_data_loading PUBLIC tunx_utils tunx_tensor tunx_matrix tunx_type)
+target_link_libraries(tunx_data_loading PUBLIC tunx_utils tunx_tensor tunx_type)
 target_link_libraries(tunx_data_loading PUBLIC nlohmann_json::nlohmann_json)
 
 # Data augmentation library
@@ -335,7 +321,7 @@ target_link_libraries(tunx_distributed PUBLIC nlohmann_json::nlohmann_json ${IBV
 target_compile_definitions(tunx_distributed PUBLIC ASIO_STANDALONE)
 
 # Main consolidated module setup
-set(tunx_MODULES tunx_type tunx_device tunx_threading tunx_kernel tunx_logging tunx_matrix tunx_tensor tunx_data_augmentation tunx_data_loading tunx_nn tunx_utils tunx_math tunx_distributed tunx_profiling tunx_partitioner)
+set(tunx_MODULES tunx_type tunx_device tunx_threading tunx_kernel tunx_logging tunx_tensor tunx_data_augmentation tunx_data_loading tunx_nn tunx_utils tunx_math tunx_distributed tunx_profiling tunx_partitioner)
 if(ENABLE_CUDA)
     list(APPEND tunx_MODULES tunx_cuda)
 endif()

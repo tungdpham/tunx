@@ -240,8 +240,8 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
          (config.max_steps == -1 || num_batches < config.max_steps)) {
     auto batch_start = chrono::high_resolution_clock::now();
     ++num_batches;
-    Tensor device_input = batch_data.to_device(model_device);
-    auto device_labels = batch_labels.to_device(model_device);
+    Tensor device_input = to_device(batch_data, model_device);
+    Tensor device_labels = to_device(batch_labels, model_device);
 
     TensorBundle inputs{{"input", device_input}};
 
@@ -466,8 +466,8 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
         }
       }
       auto batch_start = chrono::high_resolution_clock::now();
-      Tensor device_input = batch_data.to_device(model_device);
-      Tensor device_labels = batch_labels.to_device(model_device);
+      Tensor device_input = to_device(batch_data, model_device);
+      Tensor device_labels = to_device(batch_labels, model_device);
       TensorBundle inputs{{"input", device_input}};
       TensorBundle outputs = graph.forward(inputs);
       Tensor predictions = outputs.get("output");
@@ -604,19 +604,17 @@ Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
   int val_batches = 0;
   sref<Device> model_device = graph.device();
 
-  Tensor device_batch_labels;
-
   while (val_dataset->get_batch(config.batch_size, batch_data, batch_labels)) {
-    Tensor device_input = batch_data.to_device(model_device);
+    Tensor device_input = to_device(batch_data, model_device);
     TensorBundle inputs{{"input", device_input}};
     TensorBundle outputs = graph.forward(inputs);
     Tensor predictions = outputs.get("output");
 
-    device_batch_labels = batch_labels.to_device(model_device);
+    Tensor device_labels = to_device(batch_labels, model_device);
     float loss;
-    criterion->compute_loss(predictions, device_batch_labels, loss);
+    criterion->compute_loss(predictions, device_labels, loss);
     val_loss += loss;
-    int batch_corrects = compute_class_corrects(predictions, device_batch_labels);
+    int batch_corrects = compute_class_corrects(predictions, device_labels);
     val_corrects += batch_corrects;
     ++val_batches;
 
@@ -631,19 +629,19 @@ Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
         metrics["accuracy_pct"] = batch_acc_pct;
       }
       if (config.log_mode.log_precision) {
-        metrics["precision"] = compute_precision(predictions, device_batch_labels);
+        metrics["precision"] = compute_precision(predictions, device_labels);
       }
       if (config.log_mode.log_recall) {
-        metrics["recall"] = compute_recall(predictions, device_batch_labels);
+        metrics["recall"] = compute_recall(predictions, device_labels);
       }
       if (config.log_mode.log_f1_score) {
-        metrics["f1_score"] = compute_f1_score(predictions, device_batch_labels);
+        metrics["f1_score"] = compute_f1_score(predictions, device_labels);
       }
       if (config.log_mode.log_perplexity) {
         metrics["perplexity"] = std::exp(static_cast<double>(loss));
       }
       if (config.log_mode.log_top_k_accuracy) {
-        metrics["top_k_accuracy"] = compute_top_k_accuracy(predictions, device_batch_labels, 5);
+        metrics["top_k_accuracy"] = compute_top_k_accuracy(predictions, device_labels, 5);
       }
 
       logger->log_val_step(epoch, val_batches, metrics);

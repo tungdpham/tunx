@@ -11,6 +11,7 @@
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
 #include "partitioner/graph_partitioner.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 
 using namespace tunx;
@@ -73,8 +74,8 @@ void expect_tensors_close(const Tensor &lhs, const Tensor &rhs, float tolerance)
   ASSERT_TRUE(rhs);
   ASSERT_EQ(lhs.shape(), rhs.shape());
 
-  Tensor lhs_cpu = lhs.to_device(getHost());
-  Tensor rhs_cpu = rhs.to_device(getHost());
+  Tensor lhs_cpu = to_device(lhs, getHost());
+  Tensor rhs_cpu = to_device(rhs, getHost());
   const float *lhs_data = lhs_cpu.data_as<float>();
   const float *rhs_data = rhs_cpu.data_as<float>();
   for (size_t i = 0; i < lhs_cpu.size(); ++i) {
@@ -203,12 +204,12 @@ TEST_F(GraphPlannerStateTest, PartitionedResNet9MatchesFullGraphForwardAndBackwa
   Graph stage1 = reload_graph(partitions[1].graph, allocator);
 
   Tensor input = Tensor({1, 32, 32, 3}, DType_t::FP32, getHost());
-  fill_uniform(input, -1.0f, 1.0f);
+  fill_uniform(input, -1.0f, 1.0f, 12345ULL);
 
-  TensorBundle full_inputs{{"input", input.to_device(full_graph.device())}};
+  TensorBundle full_inputs{{"input", to_device(input, full_graph.device())}};
   TensorBundle full_outputs = full_graph.forward(full_inputs);
 
-  TensorBundle stage0_inputs{{partitions[0].input_uids.front(), input.to_device(stage0.device())}};
+  TensorBundle stage0_inputs{{partitions[0].input_uids.front(), to_device(input, stage0.device())}};
   TensorBundle stage0_outputs = stage0.forward(stage0_inputs);
   TensorBundle stage1_inputs = make_partition_input_map(stage0_outputs, partitions[1].input_uids);
   TensorBundle stage1_outputs = stage1.forward(stage1_inputs);
@@ -217,13 +218,13 @@ TEST_F(GraphPlannerStateTest, PartitionedResNet9MatchesFullGraphForwardAndBackwa
                        stage1_outputs.get(partitions[1].output_uids.front()), 1e-4f);
 
   Tensor grad_output = Tensor({1, 10}, DType_t::FP32, getHost());
-  fill_uniform(grad_output, -1.0f, 1.0f);
+  fill_uniform(grad_output, -1.0f, 1.0f, 12345ULL);
 
-  TensorBundle full_output_grads{{"output", grad_output.to_device(full_graph.device())}};
+  TensorBundle full_output_grads{{"output", to_device(grad_output, full_graph.device())}};
   TensorBundle full_grad_inputs = full_graph.backward(full_output_grads);
 
   TensorBundle stage1_output_grads{
-      {partitions[1].output_uids.front(), grad_output.to_device(stage1.device())}};
+      {partitions[1].output_uids.front(), to_device(grad_output, stage1.device())}};
   TensorBundle stage1_grad_inputs = stage1.backward(stage1_output_grads);
   TensorBundle stage0_output_grads =
       make_partition_input_map(stage1_grad_inputs, partitions[0].output_uids);

@@ -15,8 +15,8 @@
 #include "nn/blocks_impl/residual_block.hpp"
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/conv2d.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 #include "test_graph_utils.hpp"
 
 using namespace tunx;

@@ -4,6 +4,7 @@
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/conv2d.hpp"
 #include "nn/layers_impl/legacy_conv2d.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 
 using namespace tunx;

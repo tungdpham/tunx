@@ -114,7 +114,7 @@ __global__ void avgpool_bwd_kernel(const T* __restrict__ grad_output, T* __restr
   for (int h = h_start; h < h_end; ++h) {
     for (int w = w_start; w < w_end; ++w) {
       int input_idx = ((b * input_h + h) * input_w + w) * channels + c;
-      tunx::cuda::gpu_atomic_add(&grad_input[input_idx], (T)grad_per_element);
+      cuda::gpu_atomic_add(&grad_input[input_idx], (T)grad_per_element);
     }
   }
 }
@@ -275,7 +275,7 @@ __global__ void maxpool2d_bwd_kernel(const T* grad_output, T* grad_input, const 
 
     if (h >= 0 && h < static_cast<int>(input_h) && w >= 0 && w < static_cast<int>(input_w)) {
       size_t in_idx = ((b * input_h + h) * input_w + w) * channels + c;
-      tunx::cuda::gpu_atomic_add(&grad_input[in_idx], static_cast<T>(grad_output[idx]));
+      cuda::gpu_atomic_add(&grad_input[in_idx], static_cast<T>(grad_output[idx]));
     }
   }
 }

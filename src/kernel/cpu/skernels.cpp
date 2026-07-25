@@ -1043,7 +1043,7 @@ void div_scalar(const float *a, float scalar, float *c, size_t size) {
 #endif
 }
 
-void set_scalar(float *c, float scalar, size_t size) {
+void fill(float *c, float scalar, size_t size) {
 #ifdef __AVX2__
   if (reinterpret_cast<uintptr_t>(c) % 32 == 0) {
     avx2_aligned_set_scalar(c, scalar, size);
@@ -1404,8 +1404,7 @@ inline __m256 _mm256_cos_ps(__m256 x) {
 #endif
 
 // Utility Functions (Float)
-void fill_random_uniform(float *data, size_t size, float min_val, float max_val,
-                         unsigned long long seed) {
+void fill_uniform(float *data, size_t size, float min_val, float max_val, unsigned long long seed) {
   std::mt19937_64 gen(seed);
   std::uniform_real_distribution<float> dist(min_val, max_val);
   for (size_t i = 0; i < size; ++i) {
@@ -1413,8 +1412,7 @@ void fill_random_uniform(float *data, size_t size, float min_val, float max_val,
   }
 }
 
-void fill_random_normal(float *data, size_t size, float mean, float stddev,
-                        unsigned long long seed) {
+void fill_normal(float *data, size_t size, float mean, float stddev, unsigned long long seed) {
 #ifdef __AVX2__
   // Use vectorized Box-Muller for performance (10-20x faster than std::mt19937)
   size_t vec_size = (size / 8) * 8;

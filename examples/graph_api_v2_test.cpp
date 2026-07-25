@@ -13,6 +13,7 @@
 #include "nn/loss.hpp"
 #include "nn/metrics.hpp"
 #include "nn/optimizers.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
 
@@ -122,8 +123,8 @@ signed main() {
     int batch_idx = 0;
     // train
     while (train_dataset->get_batch(256, data, labels)) {
-      data = data.to_device(device);
-      labels = labels.to_device(device);
+      data = to_device(data, device);
+      labels = to_device(labels, device);
 
       auto input_map = TensorBundle({
           {"input", data},
@@ -176,8 +177,8 @@ signed main() {
     int val_samples = 0;
     int val_corrects = 0;
     while (val_dataset->get_batch(256, data, labels)) {
-      data = data.to_device(device);
-      labels = labels.to_device(device);
+      data = to_device(data, device);
+      labels = to_device(labels, device);
       auto input_map = TensorBundle({
           {"input", data},
       });

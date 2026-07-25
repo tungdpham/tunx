@@ -71,7 +71,7 @@ __global__ void class_token_wgrad_kernel(const T* grad_output, T* grad_token, si
 
   size_t out_idx = n * output_seq_len * embed_dim + 0 * embed_dim + e;
 
-  if constexpr (tunx::is_floating<T>::value) {
+  if constexpr (is_floating<T>::value) {
     cuda::gpu_atomic_add(&grad_token[e], grad_output[out_idx]);
   }
 }
@@ -111,7 +111,7 @@ __global__ void embedding_wgrad_kernel(const T* input, const T* grad, T* grad_we
 
   if (padding_idx < vocab_size && vocab_idx == padding_idx) return;
 
-  if constexpr (tunx::is_floating<T>::value) {
+  if constexpr (is_floating<T>::value) {
     T g_val = grad[tid];
     cuda::gpu_atomic_add(&grad_weight[vocab_idx * embed_dim + dim_idx], g_val);
   }

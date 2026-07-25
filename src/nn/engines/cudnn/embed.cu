@@ -55,7 +55,7 @@ __global__ void class_token_bwd_kernel(const T* __restrict__ grad_output,
   size_t n = tmp / output_seq_len;
 
   if (s_out == 0) {
-    tunx::cuda::gpu_atomic_add(&grad_token[e], grad_output[idx]);
+    cuda::gpu_atomic_add(&grad_token[e], grad_output[idx]);
   } else {
     size_t s_in = s_out - 1;
     size_t in_idx = n * seq_len * embed_dim + s_in * embed_dim + e;
@@ -99,7 +99,7 @@ __global__ void embedding_wgrad_kernel(const T* input, const T* grad, T* grad_we
 
   if (padding_idx < vocab_size && vocab_idx == padding_idx) return;
 
-  if constexpr (tunx::is_floating<T>::value) {
+  if constexpr (is_floating<T>::value) {
     T g_val = grad[tid];
     cuda::gpu_atomic_add(&grad_weight[vocab_idx * embed_dim + dim_idx], g_val);
   }
@@ -121,7 +121,7 @@ __global__ void embedding_bwd_kernel(const T* __restrict__ input, const T* __res
   if (padding_idx < vocab_size && vocab_idx == padding_idx) return;
 
   T g_val = grad_output[tid];
-  tunx::cuda::gpu_atomic_add(&grad_weight[vocab_idx * embed_dim + dim_idx], g_val);
+  cuda::gpu_atomic_add(&grad_weight[vocab_idx * embed_dim + dim_idx], g_val);
 }
 
 WorkspaceReq CuDNNEngine::query_class_token_graph(engine_handle backend_handle,

@@ -10,8 +10,8 @@
 #include "device/device_manager.hpp"
 #include "engine_test_utils.hpp"
 #include "nn/engines/cuda_engine.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 #include "tensor_test_utils.hpp"
 
 using namespace tunx;
@@ -73,11 +73,11 @@ TEST_F(CUDAEngineTest, DenseFwdReturnsCorrectResults) {
   };
 
   Tensor input({batch_size, in_features}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor weight({out_features, in_features}, DType_t::FP32, getGPU());
-  fill_normal(weight, 0.0, 0.1);
+  fill_normal(weight, 0.0, 0.1, 12345ULL);
   Tensor bias({out_features}, DType_t::FP32, getGPU());
-  fill_normal(bias, 0.0, 0.1);
+  fill_normal(bias, 0.0, 0.1, 12345ULL);
   Tensor output({batch_size, out_features}, DType_t::FP32, getGPU());
 
   WorkspaceReq req = engine_->query_dense_graph(handle_, stats, type_desc);
@@ -92,15 +92,15 @@ TEST_F(CUDAEngineTest, DenseFwdReturnsCorrectResults) {
 
   Tensor expected_output({batch_size, out_features}, DType_t::FP32, getHost());
 
-  Tensor input_host = input.to_host();
-  Tensor weight_host = weight.to_host();
-  Tensor bias_host = bias.to_host();
+  Tensor input_host = to_host(input);
+  Tensor weight_host = to_host(weight);
+  Tensor bias_host = to_host(bias);
 
   math_dense_fwd(input_host.data_as<float>(), weight_host.data_as<float>(),
                  bias_host.data_as<float>(), expected_output.data_as<float>(), batch_size,
                  in_features, out_features);
 
-  compare_tensor(output.to_host(), expected_output);
+  compare_tensor(to_host(output), expected_output);
 }
 
 TEST_F(CUDAEngineTest, DenseWgradReturnsCorrectResults) {
@@ -121,9 +121,9 @@ TEST_F(CUDAEngineTest, DenseWgradReturnsCorrectResults) {
   };
 
   Tensor input({batch_size, in_features}, DType_t::FP32, getGPU());
-  fill_normal(input, 0.0, 0.5);
+  fill_normal(input, 0.0, 0.5, 12345ULL);
   Tensor grad_output({batch_size, out_features}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.2);
+  fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor grad_weight_temp({out_features, in_features}, DType_t::FP32, getGPU());
   fill(grad_weight_temp, 0.0f);
   Tensor grad_weight({out_features, in_features}, DType_t::FP32, getGPU());
@@ -140,13 +140,13 @@ TEST_F(CUDAEngineTest, DenseWgradReturnsCorrectResults) {
 
   Tensor expected_grad_weight({out_features, in_features}, DType_t::FP32, getHost());
 
-  Tensor input_host = input.to_host();
-  Tensor grad_out_host = grad_output.to_host();
+  Tensor input_host = to_host(input);
+  Tensor grad_out_host = to_host(grad_output);
 
   math_dense_wgrad(input_host.data_as<float>(), grad_out_host.data_as<float>(),
                    expected_grad_weight.data_as<float>(), batch_size, in_features, out_features);
 
-  compare_tensor(grad_weight.to_host(), expected_grad_weight);
+  compare_tensor(to_host(grad_weight), expected_grad_weight);
 }
 
 TEST_F(CUDAEngineTest, DenseDgradReturnsCorrectResults) {
@@ -167,9 +167,9 @@ TEST_F(CUDAEngineTest, DenseDgradReturnsCorrectResults) {
   };
 
   Tensor grad_output({batch_size, out_features}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor weight({out_features, in_features}, DType_t::FP32, getGPU());
-  fill_normal(weight, 0.0, 0.1);
+  fill_normal(weight, 0.0, 0.1, 12345ULL);
   Tensor grad_input({batch_size, in_features}, DType_t::FP32, getGPU());
 
   WorkspaceReq req = engine_->query_dense_graph(handle_, stats, type_desc);
@@ -183,13 +183,13 @@ TEST_F(CUDAEngineTest, DenseDgradReturnsCorrectResults) {
 
   Tensor expected_grad_input({batch_size, in_features}, DType_t::FP32, getHost());
 
-  Tensor grad_out_host = grad_output.to_host();
-  Tensor weight_host = weight.to_host();
+  Tensor grad_out_host = to_host(grad_output);
+  Tensor weight_host = to_host(weight);
 
   math_dense_dgrad(grad_out_host.data_as<float>(), weight_host.data_as<float>(),
                    expected_grad_input.data_as<float>(), batch_size, in_features, out_features);
 
-  compare_tensor(grad_input.to_host(), expected_grad_input);
+  compare_tensor(to_host(grad_input), expected_grad_input);
 }
 
 TEST_F(CUDAEngineTest, DenseBgradReturnsCorrectResults) {
@@ -210,7 +210,7 @@ TEST_F(CUDAEngineTest, DenseBgradReturnsCorrectResults) {
   };
 
   Tensor grad_output({batch_size, out_features}, DType_t::FP32, getGPU());
-  fill_normal(grad_output, 0.0, 0.5);
+  fill_normal(grad_output, 0.0, 0.5, 12345ULL);
   Tensor grad_bias_temp({out_features}, DType_t::FP32, getGPU());
   fill(grad_bias_temp, 0.0f);
   Tensor grad_bias({out_features}, DType_t::FP32, getGPU());
@@ -227,12 +227,12 @@ TEST_F(CUDAEngineTest, DenseBgradReturnsCorrectResults) {
 
   Tensor expected_grad_bias({out_features}, DType_t::FP32, getHost());
 
-  Tensor grad_out_host = grad_output.to_host();
+  Tensor grad_out_host = to_host(grad_output);
 
   math_dense_bgrad(grad_out_host.data_as<float>(), expected_grad_bias.data_as<float>(), batch_size,
                    out_features);
 
-  compare_tensor(grad_bias.to_host(), expected_grad_bias);
+  compare_tensor(to_host(grad_bias), expected_grad_bias);
 }
 
 #endif  // TUNX_USE_CUDA

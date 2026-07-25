@@ -12,8 +12,8 @@
 
 #include "nn/engines/iengine.hpp"
 #include "nn/stats/stats.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -106,7 +106,7 @@ Tensor PositionalEmbeddingImpl::backward_impl(const Tensor &grad_output, Residua
 
   Tensor grad_input = make_tensor(shape, io_dtype_);
 
-  grad_output.copy_to(grad_input);
+  copy(grad_output, grad_input, engine_handle_.get_stream());
 
   size_t batch_size = 1;
   for (size_t i = 0; i + 2 < shape.size(); ++i) {

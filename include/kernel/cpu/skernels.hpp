@@ -103,7 +103,7 @@ void add_scalar(const float *a, float scalar, float *c, size_t size);
 void sub_scalar(const float *a, float scalar, float *c, size_t size);
 void mul_scalar(const float *a, float scalar, float *c, size_t size);
 void div_scalar(const float *a, float scalar, float *c, size_t size);
-void set_scalar(float *c, float scalar, size_t size);
+void fill(float *c, float scalar, size_t size);
 
 // BLAS-like Operations
 void axpy(float alpha, const float *x, float *y, size_t size);
@@ -133,10 +133,8 @@ float dot_product(const float *a, const float *b, size_t size);
 float sum_squared_diff(const float *a, float mean, size_t size);
 
 // Utility
-void fill_random_uniform(float *data, size_t size, float min_val, float max_val,
-                         unsigned long long seed);
-void fill_random_normal(float *data, size_t size, float mean, float stddev,
-                        unsigned long long seed);
+void fill_uniform(float *data, size_t size, float min_val, float max_val, unsigned long long seed);
+void fill_normal(float *data, size_t size, float mean, float stddev, unsigned long long seed);
 }  // namespace fp
 }  // namespace cpu
 }  // namespace kernel

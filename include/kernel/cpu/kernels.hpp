@@ -225,14 +225,14 @@ inline void div_scalar(DType_t dtype, const void *a_ptr, double scalar, void *c_
   DISPATCH_ANY_DTYPE(dtype, T, func(T{}));
 }
 
-inline void set_scalar(DType_t dtype, void *c_ptr, double scalar, size_t size) {
+inline void fill(DType_t dtype, void *c_ptr, double scalar, size_t size) {
   auto func = [&]<typename T>(T type_dummy) {
     T *c = static_cast<T *>(c_ptr);
 
     if constexpr (std::is_same_v<T, float>) {
-      fp::set_scalar(c, scalar, size);
+      fp::fill(c, scalar, size);
     } else if constexpr (std::is_same_v<T, double>) {
-      dp::set_scalar(c, scalar, size);
+      dp::fill(c, scalar, size);
     } else {
       T s = static_cast<T>(scalar);
       for (size_t i = 0; i < size; ++i) {
@@ -611,15 +611,15 @@ inline double norm_squared(DType_t dtype, const void *a_ptr, size_t size) {
   return static_cast<double>(_ret);
 }
 
-inline void fill_random_uniform(DType_t dtype, void *data_ptr, size_t size, double min_val,
-                                double max_val, unsigned long long seed) {
+inline void fill_uniform(DType_t dtype, void *data_ptr, size_t size, double min_val, double max_val,
+                         unsigned long long seed) {
   auto func = [&]<typename T>(T type_dummy) {
     T *data = static_cast<T *>(data_ptr);
 
     if constexpr (std::is_same_v<T, float>) {
-      fp::fill_random_uniform(data, size, min_val, max_val, seed);
+      fp::fill_uniform(data, size, min_val, max_val, seed);
     } else if constexpr (std::is_same_v<T, double>) {
-      dp::fill_random_uniform(data, size, min_val, max_val, seed);
+      dp::fill_uniform(data, size, min_val, max_val, seed);
     } else {
       std::mt19937_64 rng(seed);
       if constexpr (std::is_floating_point_v<T>) {
@@ -639,15 +639,15 @@ inline void fill_random_uniform(DType_t dtype, void *data_ptr, size_t size, doub
   DISPATCH_ANY_DTYPE(dtype, T, func(T{}));
 }
 
-inline void fill_random_normal(DType_t dtype, void *data_ptr, size_t size, double mean,
-                               double stddev, unsigned long long seed) {
+inline void fill_normal(DType_t dtype, void *data_ptr, size_t size, double mean, double stddev,
+                        unsigned long long seed) {
   auto func = [&]<typename T>(T type_dummy) {
     T *data = static_cast<T *>(data_ptr);
 
     if constexpr (std::is_same_v<T, float>) {
-      fp::fill_random_normal(data, size, mean, stddev, seed);
+      fp::fill_normal(data, size, mean, stddev, seed);
     } else if constexpr (std::is_same_v<T, double>) {
-      dp::fill_random_normal(data, size, mean, stddev, seed);
+      dp::fill_normal(data, size, mean, stddev, seed);
     } else {
       std::mt19937_64 rng(seed);
       if constexpr (std::is_floating_point_v<T>) {

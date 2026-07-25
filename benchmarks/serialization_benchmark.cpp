@@ -9,6 +9,7 @@
 #include "distributed/binary_serializer.hpp"
 #include "distributed/job.hpp"
 #include "distributed/message.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "utils/misc.hpp"
 
@@ -19,7 +20,7 @@ constexpr size_t data_size = 256 * 512 * 16 * 16;
 
 signed main() {
   Tensor tensor = Tensor({data_size}, DType_t::FP32);
-  fill_normal(tensor, 0.0, 0.5);
+  fill_normal(tensor, 0.0, 0.5, 12345ULL);
   Job job;
   job.pid = microbatch_id;
   job.data = TensorBundle{{{"output", tensor}}};

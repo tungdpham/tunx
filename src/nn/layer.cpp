@@ -14,8 +14,8 @@
 #include "device/stream.hpp"
 #include "nn/engines/engine_handle.hpp"
 #include "nn/param.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -53,14 +53,16 @@ Vec<Tensor> LayerImpl::forward(const Vec<Tensor> &inputs, Residuals &residuals) 
   if (!initialized_) {
     throw std::runtime_error("LayerImpl must be initialized before calling forward");
   }
-  Vec<Tensor> current_inputs;
+  Vec<Tensor> device_inputs;
   for (auto &input : inputs) {
     if (input.device() == this->device())
-      current_inputs.push_back(input);
-    else
-      current_inputs.push_back(input.to_device(this->device()));
+      device_inputs.push_back(input);
+    else {
+      Tensor device_input = to_device(input, device());
+      device_inputs.push_back(device_input);
+    }
   }
-  Vec<Tensor> outputs = forward_impl(current_inputs, residuals);
+  Vec<Tensor> outputs = forward_impl(device_inputs, residuals);
 #ifndef NDEBUG
   engine_handle_.get_stream().sync();
 #endif
@@ -71,14 +73,16 @@ Vec<Tensor> LayerImpl::backward(const Vec<Tensor> &grad_outputs, Residuals &resi
   if (!initialized_) {
     throw std::runtime_error("LayerImpl must be initialized before calling backward");
   }
-  Vec<Tensor> current_grad_outputs;
+  Vec<Tensor> device_grad_outputs;
   for (auto &grad : grad_outputs) {
     if (grad.device() == this->device())
-      current_grad_outputs.push_back(grad);
-    else
-      current_grad_outputs.push_back(grad.to_device(this->device()));
+      device_grad_outputs.push_back(grad);
+    else {
+      Tensor device_grad = to_device(grad, device());
+      device_grad_outputs.push_back(device_grad);
+    }
   }
-  auto grad_inputs = backward_impl(current_grad_outputs, residuals);
+  auto grad_inputs = backward_impl(device_grad_outputs, residuals);
 #ifndef NDEBUG
   engine_handle_.get_stream().sync();
 #endif

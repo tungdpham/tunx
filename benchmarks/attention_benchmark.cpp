@@ -2,8 +2,8 @@
 #include "device/pool_allocator.hpp"
 #include "device/stream.hpp"
 #include "nn/blocks_impl/flash_attention_block.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
-#include "tensor/tensor_ops.hpp"
 
 using namespace tunx;
 using namespace std;

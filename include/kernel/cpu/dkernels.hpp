@@ -98,7 +98,7 @@ void add_scalar(const double *a, double scalar, double *c, size_t size);
 void sub_scalar(const double *a, double scalar, double *c, size_t size);
 void mul_scalar(const double *a, double scalar, double *c, size_t size);
 void div_scalar(const double *a, double scalar, double *c, size_t size);
-void set_scalar(double *c, double scalar, size_t size);
+void fill(double *c, double scalar, size_t size);
 
 void axpy(double alpha, const double *x, double *y, size_t size);
 void sqrt(const double *a, double *c, size_t size);
@@ -124,10 +124,9 @@ double dot_product(const double *a, const double *b, size_t size);
 double sum_squared_diff(const double *a, double mean, size_t size);
 
 // Utility
-void fill_random_uniform(double *data, size_t size, double min_val, double max_val,
-                         unsigned long long seed);
-void fill_random_normal(double *data, size_t size, double mean, double stddev,
-                        unsigned long long seed);
+void fill_uniform(double *data, size_t size, double min_val, double max_val,
+                  unsigned long long seed);
+void fill_normal(double *data, size_t size, double mean, double stddev, unsigned long long seed);
 
 }  // namespace dp
 }  // namespace cpu

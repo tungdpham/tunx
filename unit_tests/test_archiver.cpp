@@ -1,3 +1,4 @@
+#include "tensor/ops.hpp"
 #include <gtest/gtest.h>
 
 #include <cstddef>
@@ -168,7 +169,7 @@ TEST_F(ArchiverTest, TestBoolArchiver) {
 TEST_F(ArchiverTest, TestTensorArchiver) {
   Tensor tensor = Tensor({32, 512, 768}, DType_t::FP32);
 
-  fill_normal(tensor, 0.0f, 1.0f);
+  fill_normal(tensor, 0.0f, 1.0f, 12345ULL);
 
   Sizer sizer;
   sizer(tensor);
@@ -202,8 +203,8 @@ TEST_F(ArchiverTest, TestJobArchiver) {
   job.pid = 123;
   Tensor left = Tensor({64, 256}, DType_t::FP32);
   Tensor right = Tensor({64, 128}, DType_t::FP32);
-  fill_normal(left, 0.0f, 1.0f);
-  fill_normal(right, 0.0f, 1.0f);
+  fill_normal(left, 0.0f, 1.0f, 12345ULL);
+  fill_normal(right, 0.0f, 1.0f, 12345ULL);
   job.data.set("left", left);
   job.data.set("right", right);
   Sizer sizer;
@@ -263,13 +264,13 @@ TEST_F(ArchiverTest, TestMessageDataArchiver) {
 TEST_F(ArchiverTest, LargeJobMessageSurvivesPacketSlicingAndReassembly) {
   Tensor left_host = Tensor({256, 64, 8, 8}, DType_t::FP32);
   Tensor right_host = Tensor({256, 64, 8, 8}, DType_t::FP32);
-  fill_normal(left_host, 0.0f, 1.0f);
-  fill_normal(right_host, 0.0f, 1.0f);
+  fill_normal(left_host, 0.0f, 1.0f, 12345ULL);
+  fill_normal(right_host, 0.0f, 1.0f, 12345ULL);
 
   Job job;
   job.pid = 77;
-  job.data.set("left", left_host.to_device(getGPU()));
-  job.data.set("right", right_host.to_device(getGPU()));
+  job.data.set("left", to_device(left_host, getGPU()));
+  job.data.set("right", to_device(right_host, getGPU()));
 
   Message original(CommandType::FORWARD_JOB, std::move(job));
 

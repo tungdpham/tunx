@@ -103,8 +103,8 @@ TEST(SliceOpsTest, CpuForwardBackwardMatchesReference) {
     reference_slice_forward(input, expected_out, input_shape, c.axis, c.start, c.length);
 
     Vec<T> actual_out(expected_out.size(), T(0));
-    tunx::cpu::slice::slice_forward<T>(input.data(), actual_out.data(), input_shape, c.axis,
-                                       c.start, c.length);
+    cpu::slice::slice_forward<T>(input.data(), actual_out.data(), input_shape, c.axis, c.start,
+                                 c.length);
 
     ASSERT_EQ(actual_out.size(), expected_out.size());
     for (size_t i = 0; i < expected_out.size(); ++i) {
@@ -122,8 +122,8 @@ TEST(SliceOpsTest, CpuForwardBackwardMatchesReference) {
                              c.length);
 
     Vec<T> actual_grad_input(product(input_shape), T(-1));
-    tunx::cpu::slice::slice_backward<T>(grad_output.data(), actual_grad_input.data(), input_shape,
-                                        c.axis, c.start, c.length);
+    cpu::slice::slice_backward<T>(grad_output.data(), actual_grad_input.data(), input_shape, c.axis,
+                                  c.start, c.length);
 
     ASSERT_EQ(actual_grad_input.size(), expected_grad_input.size());
     for (size_t i = 0; i < expected_grad_input.size(); ++i) {
@@ -158,7 +158,7 @@ TEST(SliceOpsTest, CudaForwardBackwardMatchesReference) {
   cudaMemcpy(d_in, input.data(), input.size() * sizeof(T), cudaMemcpyHostToDevice);
   cudaMemset(d_out, 0, expected_out.size() * sizeof(T));
 
-  tunx::cuda::slice::slice_forward<T>(d_in, d_out, input_shape, axis, start, length, 0);
+  cuda::slice::slice_forward<T>(d_in, d_out, input_shape, axis, start, length, 0);
 
   Vec<T> actual_out(expected_out.size(), T(0));
   cudaMemcpy(actual_out.data(), d_out, expected_out.size() * sizeof(T), cudaMemcpyDeviceToHost);
@@ -183,7 +183,7 @@ TEST(SliceOpsTest, CudaForwardBackwardMatchesReference) {
   cudaMemcpy(d_grad, grad_output.data(), grad_output.size() * sizeof(T), cudaMemcpyHostToDevice);
   cudaMemset(d_grad_in, 0, input.size() * sizeof(T));
 
-  tunx::cuda::slice::slice_backward<T>(d_grad, d_grad_in, input_shape, axis, start, length, 0);
+  cuda::slice::slice_backward<T>(d_grad, d_grad_in, input_shape, axis, start, length, 0);
 
   Vec<T> actual_grad_input(input.size(), T(0));
   cudaMemcpy(actual_grad_input.data(), d_grad_in, input.size() * sizeof(T), cudaMemcpyDeviceToHost);

@@ -7,6 +7,6 @@
 
 #include "tensor/tensor.hpp"
 
-#include "tensor/tensor_ops.hpp"  // IWYU pragma: keep
+#include "tensor/ops.hpp"  // IWYU pragma: keep
 
 namespace tunx {}  // namespace tunx

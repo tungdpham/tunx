@@ -14,7 +14,6 @@
 #include "device/dptr.hpp"
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
-#include "kernel/kernel.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -140,31 +139,6 @@ public:
     return Tensor(span_sizes, data_.span(offset * dtype_size, span_size * dtype_size), dtype_,
                   *allocator_);
   }
-
-  void copy_to(Tensor &dest, stream s = nullptr) const {
-    if (data_size_ != dest.data_size_) {
-      throw std::invalid_argument("Tensor copy_to: Shape mismatch between source and destination");
-    }
-    if (dtype_ != dest.dtype_) {
-      throw std::invalid_argument(
-          "Tensor copy_to: Data type mismatch between source and destination");
-    }
-    kernel::cd_copy(dtype_, data_, dest.data_, data_size_, s);
-  }
-
-  Tensor to_device(Device &target_device) const {
-    Tensor result(shape_, dtype_, DeviceAllocator::instance(target_device));
-    copy_to(result);
-    return result;
-  }
-
-  Tensor to_host() const { return to_device(getHost()); }
-
-  Tensor clone() const {
-    Tensor result(shape_, dtype_, allocator_);
-    copy_to(result);
-    return result;
-  }
 };
 
 template <typename Archiver>
@@ -175,10 +149,9 @@ void archive(Archiver &archive, const Tensor &tensor) {
   archive(shape_vec);
   dptr data_ptr = tensor.data_ptr();
   archive(make_blob(data_ptr.get<unsigned char>(), tensor.size() * get_dtype_size(dtype),
-
                     tensor.device()));
 }
 
 }  // namespace tunx
 
-#include "tensor/tensor_arithmetic.hpp"  // IWYU pragma: export
+#include "ops.hpp"  // IWYU pragma: export

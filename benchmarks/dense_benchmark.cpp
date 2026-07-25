@@ -4,6 +4,7 @@
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/legacy_dense.hpp"
 #include "nn/loss.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 
 using namespace tunx;
@@ -32,7 +33,7 @@ signed main() {
   Vec<Param> current_params = dense_layer.params();
   Vec<Param> legacy_params = legacy_layer.params();
   for (size_t i = 0; i < current_params.size(); ++i) {
-    current_params[i].data().copy_to(legacy_params[i].data());
+    copy(current_params[i].data(), legacy_params[i].data());
   }
 
   Tensor input_data = Tensor({128, INPUT_FEATURES}, DType_t::FP32, getGPU());
@@ -79,8 +80,8 @@ signed main() {
   std::cout << "Legacy Dense Average time per forward pass: " << duration.count() / passes << " ms"
             << std::endl;
 
-  auto cpu_current_output = current_output.to_device(getHost());
-  auto cpu_legacy_output = legacy_output.to_device(getHost());
+  auto cpu_current_output = to_device(current_output, getHost());
+  auto cpu_legacy_output = to_device(legacy_output, getHost());
 
   float *current_data = cpu_current_output.data_as<float>();
   float *legacy_data = cpu_legacy_output.data_as<float>();
@@ -101,7 +102,7 @@ signed main() {
   // test backward
   auto criterion = LossFactory::create_cross_entropy();
   Tensor target = Tensor({128, OUTPUT_FEATURES}, DType_t::FP32, getGPU());
-  fill_normal(target, 0.5f, 0.2f);
+  fill_normal(target, 0.5f, 0.2f, 12345ULL);
   Tensor grad = Tensor({128, OUTPUT_FEATURES}, DType_t::FP32, getGPU());
   criterion->compute_gradient(current_output, target, grad);
 
@@ -135,8 +136,8 @@ signed main() {
               << " ms" << std::endl;
   }
 
-  auto cpu_grad_input_current = grad_input_current.to_host();
-  auto cpu_grad_input_legacy = grad_input_legacy.to_host();
+  auto cpu_grad_input_current = to_host(grad_input_current);
+  auto cpu_grad_input_legacy = to_host(grad_input_legacy);
   float *grad_input_current_data = (float *)cpu_grad_input_current.data_as<void>();
   float *grad_input_legacy_data = (float *)cpu_grad_input_legacy.data_as<void>();
   max_diff = 0.0f;
@@ -155,8 +156,8 @@ signed main() {
   // check wgrad
 
   for (size_t i = 0; i < current_params.size(); ++i) {
-    auto cpu_grad_current = current_params[i].grad().to_host();
-    auto cpu_grad_legacy = legacy_params[i].grad().to_host();
+    auto cpu_grad_current = to_host(current_params[i].grad());
+    auto cpu_grad_legacy = to_host(legacy_params[i].grad());
     float *grad_current_data = (float *)cpu_grad_current.data_as<void>();
     float *grad_legacy_data = (float *)cpu_grad_legacy.data_as<void>();
     size_t grad_elements = cpu_grad_current.size();

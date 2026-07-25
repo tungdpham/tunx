@@ -8,6 +8,7 @@
 #include "device/device_manager.hpp"
 #include "nn/example_graphs.hpp"
 #include "nn/graph.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "tokenizer/tokenizer.hpp"
 #include "utils/env.hpp"
@@ -81,7 +82,7 @@ int main(int argc, char **argv) {
     Tensor output = outputs.get("output");
 
     // Transfer output to CPU for sampling
-    Tensor cpu_output = output.to_host();
+    Tensor cpu_output = to_host(output);
 
     size_t vocab_size = tokenizer.vocab_size();
     size_t last_step_idx = tokens_to_use - 1;

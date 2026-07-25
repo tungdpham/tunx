@@ -2,7 +2,7 @@
 #include "device/pool_allocator.hpp"
 #include "nn/example_graphs.hpp"
 #include "nn/graph.hpp"
-#include "tensor/tensor_ops.hpp"
+#include "tensor/ops.hpp"
 
 using namespace tunx;
 using namespace std;

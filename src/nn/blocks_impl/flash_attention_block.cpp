@@ -10,10 +10,10 @@
 #include <stdexcept>
 #include <string>
 
-#include "kernel/kernel.hpp"
 #include "nn/engines/engine_handle.hpp"
 #include "nn/layer.hpp"
 #include "nn/stats/stats.hpp"
+#include "tensor/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -263,12 +263,8 @@ Vec<Tensor> FlashAttentionBlockImpl::backward_impl(const Vec<Tensor> &grad_outpu
   Tensor grad_k_in = k_proj_.backward({grad_k}, residuals["k_proj"])[0];
   Tensor grad_v_in = v_proj_.backward({grad_v}, residuals["v_proj"])[0];
 
-  size_t size = grad_q_in.size();
-
-  kernel::add(grad_q_in.dtype(), grad_q_in.data_ptr(), grad_k_in.data_ptr(), grad_input.data_ptr(),
-              size, engine_handle_.get_stream());
-  kernel::add(grad_input.dtype(), grad_input.data_ptr(), grad_v_in.data_ptr(),
-              grad_input.data_ptr(), size, engine_handle_.get_stream());
+  add(grad_q_in, grad_k_in, grad_input, engine_handle_.get_stream());
+  add(grad_input, grad_v_in, grad_input, engine_handle_.get_stream());
 
   return {grad_input};
 }
