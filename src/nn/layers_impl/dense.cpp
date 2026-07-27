@@ -9,44 +9,32 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "nn/engines/engine_handle.hpp"
 #include "nn/engines/iengine.hpp"
-#include "nn/layer.hpp"
-#include "tensor/ops.hpp"
-#include "tensor/tensor.hpp"
+#include "nn/stats/stats.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
-namespace internal {
 
-DenseImpl::DenseImpl(size_t input_features, size_t output_features, bool use_bias,
-                     const std::string &name)
-    : SISOLayerImpl(name),
-      input_features_(input_features),
-      output_features_(output_features),
-      use_bias_(use_bias) {}
-
-DenseImpl::~DenseImpl() {}
-
-void DenseImpl::init_impl() {
-  float stddev = static_cast<float>(1.0 / std::sqrt(static_cast<double>(input_features_)));
-  long long seed = this->use_seed_ ? this->srand_seed_
-                                   : std::chrono::system_clock::now().time_since_epoch().count();
-
-  weights_ = make_param({input_features_, output_features_}, param_dtype_);
-  fill_normal(weights_.data(), 0, stddev, seed);
-
-  if (use_bias_) {
-    bias_ = make_param({output_features_}, param_dtype_);
-    fill_normal(bias_.data(), 0, stddev, seed);
-  }
+Vec<Vec<size_t>> DenseOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                        const Config &config) {
+  if (input_shapes.empty()) throw std::runtime_error("DenseOp: Input shape is empty.");
+  Vec<size_t> out_shape = input_shapes[0];
+  out_shape.back() = config.output_features;
+  return {out_shape};
 }
 
-Tensor DenseImpl::forward_impl(const Tensor &input, Residuals &residuals) {
+Tensor DenseOp::forward(OpContext &ctx, const Tensor &input, const Param &weights,
+                        const Param &bias, const Config &config) {
   const Vec<size_t> &in_shape = input.shape();
   size_t last_dim = in_shape.back();
 
-  if (last_dim != input_features_) {
-    throw std::invalid_argument("Input feature size mismatch in DenseImpl");
+  if (last_dim != config.input_features) {
+    throw std::invalid_argument("Input feature size mismatch in DenseOp");
+  }
+
+  if (ctx.is_training) {
+    ctx.residuals["input"] = input;
   }
 
   size_t batch_size = 1;
@@ -56,40 +44,37 @@ Tensor DenseImpl::forward_impl(const Tensor &input, Residuals &residuals) {
 
   DenseStats stats{
       .batch_size = batch_size,
-      .in_features = input_features_,
-      .out_features = output_features_,
+      .in_features = config.input_features,
+      .out_features = config.output_features,
+      .use_bias = config.use_bias,
   };
 
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  WorkspaceReq ws_req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
-
-  if (this->is_training_) {
-    residuals["input"] = input;
-  }
+  WorkspaceReq ws_req = ctx.engine->query_dense_graph(ctx.handle, stats, type_desc);
 
   Vec<size_t> out_shape = in_shape;
-  out_shape.back() = output_features_;
-  Tensor output = make_tensor(out_shape, io_dtype_);
-  Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+  out_shape.back() = config.output_features;
+  Tensor output = ctx.make_tensor(out_shape, ctx.io_dtype);
+  Tensor ws = ctx.make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
-  engine_->dense_fwd(engine_handle_, stats, input.data_as<void>(), weights_.data_as<void>(),
-                     use_bias_ ? bias_.data_as<void>() : nullptr, output.data_as<void>(),
-                     ws.data_as<void>(), type_desc);
+  ctx.engine->dense_fwd(ctx.handle, stats, input.data_as<void>(), weights.data_as<void>(),
+                        config.use_bias ? bias.data_as<void>() : nullptr, output.data_as<void>(),
+                        ws.data_as<void>(), type_desc);
 
   return output;
 }
 
-Tensor DenseImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  if (grad_output.shape().back() != output_features_) {
-    throw std::invalid_argument("Gradient feature size mismatch in DenseImpl.");
+Tensor DenseOp::backward(OpContext &ctx, const Tensor &grad_output, Param &weights, Param &bias,
+                         const Config &config) {
+  if (grad_output.shape().back() != config.output_features) {
+    throw std::invalid_argument("Gradient feature size mismatch in DenseOp.");
   }
-
-  const Tensor &input = residuals["input"];
+  const Tensor &input = ctx.residuals["input"];
   const Vec<size_t> &in_shape = input.shape();
   size_t batch_size = 1;
   for (size_t i = 0; i < in_shape.size() - 1; ++i) {
@@ -98,60 +83,51 @@ Tensor DenseImpl::backward_impl(const Tensor &grad_output, Residuals &residuals)
 
   DenseStats stats{
       .batch_size = batch_size,
-      .in_features = input_features_,
-      .out_features = output_features_,
+      .in_features = config.input_features,
+      .out_features = config.output_features,
+      .use_bias = config.use_bias,
   };
 
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  Tensor grad_input = make_tensor(in_shape, io_dtype_);
-  WorkspaceReq ws_req = engine_->query_dense_graph(engine_handle_, stats, type_desc);
-  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  Tensor grad_input = ctx.make_tensor(in_shape, ctx.io_dtype);
+  WorkspaceReq ws_req = ctx.engine->query_dense_graph(ctx.handle, stats, type_desc);
+  Tensor ws = ctx.make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->dense_wgrad(engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
-                       weights_.grad_as<void>(), ws.data_as<void>(), type_desc);
+  ctx.engine->dense_wgrad(ctx.handle, stats, grad_output.data_as<void>(), input.data_as<void>(),
+                          weights.grad_as<void>(), ws.data_as<void>(), type_desc);
 
-  if (use_bias_) {
-    engine_->dense_bgrad(engine_handle_, stats, grad_output.data_as<void>(), bias_.grad_as<void>(),
-                         ws.data_as<void>(), type_desc);
+  if (config.use_bias) {
+    ctx.engine->dense_bgrad(ctx.handle, stats, grad_output.data_as<void>(), bias.grad_as<void>(),
+                            ws.data_as<void>(), type_desc);
   }
 
-  engine_->dense_dgrad(engine_handle_, stats, grad_output.data_as<void>(), weights_.data_as<void>(),
-                       grad_input.data_as<void>(), ws.data_as<void>(), type_desc);
+  ctx.engine->dense_dgrad(ctx.handle, stats, grad_output.data_as<void>(), weights.data_as<void>(),
+                          grad_input.data_as<void>(), ws.data_as<void>(), type_desc);
 
   return grad_input;
 }
 
-LayerConfig DenseImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  config.set("input_features", input_features_);
-  config.set("output_features", output_features_);
-  config.set("use_bias", use_bias_);
-  return config;
+LayerConfig DenseOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.name = name;
+  lcfg.type = TYPE_NAME;
+  lcfg.set("input_features", config.input_features);
+  lcfg.set("output_features", config.output_features);
+  lcfg.set("use_bias", config.use_bias);
+  return lcfg;
 }
 
-Vec<size_t> DenseImpl::compute_output_shape(const Vec<size_t> &input_shape) const {
-  if (input_shape.empty()) {
-    throw std::runtime_error("DenseImpl::compute_output_shape: Input shape is empty.");
-  }
-  Vec<size_t> out_shape = input_shape;
-  out_shape.back() = output_features_;
-  return out_shape;
+DenseOp::Config DenseOp::parse_config(const LayerConfig &config) {
+  Config c;
+  c.input_features = config.get<size_t>("input_features");
+  c.output_features = config.get<size_t>("output_features");
+  c.use_bias = config.get<bool>("use_bias", true);
+  return c;
 }
 
-std::shared_ptr<DenseImpl> DenseImpl::create_from_config(const LayerConfig &config) {
-  size_t input_features = config.get<size_t>("input_features");
-  size_t output_features = config.get<size_t>("output_features");
-  bool use_bias = config.get<bool>("use_bias");
-
-  return std::make_shared<DenseImpl>(input_features, output_features, use_bias, config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

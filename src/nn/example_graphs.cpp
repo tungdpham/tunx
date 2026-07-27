@@ -94,7 +94,7 @@ Node dropout(Node input, Shape &shape, float dropout_rate, const std::string &na
 
 Node embedding(Node input, Shape &shape, size_t vocab_size, size_t embed_dim,
                const std::string &name) {
-  auto layer = Embedding(vocab_size, embed_dim, name);
+  auto layer = Embedding(vocab_size, embed_dim, static_cast<size_t>(-1), name);
   shape = layer.output_shapes({shape})[0];
   return layer(input);
 }

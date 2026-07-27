@@ -6,28 +6,27 @@
  */
 #include "nn/layers_impl/dropout.hpp"
 
-#include <memory>
 #include <stdexcept>
 
 #include "nn/engines/iengine.hpp"
+#include "tensor/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
-namespace internal {
 
-DropoutImpl::DropoutImpl(float dropout_rate, const std::string &name)
-    : SISOLayerImpl(name),
-      dropout_rate_(dropout_rate),
-      generator_(std::random_device{}()) {
-  if (dropout_rate < 0.0f || dropout_rate >= 1.0f) {
-    throw std::invalid_argument("Dropout rate must be in [0, 1)");
-  }
+Vec<Vec<size_t>> DropoutOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                          const Config &config) {
+  return input_shapes;
 }
 
-Tensor DropoutImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  if (!this->is_training_) {
-    Tensor output = make_tensor(input.shape(), io_dtype_);
-    copy(input, output, engine_handle_.get_stream());
+Tensor DropoutOp::forward(OpContext &ctx, const Tensor &input, const Config &config) {
+  if (config.dropout_rate < 0.0f || config.dropout_rate >= 1.0f) {
+    throw std::invalid_argument("Dropout rate must be in [0, 1)");
+  }
+
+  if (!ctx.is_training) {
+    Tensor output = ctx.make_tensor(input.shape(), ctx.io_dtype);
+    copy(input, output, ctx.handle.get_stream());
     return output;
   }
 
@@ -39,33 +38,33 @@ Tensor DropoutImpl::forward_impl(const Tensor &input, Residuals &residuals) {
       .batch_size = batch_size,
       .channels = channels,
       .spatial_size = spatial_size,
-      .dropout_rate = dropout_rate_,
+      .dropout_rate = config.dropout_rate,
   };
 
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  WorkspaceReq ws_req = engine_->query_dropout_graph(engine_handle_, stats, type_desc);
+  WorkspaceReq ws_req = ctx.engine->query_dropout_graph(ctx.handle, stats, type_desc);
 
-  Tensor mask = make_tensor(input.shape(), DType_t::BOOL);
-  residuals["mask"] = mask;
+  Tensor mask = ctx.make_tensor(input.shape(), DType_t::BOOL);
+  ctx.residuals["mask"] = mask;
 
-  Tensor output = make_tensor(input.shape(), io_dtype_);
-  Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+  Tensor output = ctx.make_tensor(input.shape(), ctx.io_dtype);
+  Tensor ws = ctx.make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
-  engine_->dropout_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
-                       mask.data_as<bool>(), ws.data_as<void>(), type_desc);
+  ctx.engine->dropout_fwd(ctx.handle, stats, input.data_as<void>(), output.data_as<void>(),
+                          mask.data_as<bool>(), ws.data_as<void>(), type_desc);
 
   return output;
 }
 
-Tensor DropoutImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  Tensor &mask = residuals["mask"];
+Tensor DropoutOp::backward(OpContext &ctx, const Tensor &grad_output, const Config &config) {
+  Tensor &mask = ctx.residuals["mask"];
   if (!mask) {
-    throw std::runtime_error("No cached mask found in DropoutImpl backward pass");
+    throw std::runtime_error("No cached mask found in DropoutOp backward pass");
   }
 
   size_t batch_size = grad_output.dim(0);
@@ -76,44 +75,40 @@ Tensor DropoutImpl::backward_impl(const Tensor &grad_output, Residuals &residual
       .batch_size = batch_size,
       .channels = channels,
       .spatial_size = spatial_size,
-      .dropout_rate = dropout_rate_,
+      .dropout_rate = config.dropout_rate,
   };
 
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
-  WorkspaceReq ws_req = engine_->query_dropout_graph(engine_handle_, stats, type_desc);
-  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  Tensor grad_input = ctx.make_tensor(grad_output.shape(), ctx.io_dtype);
+  WorkspaceReq ws_req = ctx.engine->query_dropout_graph(ctx.handle, stats, type_desc);
+  Tensor ws = ctx.make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  double scale = 1.0 / (1.0 - dropout_rate_);
+  double scale = 1.0 / (1.0 - config.dropout_rate);
 
-  engine_->dropout_bwd(engine_handle_, stats, grad_output.data_as<void>(),
-                       grad_input.data_as<void>(), mask.data_as<bool>(), scale, ws.data_as<void>(),
-                       type_desc);
+  ctx.engine->dropout_bwd(ctx.handle, stats, grad_output.data_as<void>(),
+                          grad_input.data_as<void>(), mask.data_as<bool>(), scale,
+                          ws.data_as<void>(), type_desc);
 
   return grad_input;
 }
 
-LayerConfig DropoutImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  config.set("dropout_rate", dropout_rate_);
-  return config;
+LayerConfig DropoutOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.name = name;
+  lcfg.type = TYPE_NAME;
+  lcfg.set("dropout_rate", config.dropout_rate);
+  return lcfg;
 }
 
-Vec<size_t> DropoutImpl::compute_output_shape(const Vec<size_t> &input_shape) const {
-  return input_shape;
+DropoutOp::Config DropoutOp::parse_config(const LayerConfig &config) {
+  Config c;
+  c.dropout_rate = config.get<float>("dropout_rate");
+  return c;
 }
 
-std::shared_ptr<DropoutImpl> DropoutImpl::create_from_config(const LayerConfig &config) {
-  float dropout_rate = config.get<float>("dropout_rate");
-  return std::make_shared<DropoutImpl>(dropout_rate, config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

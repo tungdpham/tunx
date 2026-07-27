@@ -37,19 +37,19 @@
 
 namespace tunx {
 inline Node operator+(const Node &a, const Node &b) {
-  auto add_layer = make_layer<internal::AddImpl>();
+  Add add_layer;
   return add_layer(a, b);
 }
 inline Node operator-(const Node &a, const Node &b) {
-  auto sub_layer = make_layer<internal::SubImpl>();
+  Sub sub_layer;
   return sub_layer(a, b);
 }
 inline Node operator*(const Node &a, const Node &b) {
-  auto mul_layer = make_layer<internal::MulImpl>();
+  Mul mul_layer;
   return mul_layer(a, b);
 }
 inline Node operator/(const Node &a, const Node &b) {
-  auto div_layer = make_layer<internal::DivImpl>();
+  Div div_layer;
   return div_layer(a, b);
 }
 }  // namespace tunx
@@ -91,36 +91,36 @@ public:
   static Layer create(const LayerConfig &config) { return create(config.type, config); }
 
   static void register_defaults() {
-    register_layer_type<internal::DenseImpl>();
-    register_layer_type<internal::ActivationImpl>();
-    register_layer_type<internal::ReLUImpl>();
-    register_layer_type<internal::ELUImpl>();
-    register_layer_type<internal::GELUImpl>();
-    register_layer_type<internal::LeakyReLUImpl>();
-    register_layer_type<internal::LinearImpl>();
-    register_layer_type<internal::SigmoidImpl>();
-    register_layer_type<internal::TanhImpl>();
-    register_layer_type<internal::Conv2DImpl>();
-    register_layer_type<internal::MaxPool2DImpl>();
-    register_layer_type<internal::AvgPool2DImpl>();
-    register_layer_type<internal::BatchNormImpl>();
-    register_layer_type<internal::DropoutImpl>();
-    register_layer_type<internal::LayerNormImpl>();
-    register_layer_type<internal::FlattenImpl>();
-    register_layer_type<internal::ClassTokenImpl>();
-    register_layer_type<internal::PositionalEmbeddingImpl>();
-    register_layer_type<internal::SliceImpl>();
-    register_layer_type<internal::EmbeddingImpl>();
-    register_layer_type<internal::SDPAImpl>();
+    register_layer_type<Dense>();
+    register_layer_type<Activation>();
+    register_layer_type<ReLU>();
+    register_layer_type<ELU>();
+    register_layer_type<GELU>();
+    register_layer_type<LeakyReLU>();
+    register_layer_type<Linear>();
+    register_layer_type<Sigmoid>();
+    register_layer_type<Tanh>();
+    register_layer_type<Conv2D>();
+    register_layer_type<MaxPool2D>();
+    register_layer_type<AvgPool2D>();
+    register_layer_type<BatchNorm>();
+    register_layer_type<Dropout>();
+    register_layer_type<LayerNorm>();
+    register_layer_type<Flatten>();
+    register_layer_type<ClassToken>();
+    register_layer_type<PositionalEmbedding>();
+    register_layer_type<Slice>();
+    register_layer_type<Embedding>();
+    register_layer_type<SDPAImpl>();
     register_layer_type<ResidualBlockImpl>();
     register_layer_type<FlashAttentionBlockImpl>();
-    register_layer_type<internal::TransposeImpl>();
+    register_layer_type<Transpose>();
     register_layer_type<SequentialImpl>();
 
-    register_layer_type<internal::AddImpl>();
-    register_layer_type<internal::SubImpl>();
-    register_layer_type<internal::MulImpl>();
-    register_layer_type<internal::DivImpl>();
+    register_layer_type<Add>();
+    register_layer_type<Sub>();
+    register_layer_type<Mul>();
+    register_layer_type<Div>();
   }
 
   static Vec<std::string> available_types() {

@@ -22,6 +22,8 @@ signed main() {
 
   auto legacy_layer = LegacyConv2D(16, 128, 3, 3, 1, 1, 0, 0, true, "legacy_conv2d_test");
   auto legacy_conv_output = legacy_layer(input);
+  graph.set_output(conv_output);
+  graph.set_output(legacy_conv_output);
 
   graph.compile(allocator);
 

@@ -6,50 +6,53 @@
  */
 #pragma once
 
-#include <memory>
+#include <chrono>
+#include <cmath>
 #include <string>
 
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "nn/param.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
-
-namespace internal {
-class EmbeddingImpl : public SISOLayerImpl {
-private:
-  size_t vocab_size_;
-  size_t embed_dim_;
-  size_t padding_idx_;
-  Param weight_;
-
-  void init_impl() override;
-  Tensor forward_impl(const Tensor &input, Residuals &residualsuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residualsuals) override;
-
-public:
-  EmbeddingImpl(size_t vocab_size, size_t embed_dim, const std::string &name = "embedding",
-                     size_t padding_idx = static_cast<size_t>(-1));
-
+struct EmbeddingOp {
   static constexpr const char *TYPE_NAME = "embedding";
 
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
+  struct Config {
+    size_t vocab_size;
+    size_t embed_dim;
+    size_t padding_idx = static_cast<size_t>(-1);
+  };
 
-
-  static std::shared_ptr<EmbeddingImpl> create_from_config(const LayerConfig &config);
+  static Tensor forward(OpContext &ctx, const Tensor &input, const Param &weight,
+                        const Config &config);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &weight,
+                         const Config &config);
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config);
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class Embedding : public LayerRef<internal::EmbeddingImpl> {
+class Embedding : public FunctionalLayer<EmbeddingOp> {
 public:
-  Embedding(size_t vocab_size, size_t embed_dim, const std::string &name = "embedding",
-                 size_t padding_idx = static_cast<size_t>(-1))
-      : LayerRef(std::make_shared<internal::EmbeddingImpl>(vocab_size, embed_dim, name, padding_idx)) {}
-
-  using LayerRef<internal::EmbeddingImpl>::LayerRef;
+  Embedding(size_t vocab_size, size_t embed_dim, size_t padding_idx = static_cast<size_t>(-1),
+            const std::string &name = "embedding")
+      : FunctionalLayer(EmbeddingOp::Config{vocab_size, embed_dim, padding_idx}, name) {
+    impl_->register_param(
+        "weight", {vocab_size, embed_dim},
+        [vocab_size, embed_dim, padding_idx](Param &p, OpContext &ctx) {
+          float stddev = static_cast<float>(1.0 / std::sqrt(static_cast<double>(embed_dim)));
+          long long seed = ctx.use_seed
+                               ? ctx.srand_seed
+                               : std::chrono::system_clock::now().time_since_epoch().count();
+          fill_normal(p.data(), 0, stddev, seed);
+          if (padding_idx < vocab_size) {
+            for (size_t i = 0; i < embed_dim; ++i) {
+              DISPATCH_DTYPE(p.dtype(), T, p.data().at<T>({padding_idx, i}) = 0.0f);
+            }
+          }
+        });
+  }
 };
-
 }  // namespace tunx

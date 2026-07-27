@@ -6,48 +6,30 @@
  */
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "nn/activations_impl/leaky_relu.hpp"
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
 
-namespace internal {
-class LeakyReLUImpl : public SISOLayerImpl {
-private:
-  std::unique_ptr<func::LeakyReLU> activation_;
-  float negative_slope_;
-
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
-
-public:
+struct LeakyReLUOp {
   static constexpr const char *TYPE_NAME = "leaky_relu";
 
-  explicit LeakyReLUImpl(float negative_slope = 0.01f, const std::string &name = "leaky_relu");
+  struct Config {
+    float negative_slope = 0.01f;
+  };
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  static std::shared_ptr<LeakyReLUImpl> create_from_config(const LayerConfig &config);
+  static Tensor forward(OpContext &ctx, const Tensor &input, const Config &config);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, const Config &config);
 
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override {
-    return input_shape;
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config) {
+    return Config{config.get<float>("negative_slope", 0.01f)};
   }
-
-  float get_negative_slope() const { return negative_slope_; }
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class LeakyReLU : public LayerRef<internal::LeakyReLUImpl> {
-public:
-  explicit LeakyReLU(float negative_slope = 0.01f, const std::string &name = "leaky_relu")
-      : LayerRef(std::make_shared<internal::LeakyReLUImpl>(negative_slope, name)) {}
-
-  using LayerRef<internal::LeakyReLUImpl>::LayerRef;
-};
+using LeakyReLU = FunctionalLayer<LeakyReLUOp>;
 
 }  // namespace tunx

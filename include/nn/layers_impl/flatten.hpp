@@ -6,43 +6,30 @@
  */
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
-
-namespace internal {
-class FlattenImpl : public SISOLayerImpl {
-private:
-  int start_dim_;
-  int end_dim_;
-
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
-
-public:
-  explicit FlattenImpl(int start_dim = 1, int end_dim = -1,
-                            const std::string &name = "flatten");
-
+struct FlattenOp {
   static constexpr const char *TYPE_NAME = "flatten";
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
-  static std::shared_ptr<FlattenImpl> create_from_config(const LayerConfig &config);
+  struct Config {
+    int start_dim = 1;
+    int end_dim = -1;
+  };
+
+  static Tensor forward(OpContext &ctx, const Tensor &input, const Config &config);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, const Config &config);
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config);
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class Flatten : public LayerRef<internal::FlattenImpl> {
+class Flatten : public FunctionalLayer<FlattenOp> {
 public:
-  explicit Flatten(int start_dim = 1, int end_dim = -1, const std::string &name = "flatten")
-      : LayerRef(std::make_shared<internal::FlattenImpl>(start_dim, end_dim, name)) {}
-
-  using LayerRef<internal::FlattenImpl>::LayerRef;
+  Flatten(int start_dim = 1, int end_dim = -1, const std::string &name = "flatten")
+      : FunctionalLayer(FlattenOp::Config{start_dim, end_dim}, name) {}
 };
-
 }  // namespace tunx

@@ -7,130 +7,104 @@
 #include "nn/layers_impl/embedding.hpp"
 
 #include <cmath>
-#include <memory>
+#include <stdexcept>
 
 #include "nn/engines/iengine.hpp"
 #include "tensor/ops.hpp"
-#include "tensor/tensor.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
-namespace internal {
 
-EmbeddingImpl::EmbeddingImpl(size_t vocab_size, size_t embed_dim, const std::string &name,
-                             size_t padding_idx)
-    : SISOLayerImpl(name),
-      vocab_size_(vocab_size),
-      embed_dim_(embed_dim) {
-  if (padding_idx == static_cast<size_t>(-1)) {
-    padding_idx_ = vocab_size_;
-  } else {
-    padding_idx_ = padding_idx;
-  }
+Vec<Vec<size_t>> EmbeddingOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                            const Config &config) {
+  if (input_shapes.empty()) throw std::invalid_argument("EmbeddingOp expects input shapes");
+  Vec<size_t> out = input_shapes[0];
+  out.push_back(config.embed_dim);
+  return {out};
 }
 
-void EmbeddingImpl::init_impl() {
-  float stddev = static_cast<float>(1.0 / std::sqrt(static_cast<double>(embed_dim_)));
-  long long seed = this->use_seed_ ? this->srand_seed_
-                                   : std::chrono::system_clock::now().time_since_epoch().count();
-  weight_ = make_param({vocab_size_, embed_dim_}, param_dtype_);
-  fill_normal(weight_.data(), 0, stddev, seed);
-
-  // Set padding idx to zeros if valid
-  if (padding_idx_ < vocab_size_) {
-    // Zero out the padding index row
-    for (size_t i = 0; i < embed_dim_; ++i) {
-      DISPATCH_DTYPE(weight_.dtype(), T, weight_.data().at<T>({padding_idx_, i}) = 0.0f);
-    }
-  }
-}
-
-Tensor EmbeddingImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  if (this->is_training_) {
-    residuals["input"] = input;
+Tensor EmbeddingOp::forward(OpContext &ctx, const Tensor &input, const Param &weight,
+                            const Config &config) {
+  if (ctx.is_training) {
+    ctx.residuals["input"] = input;
   }
 
   size_t num_tokens = input.size();
   if (num_tokens == 0) return Tensor();
 
   Vec<size_t> out_shape = input.shape();
-  out_shape.push_back(embed_dim_);
-  Tensor output = make_tensor(out_shape, io_dtype_);
+  out_shape.push_back(config.embed_dim);
+  Tensor output = ctx.make_tensor(out_shape, ctx.io_dtype);
 
   EmbeddingStats stats{
       .num_indices = num_tokens,
-      .vocab_size = vocab_size_,
-      .embed_dim = embed_dim_,
-      .padding_idx = padding_idx_,
+      .vocab_size = config.vocab_size,
+      .embed_dim = config.embed_dim,
+      .padding_idx = config.padding_idx,
   };
 
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  WorkspaceReq ws_req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
-  Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = ctx.engine->query_embedding_graph(ctx.handle, stats, type_desc);
+  Tensor ws = ctx.make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
-  engine_->embedding_fwd(engine_handle_, stats, input.data_as<void>(), weight_.data_as<void>(),
-                         output.data_as<void>(), ws.data_as<void>(), type_desc);
+  ctx.engine->embedding_fwd(ctx.handle, stats, input.data_as<void>(), weight.data_as<void>(),
+                            output.data_as<void>(), ws.data_as<void>(), type_desc);
 
   return output;
 }
 
-Tensor EmbeddingImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  const Tensor &input = residuals["input"];
+Tensor EmbeddingOp::backward(OpContext &ctx, const Tensor &grad_output, Param &weight,
+                             const Config &config) {
+  const Tensor &input = ctx.residuals["input"];
 
-  Tensor grad_input = make_tensor(input.shape(), io_dtype_);
+  Tensor grad_input = ctx.make_tensor(input.shape(), ctx.io_dtype);
   fill(grad_input, 0.0f);
 
   size_t num_tokens = input.size();
 
   EmbeddingStats stats{
       .num_indices = num_tokens,
-      .vocab_size = vocab_size_,
-      .embed_dim = embed_dim_,
-      .padding_idx = padding_idx_,
+      .vocab_size = config.vocab_size,
+      .embed_dim = config.embed_dim,
+      .padding_idx = config.padding_idx,
   };
 
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  WorkspaceReq ws_req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
-  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = ctx.engine->query_embedding_graph(ctx.handle, stats, type_desc);
+  Tensor ws = ctx.make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->embedding_bwd(engine_handle_, stats, grad_output.data_as<void>(), input.data_as<void>(),
-                         weight_.grad_as<void>(), ws.data_as<void>(), type_desc);
+  ctx.engine->embedding_bwd(ctx.handle, stats, grad_output.data_as<void>(), input.data_as<void>(),
+                            weight.grad_as<void>(), ws.data_as<void>(), type_desc);
 
   return grad_input;
 }
 
-Vec<size_t> EmbeddingImpl::compute_output_shape(const Vec<size_t> &input_shape) const {
-  Vec<size_t> out = input_shape;
-  out.push_back(embed_dim_);
-  return out;
+LayerConfig EmbeddingOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.name = name;
+  lcfg.type = TYPE_NAME;
+  lcfg.set("vocab_size", config.vocab_size);
+  lcfg.set("embed_dim", config.embed_dim);
+  lcfg.set("padding_idx", config.padding_idx);
+  return lcfg;
 }
 
-LayerConfig EmbeddingImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  config.set("vocab_size", vocab_size_);
-  config.set("embed_dim", embed_dim_);
-  config.set("padding_idx", padding_idx_);
-  return config;
+EmbeddingOp::Config EmbeddingOp::parse_config(const LayerConfig &config) {
+  Config c;
+  c.vocab_size = config.get<size_t>("vocab_size");
+  c.embed_dim = config.get<size_t>("embed_dim");
+  c.padding_idx = config.get<size_t>("padding_idx", static_cast<size_t>(-1));
+  return c;
 }
 
-std::shared_ptr<EmbeddingImpl> EmbeddingImpl::create_from_config(const LayerConfig &config) {
-  size_t vocab_size = config.get<size_t>("vocab_size");
-  size_t embed_dim = config.get<size_t>("embed_dim");
-  size_t padding_idx = config.get<size_t>("padding_idx", static_cast<size_t>(-1));
-  return std::make_shared<EmbeddingImpl>(vocab_size, embed_dim, config.name, padding_idx);
-}
-
-}  // namespace internal
 }  // namespace tunx

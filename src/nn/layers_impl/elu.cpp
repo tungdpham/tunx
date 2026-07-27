@@ -6,50 +6,43 @@
  */
 #include "nn/layers_impl/elu.hpp"
 
-#include <memory>
 #include <stdexcept>
 
+#include "nn/activations_impl/elu.hpp"
+
 namespace tunx {
-namespace internal {
 
-ELUImpl::ELUImpl(float alpha, const std::string &name)
-    : SISOLayerImpl(name),
-      activation_(std::make_unique<func::ELU>(alpha)),
-      alpha_(alpha) {}
+Vec<Vec<size_t>> ELUOp::output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config) {
+  if (input_shapes.size() != 1) {
+    throw std::runtime_error("ELUOp: expected exactly 1 input");
+  }
+  return {input_shapes[0]};
+}
 
-Tensor ELUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  if (this->is_training_) {
-    residuals["input"] = input;
+Tensor ELUOp::forward(OpContext &ctx, const Tensor &input, const Config &config) {
+  if (ctx.is_training) {
+    ctx.residuals["input"] = input;
   }
 
-  Tensor output = make_tensor(input.shape(), io_dtype_);
-  activation_->apply(input, output);
+  Tensor output = ctx.make_tensor(input.shape(), ctx.io_dtype);
+  func::ELU(config.alpha).apply(input, output);
   return output;
 }
 
-Tensor ELUImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  const Tensor &input = residuals["input"];
-  if (!input) {
-    throw std::runtime_error("No cached input found for backward pass in ELUImpl");
-  }
+Tensor ELUOp::backward(OpContext &ctx, const Tensor &grad_output, const Config &config) {
+  const Tensor &input = ctx.residuals["input"];
 
-  Tensor grad_input = make_tensor(input.shape(), io_dtype_);
-  activation_->compute_gradient(input, grad_output, grad_input);
+  Tensor grad_input = ctx.make_tensor(input.shape(), ctx.io_dtype);
+  func::ELU(config.alpha).compute_gradient(input, grad_output, grad_input);
   return grad_input;
 }
 
-LayerConfig ELUImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  config.set("alpha", alpha_);
-  return config;
+LayerConfig ELUOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.type = TYPE_NAME;
+  lcfg.name = name;
+  lcfg.set("alpha", config.alpha);
+  return lcfg;
 }
 
-std::shared_ptr<ELUImpl> ELUImpl::create_from_config(const LayerConfig &config) {
-  float alpha = config.get<float>("alpha", 1.0f);
-  return std::make_shared<ELUImpl>(alpha, config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

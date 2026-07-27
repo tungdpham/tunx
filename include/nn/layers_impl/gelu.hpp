@@ -6,45 +6,26 @@
  */
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "nn/activations_impl/gelu.hpp"
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
 
-namespace internal {
-class GELUImpl : public SISOLayerImpl {
-private:
-  std::unique_ptr<func::GELU> activation_;
-
-  Tensor forward_impl(const Tensor &input, Residuals &residualsuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residualsuals) override;
-
-public:
+struct GELUOp {
   static constexpr const char *TYPE_NAME = "gelu";
 
-  explicit GELUImpl(const std::string &name = "gelu");
+  struct Config {};
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  static std::shared_ptr<GELUImpl> create_from_config(const LayerConfig &config);
+  static Tensor forward(OpContext &ctx, const Tensor &input);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output);
 
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override {
-    return input_shape;
-  }
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config) { return Config{}; }
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class GELU : public LayerRef<internal::GELUImpl> {
-public:
-  explicit GELU(const std::string &name = "gelu")
-      : LayerRef(std::make_shared<internal::GELUImpl>(name)) {}
-
-  using LayerRef<internal::GELUImpl>::LayerRef;
-};
+using GELU = FunctionalLayer<GELUOp>;
 
 }  // namespace tunx

@@ -6,57 +6,52 @@
  */
 #pragma once
 
-#include <memory>
+#include <cstddef>
 #include <string>
 
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
+#include "nn/param.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
 
-namespace internal {
-class LayerNormImpl : public SISOLayerImpl {
-private:
-  size_t normalized_shape_;  // Size of C (channels)
-  float epsilon_;
-  bool affine_;  // Whether to use learnable affine parameters
-
-  Param gamma_;
-  Param beta_;
-
-  void init_impl() override;
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
-
-public:
-  explicit LayerNormImpl(size_t normalized_shape, float epsilon = 1e-5f, bool affine = true,
-                         const std::string &name = "layer_norm");
-
-  ~LayerNormImpl();
-
+struct LayerNormOp {
   static constexpr const char *TYPE_NAME = "layer_norm";
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override {
-    return input_shape;
-  }
+  struct Config {
+    size_t normalized_shape;
+    float epsilon = 1e-5f;
+    bool affine = true;
+  };
 
+  static Tensor forward(OpContext &ctx, const Tensor &input, const Param &gamma, const Param &beta,
+                        const Config &config);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &gamma, Param &beta,
+                         const Config &config);
 
-  static std::shared_ptr<LayerNormImpl> create_from_config(const LayerConfig &config);
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config);
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class LayerNorm : public LayerRef<internal::LayerNormImpl> {
+class LayerNorm : public FunctionalLayer<LayerNormOp> {
 public:
-  explicit LayerNorm(size_t normalized_shape, float epsilon = 1e-5f, bool affine = true,
-                     const std::string &name = "layer_norm")
-      : LayerRef(
-            std::make_shared<internal::LayerNormImpl>(normalized_shape, epsilon, affine, name)) {}
-
-  using LayerRef<internal::LayerNormImpl>::LayerRef;
+  LayerNorm(size_t normalized_shape, float epsilon = 1e-5f, bool affine = true,
+            const std::string &name = "layer_norm")
+      : FunctionalLayer(LayerNormOp::Config{normalized_shape, epsilon, affine}, name) {
+    if (affine) {
+      impl_->register_param("gamma", {normalized_shape},
+                            [](Param &p, OpContext &ctx) { fill(p.data(), 1.0f); });
+      impl_->register_param("beta", {normalized_shape},
+                            [](Param &p, OpContext &ctx) { fill(p.data(), 0.0f); });
+    } else {
+      impl_->register_param("gamma", {normalized_shape},
+                            [](Param &p, OpContext &ctx) { fill(p.data(), 1.0f); });
+      impl_->register_param("beta", {normalized_shape},
+                            [](Param &p, OpContext &ctx) { fill(p.data(), 0.0f); });
+    }
+  }
 };
 
 }  // namespace tunx

@@ -6,62 +6,49 @@
  */
 #pragma once
 
-#include <memory>
 #include <string>
 
+#include "nn/functional_layer.hpp"
 #include "nn/param.hpp"
-#include "nn/siso_layer.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
 
-// [N, H, W, C] input
-namespace internal {
-class Conv2DImpl : public SISOLayerImpl {
-private:
-  size_t in_channels_;
-  size_t out_channels_;
-  size_t kernel_h_;
-  size_t kernel_w_;
-  size_t stride_h_;
-  size_t stride_w_;
-  size_t pad_h_;
-  size_t pad_w_;
-  bool use_bias_;
+struct Conv2DOp {
+  static constexpr const char *TYPE_NAME = "conv2d";
 
-  Param weights_;
-  Param bias_;
+  struct Config {
+    size_t in_channels;
+    size_t out_channels;
+    size_t kernel_h;
+    size_t kernel_w;
+    size_t stride_h = 1;
+    size_t stride_w = 1;
+    size_t pad_h = 0;
+    size_t pad_w = 0;
+    bool use_bias = true;
+  };
 
-  void init_impl() override;
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
+  static Tensor forward(OpContext &ctx, const Tensor &input, const Param &weight, const Param &bias,
+                        const Config &config);
 
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &weight, Param &bias,
+                         const Config &config);
+
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config);
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
+};
+
+
+class Conv2D : public FunctionalLayer<Conv2DOp> {
 public:
   static constexpr const char *TYPE_NAME = "conv2d";
 
-  Conv2DImpl(size_t in_channels, size_t out_channels, size_t kernel_h, size_t kernel_w,
-             size_t stride_h = 1, size_t stride_w = 1, size_t pad_h = 0, size_t pad_w = 0,
-             bool use_bias = true, const std::string &name = "conv2d");
-
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
-  static std::shared_ptr<Conv2DImpl> create_from_config(const LayerConfig &config);
-};
-
-}  // namespace internal
-
-class Conv2D : public LayerRef<internal::Conv2DImpl> {
-public:
   Conv2D(size_t in_channels, size_t out_channels, size_t kernel_h, size_t kernel_w,
          size_t stride_h = 1, size_t stride_w = 1, size_t pad_h = 0, size_t pad_w = 0,
-         bool use_bias = true, const std::string &name = "conv2d")
-      : LayerRef(std::make_shared<internal::Conv2DImpl>(in_channels, out_channels, kernel_h,
-                                                        kernel_w, stride_h, stride_w, pad_h, pad_w,
-                                                        use_bias, name)) {}
-
-  using LayerRef<internal::Conv2DImpl>::LayerRef;
+         bool use_bias = true, const std::string &name = "conv2d");
 };
 
 }  // namespace tunx

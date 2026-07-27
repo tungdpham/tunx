@@ -6,49 +6,30 @@
  */
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "nn/activations_impl/elu.hpp"
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
 
-namespace internal {
-class ELUImpl : public SISOLayerImpl {
-private:
-  std::unique_ptr<func::ELU> activation_;
-  float alpha_;
-
-protected:
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
-
-public:
+struct ELUOp {
   static constexpr const char *TYPE_NAME = "elu";
 
-  explicit ELUImpl(float alpha = 1.0f, const std::string &name = "elu");
+  struct Config {
+    float alpha = 1.0f;
+  };
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  static std::shared_ptr<ELUImpl> create_from_config(const LayerConfig &config);
+  static Tensor forward(OpContext &ctx, const Tensor &input, const Config &config);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, const Config &config);
 
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override {
-    return input_shape;
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config) {
+    return Config{config.get<float>("alpha", 1.0f)};
   }
-
-  float get_alpha() const { return alpha_; }
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class ELU : public LayerRef<internal::ELUImpl> {
-public:
-  explicit ELU(float alpha = 1.0f, const std::string &name = "elu")
-      : LayerRef(std::make_shared<internal::ELUImpl>(alpha, name)) {}
-
-  using LayerRef<internal::ELUImpl>::LayerRef;
-};
+using ELU = FunctionalLayer<ELUOp>;
 
 }  // namespace tunx

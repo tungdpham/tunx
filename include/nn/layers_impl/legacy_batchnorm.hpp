@@ -6,64 +6,37 @@
  */
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
+#include "tensor/tensor.hpp"
 
 namespace tunx {
 
-namespace internal {
-class LegacyBatchNormImpl : public SISOLayerImpl {
-private:
-  size_t num_features_;
-  float epsilon_;
-  float momentum_;
-  bool affine_;
-
-  Tensor gamma_;
-  Tensor beta_;
-  Tensor grad_gamma_;
-  Tensor grad_beta_;
-
-  Tensor running_mean_;
-  Tensor running_var_;
-  Tensor grad_dummy_mean_;
-  Tensor grad_dummy_var_;
-
-  Tensor def_forward(const Tensor &input, Residuals &residuals);
-  Tensor def_backward(const Tensor &grad_output, Residuals &residuals);
-
-  void init_impl() override;
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
-
-public:
-  explicit LegacyBatchNormImpl(size_t num_features, float epsilon = 1e-5f,
-                                    float momentum = 0.1f, bool affine = true,
-                                    const std::string &name = "batchnorm");
-
+struct LegacyBatchNormOp {
   static constexpr const char *TYPE_NAME = "legacy_batchnorm";
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
+  struct Config {
+    size_t num_features;
+    float epsilon = 1e-5f;
+    float momentum = 0.1f;
+    bool affine = true;
+  };
 
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
+  static Tensor forward(OpContext &ctx, const Tensor &input, Param &gamma, Param &beta,
+                        Param &running_mean, Param &running_var, const Config &config);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &gamma, Param &beta,
+                         const Config &config);
 
-
-  static std::shared_ptr<LegacyBatchNormImpl> create_from_config(const LayerConfig &config);
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config);
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class LegacyBatchNorm : public LayerRef<internal::LegacyBatchNormImpl> {
+class LegacyBatchNorm : public FunctionalLayer<LegacyBatchNormOp> {
 public:
   explicit LegacyBatchNorm(size_t num_features, float epsilon = 1e-5f, float momentum = 0.1f,
-                                bool affine = true, const std::string &name = "batchnorm")
-      : LayerRef(std::make_shared<internal::LegacyBatchNormImpl>(num_features, epsilon, momentum, affine,
-                                                            name)) {}
-
-  using LayerRef<internal::LegacyBatchNormImpl>::LayerRef;
+                           bool affine = true, const std::string &name = "batchnorm");
 };
 
 }  // namespace tunx

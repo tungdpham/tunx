@@ -6,42 +6,26 @@
  */
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
 
-namespace internal {
-class ReLUImpl : public SISOLayerImpl {
-protected:
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
-
-public:
+struct ReLUOp {
   static constexpr const char *TYPE_NAME = "relu";
 
-  explicit ReLUImpl(const std::string &name = "relu");
+  struct Config {};
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  static std::shared_ptr<ReLUImpl> create_from_config(const LayerConfig &config);
+  static Tensor forward(OpContext &ctx, const Tensor &input);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output);
 
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override {
-    return input_shape;
-  }
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config) { return Config{}; }
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class ReLU : public LayerRef<internal::ReLUImpl> {
-public:
-  explicit ReLU(const std::string &name = "relu")
-      : LayerRef(std::make_shared<internal::ReLUImpl>(name)) {}
-
-  using LayerRef<internal::ReLUImpl>::LayerRef;
-};
+using ReLU = FunctionalLayer<ReLUOp>;
 
 }  // namespace tunx

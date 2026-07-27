@@ -43,53 +43,97 @@ inline size_t get_shapes_bytes(const Vec<Vec<size_t>> &shapes, DType_t dtype) {
   return total_bytes;
 }
 
-namespace detail {
 struct ResidualObject {
 public:
-  using ResidualValue = std::variant<std::monostate, std::map<std::string, ResidualObject>, Tensor>;
+  struct Impl {
+    using ResidualValue =
+        std::variant<std::monostate, std::map<std::string, ResidualObject>, Tensor>;
 
-  ResidualValue data_;
+    ResidualValue data;
+  };
+  std::shared_ptr<Impl> impl;
 
   ResidualObject()
-      : data_(std::monostate{}) {}
+      : impl(std::make_shared<Impl>()) {}
   ~ResidualObject() = default;
-  ResidualObject(const ResidualObject &) = delete;
-  ResidualObject &operator=(const ResidualObject &) = delete;
+  ResidualObject(const ResidualObject &) = default;
+  ResidualObject &operator=(const ResidualObject &) = default;
   ResidualObject(ResidualObject &&) = default;
   ResidualObject &operator=(ResidualObject &&) = default;
 
   ResidualObject &operator[](const std::string &key) {
-    if (data_.index() == 0) {
-      data_ = std::map<std::string, ResidualObject>{};
-    } else if (data_.index() == 1) {
+    if (impl->data.index() == 0) {
+      impl->data = std::map<std::string, ResidualObject>{};
+    } else if (impl->data.index() == 1) {
       // already a map, do nothing
-    } else if (data_.index() == 2) {
+    } else if (impl->data.index() == 2) {
       throw std::runtime_error("ResidualObject: Attempting to index into a leaf node");
     }
 
-    return std::get<1>(data_)[key];
+    return std::get<1>(impl->data)[key];
   }
 
   ResidualObject &operator=(const Tensor &tensor) {
-    if (data_.index() == 0) {
-      data_ = tensor;
-    } else if (data_.index() == 1) {
+    if (impl->data.index() == 0) {
+      impl->data = tensor;
+    } else if (impl->data.index() == 1) {
       throw std::runtime_error("ResidualObject: Attempting to assign a Tensor to a non-leaf node");
     }
     return *this;
   }
 
   operator Tensor &() {
-    if (data_.index() != 2) {
+    if (impl->data.index() != 2) {
       throw std::runtime_error("ResidualObject: Attempting to convert a non-leaf node to Tensor");
     }
-    return std::get<2>(data_);
+    return std::get<2>(impl->data);
+  }
+
+  void print(std::ostream &os, int indent = 0) const {
+    std::string indent_str(indent * 2, ' ');
+    if (!impl) {
+      os << indent_str << "<null impl>\n";
+      return;
+    }
+
+    std::visit(
+        [&os, indent, &indent_str](auto &&arg) {
+          using T = std::decay_t<decltype(arg)>;
+
+          if constexpr (std::is_same_v<T, std::monostate>) {
+            os << "<empty>\n";
+          } else if constexpr (std::is_same_v<T, std::map<std::string, ResidualObject>>) {
+            if (arg.empty()) {
+              os << "{}\n";
+              return;
+            }
+            os << "{\n";
+            for (const auto &[key, value] : arg) {
+              os << indent_str << "  " << key << ": ";
+              value.print(os, indent + 1);
+            }
+            os << indent_str << "}\n";
+          } else if constexpr (std::is_same_v<T, Tensor>) {
+            // For leaf nodes, output the Tensor
+            os << "Tensor(shape=[";
+            const auto &shape = arg.shape();
+            for (size_t i = 0; i < shape.size(); ++i) {
+              os << shape[i];
+              if (i < shape.size() - 1) os << ", ";
+            }
+            os << "])\n";
+          }
+        },
+        impl->data);
+  }
+
+  friend std::ostream &operator<<(std::ostream &os, const ResidualObject &obj) {
+    obj.print(os, 0);
+    return os;
   }
 };
 
-}  // namespace detail
-
-using Residuals = detail::ResidualObject;
+using Residuals = ResidualObject;
 
 struct InitOptions {
   DELAllocatorV2 *ws_allocator = nullptr;
@@ -167,6 +211,7 @@ protected:
   DType_t param_dtype_ = DType_t::FP32;    // data type for parameters/gradients
   DType_t compute_dtype_ = DType_t::FP32;  // data type for internal computations
 
+public:
   // helpers
   Param make_param(const Vec<size_t> &shape, DType_t dtype);
   Tensor make_tensor(const Vec<size_t> &shape, DType_t dtype);

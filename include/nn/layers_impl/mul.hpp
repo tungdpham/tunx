@@ -6,56 +6,27 @@
  */
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "nn/graph.hpp"
-#include "nn/layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
 
-// Element-wise multiplication layer.
-namespace internal {
-class MulImpl : public LayerImpl {
-protected:
-  Vec<Tensor> forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) override;
-  Vec<Tensor> backward_impl(const Vec<Tensor> &grad_outputs, Residuals &residuals) override;
-
-public:
+struct MulOp {
   static constexpr const char *TYPE_NAME = "mul";
 
-  explicit MulImpl(const std::string &name = "mul") { this->name_ = name; }
+  struct Config {};
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const override;
+  static Tensor forward(OpContext &ctx, const Tensor &a, const Tensor &b);
+  static Vec<Tensor> backward(OpContext &ctx, const Tensor &grad_out);
 
-  Node operator()(const Node &a, const Node &b) {
-    if (!a || !b) {
-      throw std::runtime_error("MulImpl: input nodes cannot be null");
-    }
-    Graph *graph = a->graph();
-    if (graph != b->graph()) {
-      throw std::runtime_error("MulImpl: both input nodes must belong to the same graph");
-    }
-    Node output = graph->make_node();
-    std::shared_ptr<LayerImpl> self = shared_from_this();
-    graph->add_edge(self, {a, b}, {output});
-    return output;
-  }
-
-  static std::shared_ptr<MulImpl> create_from_config(const LayerConfig &config);
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config) { return Config{}; }
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
 
-class Mul : public LayerRef<internal::MulImpl> {
-public:
-  explicit Mul(const std::string &name = "mul")
-      : LayerRef(std::make_shared<internal::MulImpl>(name)) {}
-
-  using LayerRef<internal::MulImpl>::LayerRef;
-};
+using Mul = FunctionalLayer<MulOp>;
 
 }  // namespace tunx

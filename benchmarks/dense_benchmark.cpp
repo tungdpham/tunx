@@ -28,6 +28,8 @@ signed main() {
   auto legacy_layer = LegacyDense(INPUT_FEATURES, OUTPUT_FEATURES, true, "legacy_dense_test");
   auto legacy_dense_output = legacy_layer(input);
 
+  graph.set_output(dense_output);
+  graph.set_output(legacy_dense_output);
   graph.compile(allocator);
 
   Vec<Param> current_params = dense_layer.params();

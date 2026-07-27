@@ -6,25 +6,28 @@
  */
 #include "nn/layers_impl/leaky_relu.hpp"
 
-#include <memory>
 #include <stdexcept>
 
+#include "nn/activations_impl/leaky_relu.hpp"
+
 namespace tunx {
-namespace internal {
 
-LeakyReLUImpl::LeakyReLUImpl(float negative_slope, const std::string &name)
-    : SISOLayerImpl(name),
-      activation_(std::make_unique<func::LeakyReLU>(negative_slope)),
-      negative_slope_(negative_slope) {}
+Vec<Vec<size_t>> LeakyReLUOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                            const Config &config) {
+  if (input_shapes.size() != 1) {
+    throw std::runtime_error("LeakyReLUOp: expected exactly 1 input");
+  }
+  return {input_shapes[0]};
+}
 
-Tensor LeakyReLUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  Tensor output = make_tensor(input.shape(), io_dtype_);
+Tensor LeakyReLUOp::forward(OpContext &ctx, const Tensor &input, const Config &config) {
+  Tensor output = ctx.make_tensor(input.shape(), ctx.io_dtype);
 
-  if (this->is_training_) {
-    Tensor mask = this->make_tensor(input.shape(), DType_t::UINT8_T);
-    residuals["mask"] = mask;
+  if (ctx.is_training) {
+    Tensor mask = ctx.make_tensor(input.shape(), DType_t::UINT8_T);
+    ctx.residuals["mask"] = mask;
 
-    activation_->apply(input, output);
+    func::LeakyReLU(config.negative_slope).apply(input, output);
 
     size_t num_elements = input.size();
     if (input.device_type() == DeviceType::CPU) {
@@ -36,23 +39,20 @@ Tensor LeakyReLUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
     }
 #ifdef TUNX_USE_CUDA
     else if (input.device_type() == DeviceType::CUDA) {
-      throw std::runtime_error("LeakyReLUImpl: CUDA mask computation not yet implemented");
+      throw std::runtime_error("LeakyReLUOp: CUDA mask computation not yet implemented");
     }
 #endif
   } else {
-    activation_->apply(input, output);
+    func::LeakyReLU(config.negative_slope).apply(input, output);
   }
 
   return output;
 }
 
-Tensor LeakyReLUImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  Tensor &mask = residuals["mask"];
-  if (!mask) {
-    throw std::runtime_error("No cached mask found for backward pass in LeakyReLUImpl");
-  }
+Tensor LeakyReLUOp::backward(OpContext &ctx, const Tensor &grad_output, const Config &config) {
+  const Tensor &mask = ctx.residuals["mask"];
 
-  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
+  Tensor grad_input = ctx.make_tensor(grad_output.shape(), ctx.io_dtype);
 
   // Gradient: grad_input = grad_output * (mask ? 1.0 : negative_slope)
   size_t num_elements = grad_output.size();
@@ -61,31 +61,25 @@ Tensor LeakyReLUImpl::backward_impl(const Tensor &grad_output, Residuals &residu
     const uint8_t *mask_data = mask.data_as<uint8_t>();
     float *grad_in_data = grad_input.data_as<float>();
     for (size_t i = 0; i < num_elements; ++i) {
-      float slope = mask_data[i] ? 1.0f : negative_slope_;
+      float slope = mask_data[i] ? 1.0f : config.negative_slope;
       grad_in_data[i] = grad_out_data[i] * slope;
     }
   }
 #ifdef TUNX_USE_CUDA
   else if (grad_output.device_type() == DeviceType::CUDA) {
-    throw std::runtime_error("LeakyReLUImpl: CUDA backward not yet implemented");
+    throw std::runtime_error("LeakyReLUOp: CUDA backward not yet implemented");
   }
 #endif
 
   return grad_input;
 }
 
-LayerConfig LeakyReLUImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  config.set("negative_slope", negative_slope_);
-  return config;
+LayerConfig LeakyReLUOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.type = TYPE_NAME;
+  lcfg.name = name;
+  lcfg.set("negative_slope", config.negative_slope);
+  return lcfg;
 }
 
-std::shared_ptr<LeakyReLUImpl> LeakyReLUImpl::create_from_config(const LayerConfig &config) {
-  float negative_slope = config.get<float>("negative_slope", 0.01f);
-  return std::make_shared<LeakyReLUImpl>(negative_slope, config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

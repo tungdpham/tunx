@@ -9,71 +9,63 @@
 #include <stdexcept>
 
 namespace tunx {
-namespace internal {
 
-SliceImpl::SliceImpl(size_t axis, size_t start, size_t length, const std::string &name)
-    : SISOLayerImpl(name),
-      axis_(axis),
-      start_(start),
-      length_(length) {}
+Vec<Vec<size_t>> SliceOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                        const Config &config) {
+  if (input_shapes.empty()) throw std::invalid_argument("SliceOp expects input shapes");
+  auto out_shape = input_shapes[0];
+  if (config.axis >= out_shape.size()) {
+    throw std::invalid_argument("Slice axis out of bounds");
+  }
+  if (config.start + config.length > out_shape[config.axis]) {
+    throw std::invalid_argument("Slice range out of bounds");
+  }
+  out_shape[config.axis] = config.length;
+  return {out_shape};
+}
 
-Tensor SliceImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  Tensor shape_tensor = Tensor({input.shape().size()});
-  std::copy(input.shape().begin(), input.shape().end(), shape_tensor.data_as<size_t>());
-  residuals["original_shape"] = shape_tensor;
+Tensor SliceOp::forward(OpContext &ctx, const Tensor &input, const Config &config) {
+  if (ctx.is_training) {
+    Tensor shape_tensor = ctx.make_tensor({input.shape().size()}, DType_t::SIZE_T);
+    std::copy(input.shape().begin(), input.shape().end(), shape_tensor.data_as<size_t>());
+    ctx.residuals["original_shape"] = shape_tensor;
+  }
 
-  Vec<size_t> output_shape = compute_output_shape(input.shape());
-  Tensor output = make_tensor(output_shape, io_dtype_);
+  Vec<size_t> out_shape = output_shapes({input.shape()}, config)[0];
+  Tensor output = ctx.make_tensor(out_shape, ctx.io_dtype);
 
-  // TODO: implement slice forward in engines.
-  throw std::runtime_error("SliceImpl: unimplemented");
-
+  throw std::runtime_error("SliceOp: unimplemented");
   return output;
 }
 
-Tensor SliceImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  const Tensor &shape_tensor = residuals["original_shape"];
+Tensor SliceOp::backward(OpContext &ctx, const Tensor &grad_output, const Config &config) {
+  const Tensor &shape_tensor = ctx.residuals["original_shape"];
   Vec<size_t> original_shape(shape_tensor.size());
   std::copy(shape_tensor.data_as<size_t>(), shape_tensor.data_as<size_t>() + shape_tensor.size(),
             original_shape.begin());
 
-  Tensor grad_input = make_tensor(original_shape, io_dtype_);
+  Tensor grad_input = ctx.make_tensor(original_shape, ctx.io_dtype);
 
-  // TODO: implement slice backward in engines.
-  throw std::runtime_error("SliceImpl: unimplemented");
-
+  throw std::runtime_error("SliceOp: unimplemented");
   return grad_input;
 }
 
-Vec<size_t> SliceImpl::compute_output_shape(const Vec<size_t> &input_shape) const {
-  if (axis_ >= input_shape.size()) {
-    throw std::invalid_argument("Slice axis out of bounds");
-  }
-  if (start_ + length_ > input_shape[axis_]) {
-    throw std::invalid_argument("Slice range out of bounds");
-  }
-
-  Vec<size_t> output_shape = input_shape;
-  output_shape[axis_] = length_;
-  return output_shape;
+LayerConfig SliceOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.name = name;
+  lcfg.type = TYPE_NAME;
+  lcfg.set("axis", (int)config.axis);
+  lcfg.set("start", (int)config.start);
+  lcfg.set("length", (int)config.length);
+  return lcfg;
 }
 
-LayerConfig SliceImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  config.set("axis", (int)axis_);
-  config.set("start", (int)start_);
-  config.set("length", (int)length_);
-  return config;
+SliceOp::Config SliceOp::parse_config(const LayerConfig &config) {
+  Config c;
+  c.axis = (size_t)config.get<int>("axis", 0);
+  c.start = (size_t)config.get<int>("start", 0);
+  c.length = (size_t)config.get<int>("length", 1);
+  return c;
 }
 
-std::shared_ptr<SliceImpl> SliceImpl::create_from_config(const LayerConfig &config) {
-  size_t axis = (size_t)config.get<int>("axis", 0);
-  size_t start = (size_t)config.get<int>("start", 0);
-  size_t length = (size_t)config.get<int>("length", 1);
-  return std::make_shared<SliceImpl>(axis, start, length, config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

@@ -7,49 +7,41 @@
 #pragma once
 
 #include <cstddef>
-#include <memory>
 #include <string>
 
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
 
-namespace internal {
-class AvgPool2DImpl : public SISOLayerImpl {
-private:
-  size_t pool_h_;
-  size_t pool_w_;
-  size_t stride_h_;
-  size_t stride_w_;
-  size_t pad_h_;
-  size_t pad_w_;
-
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
-
-public:
+struct AvgPool2DOp {
   static constexpr const char *TYPE_NAME = "avgpool2d";
 
-  AvgPool2DImpl(size_t pool_h, size_t pool_w, size_t stride_h = 1, size_t stride_w = 1,
-                     size_t pad_h = 0, size_t pad_w = 0, const std::string &name = "avgpool2d");
+  struct Config {
+    size_t pool_h;
+    size_t pool_w;
+    size_t stride_h = 1;
+    size_t stride_w = 1;
+    size_t pad_h = 0;
+    size_t pad_w = 0;
+  };
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
-  static std::shared_ptr<AvgPool2DImpl> create_from_config(const LayerConfig &config);
+  static Tensor forward(OpContext &ctx, const Tensor &input, const Config &config);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, const Config &config);
+
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config);
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class AvgPool2D : public LayerRef<internal::AvgPool2DImpl> {
+class AvgPool2D : public FunctionalLayer<AvgPool2DOp> {
 public:
-  AvgPool2D(size_t pool_h, size_t pool_w, size_t stride_h = 1, size_t stride_w = 1,
-                 size_t pad_h = 0, size_t pad_w = 0, const std::string &name = "avgpool2d")
-      : LayerRef(std::make_shared<internal::AvgPool2DImpl>(pool_h, pool_w, stride_h, stride_w, pad_h,
-                                                      pad_w, name)) {}
-
-  using LayerRef<internal::AvgPool2DImpl>::LayerRef;
+  AvgPool2D(size_t pool_h, size_t pool_w, size_t stride_h = 0, size_t stride_w = 0,
+            size_t pad_h = 0, size_t pad_w = 0, const std::string &name = "avgpool2d")
+      : FunctionalLayer(
+            AvgPool2DOp::Config{pool_h, pool_w, stride_h == 0 ? pool_h : stride_h,
+                                          stride_w == 0 ? pool_w : stride_w, pad_h, pad_w},
+            name) {}
 };
 
 }  // namespace tunx

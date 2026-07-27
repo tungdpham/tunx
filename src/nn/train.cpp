@@ -256,12 +256,8 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
     TensorBundle inputs{{"input", device_input}};
 
-    auto forward_start = chrono::high_resolution_clock::now();
     TensorBundle outputs = graph.forward(inputs);
     Tensor predictions = outputs.get("output");
-    auto forward_end = chrono::high_resolution_clock::now();
-    auto forward_duration =
-        chrono::duration_cast<chrono::milliseconds>(forward_end - forward_start).count();
 
     size_t batch_size = 1;
     for (size_t i = 0; i < predictions.dims() - 1; ++i) {
@@ -269,19 +265,12 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     }
     total_class_num += batch_size;
 
-    auto loss_start = chrono::high_resolution_clock::now();
     float loss;
     criterion->compute_loss(predictions, device_labels, loss);
     total_loss += loss;
-    auto loss_end = chrono::high_resolution_clock::now();
-    auto loss_duration = chrono::duration_cast<chrono::milliseconds>(loss_end - loss_start).count();
 
-    auto gradient_start = chrono::high_resolution_clock::now();
     Tensor loss_gradient = Tensor(predictions.shape(), batch_data.dtype(), mem_pool);
     criterion->compute_gradient(predictions, device_labels, loss_gradient);
-    auto gradient_end = chrono::high_resolution_clock::now();
-    auto gradient_duration =
-        chrono::duration_cast<chrono::milliseconds>(gradient_end - gradient_start).count();
 
     int batch_corrects = compute_class_corrects(predictions, device_labels);
     predictions = Tensor();  // free prediction buffer early
@@ -290,34 +279,20 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
       loss_gradient *= (1.0f / static_cast<float>(config.gradient_accumulation_steps));
     }
 
-    auto grad_backward_start = chrono::high_resolution_clock::now();
     TensorBundle output_grads{{"output", loss_gradient}};
     graph.backward(output_grads);
-    auto grad_backward_end = chrono::high_resolution_clock::now();
-    auto grad_backward_duration =
-        chrono::duration_cast<chrono::milliseconds>(grad_backward_end - grad_backward_start)
-            .count();
 
     auto batch_end = chrono::high_resolution_clock::now();
     auto batch_duration = chrono::duration_cast<chrono::milliseconds>(batch_end - batch_start);
 
-    auto update_time = 0;
-    auto zero_grads_time = 0;
     if (++grad_accum_counter == config.gradient_accumulation_steps) {
       grad_accum_counter = 0;
 
-      auto update_start = chrono::high_resolution_clock::now();
       optimizer->update();
       model_device.default_stream().sync();
-      auto update_end = chrono::high_resolution_clock::now();
-      update_time = chrono::duration_cast<chrono::milliseconds>(update_end - update_start).count();
 
-      auto zero_grads_start = chrono::high_resolution_clock::now();
       optimizer->zero_grads();
       model_device.default_stream().sync();
-      auto zero_grads_end = chrono::high_resolution_clock::now();
-      zero_grads_time =
-          chrono::duration_cast<chrono::milliseconds>(zero_grads_end - zero_grads_start).count();
 
       if (scheduler) {
         scheduler->step();
@@ -362,11 +337,13 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
         cout << ", PPL: " << setprecision(2) << step_metrics["perplexity"];
       }
       cout << ", Batch Time: " << batch_duration.count() << "ms" << endl;
+      /*
       print_timing_table(graph.profiling_details());
       cout << "Forward time: " << forward_duration << ", Backward time: " << grad_backward_duration
            << ", Loss time: " << loss_duration << ", Gradient time: " << gradient_duration
            << ", Update time: " << update_time << "ms, " << "Zero grads time: " << zero_grads_time
            << "ms" << endl;
+      */
     }
     graph.clear_profiling_details();
   }

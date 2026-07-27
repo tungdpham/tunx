@@ -1395,8 +1395,9 @@ inline void print_tensor(const Tensor &input, size_t num_elements_, std::string_
   auto host_tensor = to_host(input);
   fmt::print(fmt::runtime("{}: "), label);
   for (size_t i = 0; i < num_elements_; i++) {
-    DISPATCH_ANY_DTYPE(input.dtype(), T,
-                       { fmt::print(fmt::runtime("{:.3f} "), static_cast<float>(host_tensor.data_as<T>()[i])); })
+    DISPATCH_ANY_DTYPE(input.dtype(), T, {
+      fmt::print(fmt::runtime("{:.4f} "), static_cast<double>(host_tensor.data_as<T>()[i]));
+    })
   }
   fmt::print(fmt::runtime("\n"));
 }

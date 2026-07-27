@@ -6,51 +6,26 @@
  */
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "nn/activations_impl/sigmoid.hpp"
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
 
-/**
- * funcgmoid LayerImpl with output caching
- * Caches the output activation during forward pass for efficient gradient computation.
- * funcgmoid gradient: grad_input = grad_output * output * (1 - output)
- */
-namespace internal {
-class SigmoidImpl : public SISOLayerImpl {
-private:
-  std::unique_ptr<func::Sigmoid> activation_;
-
-protected:
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
-
-public:
+struct SigmoidOp {
   static constexpr const char *TYPE_NAME = "sigmoid";
 
-  explicit SigmoidImpl(const std::string &name = "sigmoid");
+  struct Config {};
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  static std::shared_ptr<SigmoidImpl> create_from_config(const LayerConfig &config);
+  static Tensor forward(OpContext &ctx, const Tensor &input);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output);
 
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override {
-    return input_shape;
-  }
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config) { return Config{}; }
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class Sigmoid : public LayerRef<internal::SigmoidImpl> {
-public:
-  explicit Sigmoid(const std::string &name = "sigmoid")
-      : LayerRef(std::make_shared<internal::SigmoidImpl>(name)) {}
-
-  using LayerRef<internal::SigmoidImpl>::LayerRef;
-};
+using Sigmoid = FunctionalLayer<SigmoidOp>;
 
 }  // namespace tunx

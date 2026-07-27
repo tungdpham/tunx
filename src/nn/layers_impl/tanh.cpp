@@ -6,50 +6,45 @@
  */
 #include "nn/layers_impl/tanh.hpp"
 
-#include <memory>
 #include <stdexcept>
 
+#include "nn/activations_impl/tanh.hpp"
+
 namespace tunx {
-namespace internal {
 
-TanhImpl::TanhImpl(const std::string &name)
-    : SISOLayerImpl(name),
-      activation_(std::make_unique<func::Tanh>()) {}
+Vec<Vec<size_t>> TanhOp::output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config) {
+  if (input_shapes.size() != 1) {
+    throw std::runtime_error("TanhOp: expected exactly 1 input");
+  }
+  return {input_shapes[0]};
+}
 
-Tensor TanhImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  if (this->is_training_) {
-    residuals["input"] = input;
+Tensor TanhOp::forward(OpContext &ctx, const Tensor &input) {
+  if (ctx.is_training) {
+    ctx.residuals["input"] = input;
   }
 
-  Tensor output = make_tensor(input.shape(), io_dtype_);
-  activation_->apply(input, output, engine_handle_.get_stream());
+  Tensor output = ctx.make_tensor(input.shape(), ctx.io_dtype);
+  func::Tanh().apply(input, output, ctx.handle.get_stream());
 
   return output;
 }
 
-Tensor TanhImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  Tensor &input = residuals["input"];
-  if (!input) {
-    throw std::runtime_error("No cached input found for backward pass in TanhImpl");
-  }
+Tensor TanhOp::backward(OpContext &ctx, const Tensor &grad_output) {
+  const Tensor &input = ctx.residuals["input"];
 
-  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
+  Tensor grad_input = ctx.make_tensor(grad_output.shape(), ctx.io_dtype);
 
-  activation_->compute_gradient(input, grad_output, grad_input, engine_handle_.get_stream());
+  func::Tanh().compute_gradient(input, grad_output, grad_input, ctx.handle.get_stream());
 
   return grad_input;
 }
 
-LayerConfig TanhImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  return config;
+LayerConfig TanhOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.type = TYPE_NAME;
+  lcfg.name = name;
+  return lcfg;
 }
 
-std::shared_ptr<TanhImpl> TanhImpl::create_from_config(const LayerConfig &config) {
-  return std::make_shared<TanhImpl>(config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

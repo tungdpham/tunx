@@ -6,57 +6,58 @@
  */
 #include "nn/layers_impl/activation.hpp"
 
-#include "nn/activations.hpp"
-namespace tunx {
-namespace internal {
+#include <stdexcept>
 
-ActivationImpl::ActivationImpl(std::unique_ptr<ActivationFunction> activation,
-                               const std::string &name)
-    : SISOLayerImpl(name),
-      activation_(std::move(activation)) {
-  if (!activation_) {
-    throw std::invalid_argument("Activation function cannot be null");
+#include "nn/activations.hpp"
+
+namespace tunx {
+
+Vec<Vec<size_t>> ActivationOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                             const Config &config) {
+  if (input_shapes.size() != 1) {
+    throw std::runtime_error("ActivationOp: expected exactly 1 input");
   }
+  return {input_shapes[0]};
 }
 
-Tensor ActivationImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  if (this->is_training_) {
-    residuals["input"] = input;
+Tensor ActivationOp::forward(OpContext &ctx, const Tensor &input, const Config &config) {
+  if (ctx.is_training) {
+    ctx.residuals["input"] = input;
   }
 
-  Tensor output = make_tensor(input.shape(), input.dtype());
-  activation_->apply(input, output);
+  Tensor output = ctx.make_tensor(input.shape(), input.dtype());
+
+  ActivationFactory::register_defaults();
+  auto activation = ActivationFactory::create(config.activation_type);
+  if (!activation) {
+    throw std::invalid_argument("Activation function cannot be null");
+  }
+  activation->apply(input, output);
+
   return output;
 }
 
-Tensor ActivationImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  const Tensor &input = residuals["input"];
-  if (!input) {
-    throw std::runtime_error("No cached input found for backward pass in ActivationImpl");
+Tensor ActivationOp::backward(OpContext &ctx, const Tensor &grad_output, const Config &config) {
+  const Tensor &input = ctx.residuals["input"];
+
+  Tensor grad_input = ctx.make_tensor(input.shape(), input.dtype());
+
+  ActivationFactory::register_defaults();
+  auto activation = ActivationFactory::create(config.activation_type);
+  if (!activation) {
+    throw std::invalid_argument("Activation function cannot be null");
   }
-  Tensor grad_input = make_tensor(input.shape(), input.dtype());
-  activation_->compute_gradient(input, grad_output, grad_input);
+  activation->compute_gradient(input, grad_output, grad_input);
+
   return grad_input;
 }
 
-LayerConfig ActivationImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  config.set("activation", activation_->name());
-  return config;
+LayerConfig ActivationOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.type = TYPE_NAME;
+  lcfg.name = name;
+  lcfg.set("activation", config.activation_type);
+  return lcfg;
 }
 
-Vec<size_t> ActivationImpl::compute_output_shape(const Vec<size_t> &input_shape) const {
-  return input_shape;
-}
-
-std::shared_ptr<ActivationImpl> ActivationImpl::create_from_config(const LayerConfig &config) {
-  std::string activation_name = config.get<std::string>("activation", "relu");
-  ActivationFactory::register_defaults();
-  auto activation = ActivationFactory::create(activation_name);
-  return std::make_shared<ActivationImpl>(std::move(activation), config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

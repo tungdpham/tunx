@@ -6,54 +6,34 @@
  */
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
+#include "tensor/tensor.hpp"
 
 namespace tunx {
 
-namespace internal {
-class LegacyDenseImpl : public SISOLayerImpl {
-private:
-  size_t input_features_;
-  size_t output_features_;
-  bool use_bias_;
-
-  Tensor weights_;
-  Tensor bias_;
-  Tensor grad_weights_;
-  Tensor grad_bias_;
-
-  void init_impl() override;
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
-
-public:
-  LegacyDenseImpl(size_t input_features, size_t output_features, bool use_bias = true,
-                       const std::string &name = "legacy_dense");
-
+struct LegacyDenseOp {
   static constexpr const char *TYPE_NAME = "legacy_dense";
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
+  struct Config {
+    size_t input_features;
+    size_t output_features;
+    bool use_bias = true;
+  };
 
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
+  static Tensor forward(OpContext &ctx, const Tensor &input, const Param &weights, const Param &bias, const Config &config);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &weights, Param &bias, const Config &config);
 
-
-  static std::shared_ptr<LegacyDenseImpl> create_from_config(const LayerConfig &config);
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config);
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class LegacyDense : public LayerRef<internal::LegacyDenseImpl> {
+class LegacyDense : public FunctionalLayer<LegacyDenseOp> {
 public:
   LegacyDense(size_t input_features, size_t output_features, bool use_bias = true,
-                   const std::string &name = "legacy_dense")
-      : LayerRef(std::make_shared<internal::LegacyDenseImpl>(input_features, output_features, use_bias,
-                                                        name)) {}
-
-  using LayerRef<internal::LegacyDenseImpl>::LayerRef;
+              const std::string &name = "legacy_dense");
 };
 
 }  // namespace tunx

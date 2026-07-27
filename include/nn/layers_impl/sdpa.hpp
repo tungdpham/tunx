@@ -19,7 +19,6 @@ namespace tunx {
 // Scaled Dot-Product Attention LayerImpl
 // Accepts 3 inputs: Q (B,H,S,D), K (B,H,S,D), V (B,H,S,D)
 // Outputs: O (B,H,S,D)
-namespace internal {
 class SDPAImpl : public LayerImpl {
 private:
   float attn_scale_;  // Attention scale factor (typically 1/sqrt(head_dim))
@@ -60,15 +59,12 @@ public:
   static std::shared_ptr<SDPAImpl> create_from_config(const LayerConfig &config);
 };
 
-}  // namespace internal
-
-class SDPA : public LayerRef<internal::SDPAImpl> {
+class SDPA : public LayerRef<SDPAImpl> {
 public:
-  explicit SDPA(float attn_scale = 1.0f, bool is_causal = false,
-                     const std::string &name = "sdpa")
-      : LayerRef(std::make_shared<internal::SDPAImpl>(attn_scale, is_causal, name)) {}
+  explicit SDPA(float attn_scale = 1.0f, bool is_causal = false, const std::string &name = "sdpa")
+      : LayerRef(std::make_shared<SDPAImpl>(attn_scale, is_causal, name)) {}
 
-  using LayerRef<internal::SDPAImpl>::LayerRef;
+  using LayerRef<SDPAImpl>::LayerRef;
 };
 
 }  // namespace tunx

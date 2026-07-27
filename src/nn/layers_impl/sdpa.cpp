@@ -10,7 +10,6 @@
 #include <stdexcept>
 
 namespace tunx {
-namespace internal {
 
 SDPAImpl::SDPAImpl(float attn_scale, bool is_causal, const std::string &name)
     : attn_scale_(attn_scale),
@@ -194,5 +193,4 @@ std::shared_ptr<SDPAImpl> SDPAImpl::create_from_config(const LayerConfig &config
   return std::make_shared<SDPAImpl>(attn_scale, is_causal, name);
 }
 
-}  // namespace internal
 }  // namespace tunx
