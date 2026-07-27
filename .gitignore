@@ -73,7 +73,7 @@ CMakeDoxygenDefaults.cmake
 install_manifest.txt
 
 # logs
-/logs/
+logs/
 
 # temp files
 /temp/

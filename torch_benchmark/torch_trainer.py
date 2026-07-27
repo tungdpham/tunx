@@ -649,6 +649,12 @@ TINY_STD = [0.2770, 0.2691, 0.2821]
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
+def _cifar10_transform(img):
+    return (img - CIFAR10_MEAN) / CIFAR10_STD
+
+def _cifar100_transform(img):
+    return (img - CIFAR100_MEAN) / CIFAR100_STD
+
 
 def get_model_config(model_name: str) -> Dict[str, Any]:
     """
@@ -674,12 +680,12 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
             "train_dataset": lambda: CIFAR10Bin(
                 root=os.getenv("CIFAR10_BIN_ROOT", "data/cifar-10-batches-bin"),
                 train=True,
-                transform=lambda img: (img - CIFAR10_MEAN) / CIFAR10_STD
+                transform=_cifar10_transform
             ),
             "test_dataset": lambda: CIFAR10Bin(
                 root=os.getenv("CIFAR10_BIN_ROOT", "data/cifar-10-batches-bin"),
                 train=False,
-                transform=lambda img: (img - CIFAR10_MEAN) / CIFAR10_STD
+                transform=_cifar10_transform
             ),
             "criterion": nn.CrossEntropyLoss(),
             "epochs": int(os.getenv("EPOCHS", "10")),
@@ -696,12 +702,12 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
             "train_dataset": lambda: CIFAR100Bin(
                 root=os.getenv("CIFAR100_BIN_ROOT", "data/cifar-100-binary"),
                 train=True,
-                transform=lambda img: (img - CIFAR100_MEAN) / CIFAR100_STD
+                transform=_cifar100_transform
             ),
             "test_dataset": lambda: CIFAR100Bin(
                 root=os.getenv("CIFAR100_BIN_ROOT", "data/cifar-100-binary"),
                 train=False,
-                transform=lambda img: (img - CIFAR100_MEAN) / CIFAR100_STD
+                transform=_cifar100_transform
             ),
             "criterion": nn.CrossEntropyLoss(),
             "epochs": int(os.getenv("EPOCHS", "50")),
