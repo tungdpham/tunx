@@ -1393,12 +1393,12 @@ inline void cnhw_to_nchw(const Tensor &input, Tensor &output, size_t n, size_t c
 
 inline void print_tensor(const Tensor &input, size_t num_elements_, std::string_view label) {
   auto host_tensor = to_host(input);
-  fmt::print("{}: ", label);
+  fmt::print(fmt::runtime("{}: "), label);
   for (size_t i = 0; i < num_elements_; i++) {
     DISPATCH_ANY_DTYPE(input.dtype(), T,
-                       { fmt::print("{:.3f} ", static_cast<float>(host_tensor.data_as<T>()[i])); })
+                       { fmt::print(fmt::runtime("{:.3f} "), static_cast<float>(host_tensor.data_as<T>()[i])); })
   }
-  fmt::print("\n");
+  fmt::print(fmt::runtime("\n"));
 }
 
 }  // namespace tunx

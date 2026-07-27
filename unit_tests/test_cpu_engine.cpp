@@ -745,18 +745,15 @@ TEST_F(CPUEngineTest, ReLUFwdReturnsCorrectResult) {
   Tensor input({16, 256}, DType_t::FP32, getHost());
   fill_normal(input, 0.0, 1.0, 12345ULL);
   Tensor output({16, 256}, DType_t::FP32, getHost());
-  Tensor mask({16, 256}, DType_t::BOOL, getHost());
 
   engine_->relu_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
-                    mask.data_as<bool>(), workspace.data_as<void>(), type_desc);
+                    workspace.data_as<void>(), type_desc);
 
   Tensor expected_output({16, 256}, DType_t::FP32, getHost());
-  Tensor expected_mask({16, 256}, DType_t::BOOL, getHost());
   math_relu_fwd(input.data_as<float>(), expected_output.data_as<float>(),
-                expected_mask.data_as<bool>(), 16 * 256);
+                static_cast<bool*>(nullptr), 16 * 256);
 
   compare_tensor(output, expected_output);
-  compare_array_t<bool>(mask.data_as<bool>(), expected_mask.data_as<bool>(), mask.size());
 }
 
 TEST_F(CPUEngineTest, ReLUBwdReturnsCorrectResult) {
@@ -776,22 +773,24 @@ TEST_F(CPUEngineTest, ReLUBwdReturnsCorrectResult) {
 
   Tensor grad_output({16, 256}, DType_t::FP32, getHost());
   fill(grad_output, 1.0f);
-  Tensor mask({16, 256}, DType_t::BOOL, getHost());
 
-  // Fill mask deterministically: every other element is active
-  size_t mask_elements = 16 * 256;
-  std::vector<uint8_t> mask_raw(mask_elements);
-  for (size_t i = 0; i < mask_elements; ++i) mask_raw[i] = static_cast<uint8_t>(i % 2 == 0);
-  std::memcpy(mask.data_as<bool>(), mask_raw.data(), mask_elements * sizeof(bool));
+  // Construct a fake cached output that mimics the activation pattern:
+  // every other element is positive (i.e., was active during forward).
+  size_t num_elements = 16 * 256;
+  Tensor cached_output({16, 256}, DType_t::FP32, getHost());
+  float* co_data = cached_output.data_as<float>();
+  for (size_t i = 0; i < num_elements; ++i) co_data[i] = (i % 2 == 0) ? 1.0f : -1.0f;
 
   Tensor grad_input({16, 256}, DType_t::FP32, getHost());
 
   engine_->relu_bwd(engine_handle_, stats, grad_output.data_as<void>(), grad_input.data_as<void>(),
-                    mask.data_as<bool>(), workspace.data_as<void>(), type_desc);
+                    cached_output.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   Tensor expected_grad_input({16, 256}, DType_t::FP32, getHost());
-  math_relu_bwd(grad_output.data_as<float>(), expected_grad_input.data_as<float>(),
-                mask.data_as<bool>(), 16 * 256);
+  float* egi_data = expected_grad_input.data_as<float>();
+  const float* go_data = grad_output.data_as<float>();
+  for (size_t i = 0; i < num_elements; ++i)
+    egi_data[i] = co_data[i] > 0.0f ? go_data[i] : 0.0f;
 
   compare_tensor(grad_input, expected_grad_input);
 }

@@ -1210,11 +1210,10 @@ TEST_F(CuDNNEngineTest, ReLUFwdReturnsCorrectResult) {
   fill_normal(input, 0.0, 1.0, 12345ULL);
 
   Tensor output({batch_size, spatial_size}, DType_t::FP32, getGPU());
-  Tensor mask({batch_size, spatial_size}, DType_t::BOOL, getGPU());
 
   EXPECT_NO_THROW({
     engine_->relu_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
-                      mask.data_as<bool>(), workspace.data_as<void>(), type_desc);
+                      workspace.data_as<void>(), type_desc);
   });
 
   Tensor input_host = to_host(input);
@@ -1247,22 +1246,22 @@ TEST_F(CuDNNEngineTest, ReLUBwdReturnsCorrectResult) {
   Tensor workspace({ws_size > 0 ? ws_size : 1}, DType_t::BYTE, getGPU());
   Tensor grad_output({batch_size, spatial_size}, DType_t::FP32, getGPU());
   fill(grad_output, 1.0f);
-  Tensor mask({batch_size, spatial_size}, DType_t::BOOL, getGPU());
-  // Fill mask deterministically: every other element is active
+
+  // Construct a fake cached output on host then upload: every other element is positive.
   size_t mask_elements = batch_size * spatial_size;
-  {
-    std::vector<uint8> mask_raw(mask_elements);
-    for (size_t i = 0; i < mask_elements; ++i) mask_raw[i] = static_cast<uint8>(i % 2 == 0);
-    cudaMemcpy(mask.data_as<bool>(), mask_raw.data(), mask_elements * sizeof(bool),
-               cudaMemcpyHostToDevice);
-  }
+  std::vector<float> cached_output_host(mask_elements);
+  for (size_t i = 0; i < mask_elements; ++i)
+    cached_output_host[i] = (i % 2 == 0) ? 1.0f : -1.0f;
+  Tensor cached_output({batch_size, spatial_size}, DType_t::FP32, getGPU());
+  cudaMemcpy(cached_output.data_as<float>(), cached_output_host.data(),
+             mask_elements * sizeof(float), cudaMemcpyHostToDevice);
 
   Tensor grad_input({batch_size, spatial_size}, DType_t::FP32, getGPU());
 
   EXPECT_NO_THROW({
     engine_->relu_bwd(engine_handle_, stats, grad_output.data_as<void>(),
-                      grad_input.data_as<void>(), mask.data_as<bool>(), workspace.data_as<void>(),
-                      type_desc);
+                      grad_input.data_as<void>(), cached_output.data_as<void>(),
+                      workspace.data_as<void>(), type_desc);
   });
 
   Tensor grad_input_host = to_host(grad_input);

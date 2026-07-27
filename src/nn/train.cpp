@@ -45,6 +45,17 @@ static std::string normalize_train_mode(std::string mode) {
   return "auto";
 }
 
+void print_timing_table(const std::vector<std::pair<std::string, double>> &timings) {
+  // Table Header
+  fmt::print("{:<25} | {:>12}\n", "Layer Name", "Time (ms)");
+  fmt::print("{:-<25}-+-{:-<12}\n", "", "");  // Divider line
+
+  // Rows
+  for (const auto &[layer, time_ms] : timings) {
+    fmt::print("{:<25} | {:>10.3f} ms\n", layer, time_ms);
+  }
+}
+
 static std::string training_artifact_name(const TrainingConfig &config) {
   if (!config.model_name.empty()) {
     return config.model_name;
@@ -245,8 +256,12 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
     TensorBundle inputs{{"input", device_input}};
 
+    auto forward_start = chrono::high_resolution_clock::now();
     TensorBundle outputs = graph.forward(inputs);
     Tensor predictions = outputs.get("output");
+    auto forward_end = chrono::high_resolution_clock::now();
+    auto forward_duration =
+        chrono::duration_cast<chrono::milliseconds>(forward_end - forward_start).count();
 
     size_t batch_size = 1;
     for (size_t i = 0; i < predictions.dims() - 1; ++i) {
@@ -254,14 +269,70 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     }
     total_class_num += batch_size;
 
+    auto loss_start = chrono::high_resolution_clock::now();
     float loss;
     criterion->compute_loss(predictions, device_labels, loss);
     total_loss += loss;
+    auto loss_end = chrono::high_resolution_clock::now();
+    auto loss_duration = chrono::duration_cast<chrono::milliseconds>(loss_end - loss_start).count();
+
+    auto gradient_start = chrono::high_resolution_clock::now();
+    Tensor loss_gradient = Tensor(predictions.shape(), batch_data.dtype(), mem_pool);
+    criterion->compute_gradient(predictions, device_labels, loss_gradient);
+    auto gradient_end = chrono::high_resolution_clock::now();
+    auto gradient_duration =
+        chrono::duration_cast<chrono::milliseconds>(gradient_end - gradient_start).count();
 
     int batch_corrects = compute_class_corrects(predictions, device_labels);
-    total_corrects += batch_corrects;
+    predictions = Tensor();  // free prediction buffer early
 
+    if (config.gradient_accumulation_steps > 1) {
+      loss_gradient *= (1.0f / static_cast<float>(config.gradient_accumulation_steps));
+    }
+
+    auto grad_backward_start = chrono::high_resolution_clock::now();
+    TensorBundle output_grads{{"output", loss_gradient}};
+    graph.backward(output_grads);
+    auto grad_backward_end = chrono::high_resolution_clock::now();
+    auto grad_backward_duration =
+        chrono::duration_cast<chrono::milliseconds>(grad_backward_end - grad_backward_start)
+            .count();
+
+    auto batch_end = chrono::high_resolution_clock::now();
+    auto batch_duration = chrono::duration_cast<chrono::milliseconds>(batch_end - batch_start);
+
+    auto update_time = 0;
+    auto zero_grads_time = 0;
+    if (++grad_accum_counter == config.gradient_accumulation_steps) {
+      grad_accum_counter = 0;
+
+      auto update_start = chrono::high_resolution_clock::now();
+      optimizer->update();
+      model_device.default_stream().sync();
+      auto update_end = chrono::high_resolution_clock::now();
+      update_time = chrono::duration_cast<chrono::milliseconds>(update_end - update_start).count();
+
+      auto zero_grads_start = chrono::high_resolution_clock::now();
+      optimizer->zero_grads();
+      model_device.default_stream().sync();
+      auto zero_grads_end = chrono::high_resolution_clock::now();
+      zero_grads_time =
+          chrono::duration_cast<chrono::milliseconds>(zero_grads_end - zero_grads_start).count();
+
+      if (scheduler) {
+        scheduler->step();
+      }
+    }
+
+    // Log batch metrics
     std::unordered_map<std::string, double> step_metrics;
+    if (config.log_mode.log_accuracy) {
+      total_corrects += batch_corrects;
+      step_metrics["accuracy_pct"] = batch_corrects / static_cast<double>(batch_size);
+    }
+    if (config.log_mode.log_loss) {
+      step_metrics["loss"] = loss;
+    }
     if (config.log_mode.log_precision) {
       step_metrics["precision"] = compute_precision(predictions, device_labels);
     }
@@ -277,46 +348,8 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     if (config.log_mode.log_top_k_accuracy) {
       step_metrics["top_k_accuracy"] = compute_top_k_accuracy(predictions, device_labels, 5);
     }
-
-    Tensor loss_gradient = Tensor(predictions.shape(), batch_data.dtype(), mem_pool);
-    criterion->compute_gradient(predictions, device_labels, loss_gradient);
-
-    predictions = Tensor();  // free prediction buffer early
-
-    if (config.gradient_accumulation_steps > 1) {
-      loss_gradient *= (1.0f / static_cast<float>(config.gradient_accumulation_steps));
-    }
-
-    TensorBundle output_grads{{"output", loss_gradient}};
-    graph.backward(output_grads);
-
-    auto batch_end = chrono::high_resolution_clock::now();
-    auto batch_duration = chrono::duration_cast<chrono::milliseconds>(batch_end - batch_start);
-
-    if (++grad_accum_counter == config.gradient_accumulation_steps) {
-      grad_accum_counter = 0;
-      optimizer->update();
-      optimizer->zero_grads();
-      if (scheduler) {
-        scheduler->step();
-      }
-    }
-    model_device.default_stream().sync();
-
-    // Log batch metrics
-    {
-      double batch_acc_pct = total_class_num > 0 ? (total_corrects * 100.0 / total_class_num) : 0.0;
-
-      if (config.log_mode.log_loss) {
-        step_metrics["loss"] = loss;
-      }
-      if (config.log_mode.log_accuracy) {
-        step_metrics["accuracy_pct"] = batch_acc_pct;
-      }
-      step_metrics["time_ms"] = batch_duration.count();
-
-      logger.log_train_step(epoch, num_batches, step_metrics);
-    }
+    step_metrics["time_ms"] = batch_duration.count();
+    logger.log_train_step(epoch, num_batches, step_metrics);
 
     if (num_batches % config.progress_print_interval == 0) {
       cout << "Batch ID: " << num_batches << ", Batch's Loss: " << fixed << setprecision(4) << loss
@@ -329,7 +362,13 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
         cout << ", PPL: " << setprecision(2) << step_metrics["perplexity"];
       }
       cout << ", Batch Time: " << batch_duration.count() << "ms" << endl;
+      print_timing_table(graph.profiling_details());
+      cout << "Forward time: " << forward_duration << ", Backward time: " << grad_backward_duration
+           << ", Loss time: " << loss_duration << ", Gradient time: " << gradient_duration
+           << ", Update time: " << update_time << "ms, " << "Zero grads time: " << zero_grads_time
+           << "ms" << endl;
     }
+    graph.clear_profiling_details();
   }
   cout << endl;
 

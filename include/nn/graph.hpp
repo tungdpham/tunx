@@ -8,6 +8,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "device/del_allocator_v2.hpp"
 #include "device/iallocator.hpp"
@@ -130,6 +131,19 @@ public:
 
   Vec<Param> params();
 
+  std::vector<std::pair<std::string, double>> profiling_details() const {
+    std::vector<std::pair<std::string, double>> res;
+    for (const auto &k : timing_order_) {
+      res.push_back({k, timing_map_.at(k)});
+    }
+    return res;
+  }
+
+  void clear_profiling_details() {
+    timing_map_.clear();
+    timing_order_.clear();
+  }
+
 private:
   // backend
   IAllocator *param_allocator_;
@@ -145,6 +159,8 @@ private:
   Vec<Edge> edges_;
   std::set<Node> input_nodes_;
   std::set<Node> output_nodes_;
+  std::map<std::string, double> timing_map_;  // layer name -> total time taken.
+  std::vector<std::string> timing_order_;
   std::map<std::weak_ptr<NodeImpl>, int, std::owner_less<std::weak_ptr<NodeImpl>>> in_degree_;
   std::map<std::weak_ptr<NodeImpl>, int, std::owner_less<std::weak_ptr<NodeImpl>>> out_degree_;
   ExecutionMode mode_ = ExecutionMode::TRAIN;

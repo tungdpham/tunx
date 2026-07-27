@@ -502,12 +502,11 @@ public:
    * @param stats ReLU layer configuration.
    * @param input Input tensor. Shape: Total elements flattened, DType: io_dtype.
    * @param output Output tensor. Shape: Total elements flattened, DType: io_dtype.
-   * @param mask Mask tensor (bitmask or bool) for backward pass.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
   virtual void relu_fwd(engine_handle backend_handle, const ReLUStats& stats, const void* input,
-                        void* output, bool* mask, void* workspace, DTypeDesc type_desc) = 0;
+                        void* output, void* workspace, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Forward pass for a ReLU activation (inference mode).
@@ -528,12 +527,12 @@ public:
    * @param grad_output Gradient w.r.t output. Shape: Total elements flattened, DType: io_dtype.
    * @param grad_input Computed gradient w.r.t input. Shape: Total elements flattened, DType:
    * io_dtype.
-   * @param mask Mask tensor from forward pass.
+   * @param output Cached output tensor from forward pass (used as gate: output > 0).
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
   virtual void relu_bwd(engine_handle backend_handle, const ReLUStats& stats,
-                        const void* grad_output, void* grad_input, const bool* mask,
+                        const void* grad_output, void* grad_input, const void* output,
                         void* workspace, DTypeDesc type_desc) = 0;
 
   /**

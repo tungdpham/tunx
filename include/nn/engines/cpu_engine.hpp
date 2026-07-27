@@ -102,13 +102,13 @@ public:
                    DTypeDesc type_desc) override;
 
   void relu_fwd(engine_handle backend_handle, const ReLUStats& stats, const void* input,
-                void* output, bool* mask, void* workspace, DTypeDesc type_desc) override;
+                void* output, void* workspace, DTypeDesc type_desc) override;
 
   void relu_inf(engine_handle backend_handle, const ReLUStats& stats, const void* input,
                 void* output, void* workspace, DTypeDesc type_desc) override;
 
   void relu_bwd(engine_handle backend_handle, const ReLUStats& stats, const void* grad_output,
-                void* grad_input, const bool* mask, void* workspace, DTypeDesc type_desc) override;
+                void* grad_input, const void* output, void* workspace, DTypeDesc type_desc) override;
 
   void embedding_fwd(engine_handle backend_handle, const EmbeddingStats& stats, const void* input,
                      const void* weight, void* output, void* workspace,

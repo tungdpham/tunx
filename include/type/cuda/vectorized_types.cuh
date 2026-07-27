@@ -248,7 +248,7 @@ struct Sqrt<float> {
 };
 template <>
 struct Sqrt<double> {
-  __device__ double operator()(double a) const { return sqrt(a); }
+  __device__ double operator()(double a) const { return ::sqrt(a); }
 };
 template <>
 struct Sqrt<unsigned long> {

@@ -232,11 +232,20 @@ TensorBundle Graph::forward(TensorBundle &input_map, size_t pid) {
 
   TensorBundle output_map;
   for (size_t edge_index = 0; edge_index < edges_.size(); ++edge_index) {
+    auto &edge = edges_[edge_index];
     size_t usage_before = workspace_allocator_ ? workspace_allocator_->total_allocated() : 0;
     edge_peak_usage = usage_before;
-    forward_edge(edges_[edge_index], pid);
+    auto start = std::chrono::high_resolution_clock::now();
+    forward_edge(edge, pid);
+    auto end = std::chrono::high_resolution_clock::now();
+    double duration = std::chrono::duration<double, std::milli>(end - start).count();
+    auto timing_key = edge->layer()->name() + " forward";
+    if (timing_map_.find(timing_key) == timing_map_.end()) {
+      timing_order_.push_back(timing_key);
+    }
+    timing_map_[timing_key] += duration;
 
-    for (const auto &consumer : edges_[edge_index]->consumers()) {
+    for (const auto &consumer : edge->consumers()) {
       if (is_output(consumer)) {
         output_map.set(consumer->uid(), consumer->data(pid));
       }
@@ -278,7 +287,17 @@ TensorBundle Graph::backward(TensorBundle &output_grad_map, size_t pid) {
   TensorBundle grad_input_map;
   for (auto it = edges_.rbegin(); it != edges_.rend(); ++it) {
     Edge &edge = *it;
+
+    auto start = std::chrono::high_resolution_clock::now();
     backward_edge(edge, pid);
+    auto end = std::chrono::high_resolution_clock::now();
+    double duration = std::chrono::duration<double, std::milli>(end - start).count();
+    auto timing_key = edge->layer()->name() + " backward";
+    if (timing_map_.find(timing_key) == timing_map_.end()) {
+      timing_order_.push_back(timing_key);
+    }
+    timing_map_[timing_key] += duration;
+
     for (auto &producer : edge->producers()) {
       if (is_input(producer)) {
         grad_input_map.set(producer->uid(), producer->grad(pid));

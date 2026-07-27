@@ -39,11 +39,10 @@ Tensor ReLUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
   Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
   if (this->is_training_) {
-    Tensor mask = this->make_tensor(input.shape(), DType_t::BOOL);
-    residuals["mask"] = mask;
+    residuals["output"] = output;
 
     engine_->relu_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
-                      mask.data_as<bool>(), ws.data_as<void>(), type_desc);
+                      ws.data_as<void>(), type_desc);
   } else {
     engine_->relu_inf(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
                       ws.data_as<void>(), type_desc);
@@ -53,9 +52,9 @@ Tensor ReLUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
 }
 
 Tensor ReLUImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  Tensor &mask = residuals["mask"];
-  if (!mask) {
-    throw std::runtime_error("No cached mask found for backward pass in ReLUImpl");
+  Tensor &output = residuals["output"];
+  if (!output) {
+    throw std::runtime_error("No cached output found for backward pass in ReLUImpl");
   }
 
   Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
@@ -78,7 +77,7 @@ Tensor ReLUImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) 
   Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
   engine_->relu_bwd(engine_handle_, stats, grad_output.data_as<void>(), grad_input.data_as<void>(),
-                    mask.data_as<bool>(), ws.data_as<void>(), type_desc);
+                    output.data_as<void>(), ws.data_as<void>(), type_desc);
 
   return grad_input;
 }
