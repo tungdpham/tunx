@@ -21,9 +21,9 @@ CsvLogger::CsvLogger(const std::string &model_name, const std::string &log_dir,
   std::filesystem::create_directories(log_dir);
   std::string ts = csv_timestamp();
 
-  std::string batch_path = log_dir + "/" + model_name + "_batch_" + ts + ".csv";
-  std::string val_path = log_dir + "/" + model_name + "_val_" + ts + ".csv";
-  std::string epoch_path = log_dir + "/" + model_name + "_epoch_" + ts + ".csv";
+  std::string batch_path = log_dir + "/" + model_name + "_" + ts + "_batch.csv";
+  std::string val_path = log_dir + "/" + model_name + "_" + ts + "_val.csv";
+  std::string epoch_path = log_dir + "/" + model_name + "_" + ts + "_epoch.csv";
 
   train_step_logger_.set_log_file(batch_path);
   train_step_logger_.set_pattern("%v");

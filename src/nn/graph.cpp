@@ -7,6 +7,8 @@
 
 #include "nn/graph.hpp"
 
+#include <fmt/core.h>
+
 #include <array>
 #include <cstdint>
 #include <istream>
@@ -220,21 +222,9 @@ TensorBundle Graph::forward(TensorBundle &input_map, size_t pid) {
     it->second->set_data(pid, device_tensor, out_degree_[node]);
   }
 
-  size_t hook_id = 0;
-  bool hook_registered = false;
-  size_t edge_peak_usage = workspace_allocator_ ? workspace_allocator_->total_allocated() : 0;
-  if (workspace_allocator_) {
-    hook_id = workspace_allocator_->add_allocation_hook([&edge_peak_usage](size_t current_usage) {
-      edge_peak_usage = std::max(edge_peak_usage, current_usage);  // Hook to track peak memory
-    });
-    hook_registered = true;
-  }
-
   TensorBundle output_map;
   for (size_t edge_index = 0; edge_index < edges_.size(); ++edge_index) {
     auto &edge = edges_[edge_index];
-    size_t usage_before = workspace_allocator_ ? workspace_allocator_->total_allocated() : 0;
-    edge_peak_usage = usage_before;
     auto start = std::chrono::high_resolution_clock::now();
     forward_edge(edge, pid);
     auto end = std::chrono::high_resolution_clock::now();
@@ -250,10 +240,6 @@ TensorBundle Graph::forward(TensorBundle &input_map, size_t pid) {
         output_map.set(consumer->uid(), consumer->data(pid));
       }
     }
-  }
-
-  if (hook_registered) {
-    workspace_allocator_->remove_allocation_hook(hook_id);  // Unregister hook
   }
 
   // clean up boundary node data
@@ -416,7 +402,35 @@ void Graph::forward_edge(Edge &edge, size_t pid) {
   }
   Residuals residuals;  // can be used to store intermediate results for reuse within the same
                         // forward pass
-  Vec<Tensor> output_data = edge->layer()->forward(input_data, residuals);
+  Vec<Tensor> output_data;
+  if (enable_memory_profiling_ && workspace_allocator_) {
+    size_t usage_before = workspace_allocator_->in_use();
+    size_t peak_usage = workspace_allocator_->in_use();
+    size_t hook_id = workspace_allocator_->add_allocation_hook([&peak_usage](size_t current_usage) {
+      peak_usage = std::max(peak_usage, current_usage);  // Hook to track peak memory
+    });
+    output_data = edge->layer()->forward(input_data, residuals);
+    size_t usage_after = workspace_allocator_->in_use();
+    workspace_allocator_->remove_allocation_hook(hook_id);
+
+    size_t peak_edge_usage = peak_usage - usage_before;
+    size_t retained = usage_after - usage_before;
+    if (memory_profile_stream_) {
+      *memory_profile_stream_ << fmt::format("{},{},{},{},{}\n", edge->layer()->name(),
+                                             peak_edge_usage, retained,
+                                             workspace_allocator_->unused(),
+                                             workspace_allocator_->reserved());
+    } else {
+      fmt::print(
+          "Layer {} peak usage: {:.2f} MB, retained: {:.2f} MB, unused: {:.2f} MB, reserved: "
+          "{:.2f} MB\n",
+          edge->layer()->name(), (double)peak_edge_usage / 1024 / 1024,
+          (double)retained / 1024 / 1024, (double)workspace_allocator_->unused() / 1024 / 1024,
+          (double)workspace_allocator_->reserved() / 1024 / 1024);
+    }
+  } else {
+    output_data = edge->layer()->forward(input_data, residuals);
+  }
 
   edge->set_residuals(pid, std::move(residuals));
 

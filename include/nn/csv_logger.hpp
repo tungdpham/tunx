@@ -83,7 +83,7 @@ public:
     std::filesystem::create_directories(log_dir);
     std::string ts = csv_timestamp();
 
-    std::string path = log_dir + "/" + worker_name + "_compute_" + ts + ".csv";
+    std::string path = log_dir + "/" + worker_name + "_" + ts + "_compute.csv";
     compute_logger_.set_log_file(path);
     compute_logger_.set_pattern("%v");
     compute_logger_.info("step,event_type,time_ms");

@@ -256,7 +256,25 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
     TensorBundle inputs{{"input", device_input}};
 
+    std::ofstream mem_file;
+    if (config.print_layer_memory_usage && epoch == 1 && num_batches == 1) {
+      std::string mem_csv_path = "tunx_" + training_artifact_name(config) + "_" + csv_timestamp() + "_memory.csv";
+      if (!config.log_dir.empty()) {
+        mem_csv_path = config.log_dir + "/" + mem_csv_path;
+      }
+      mem_file.open(mem_csv_path);
+      if (mem_file.is_open()) {
+        mem_file << "layer,peak_usage_bytes,retained_bytes,unused_bytes,reserved_bytes\n";
+        graph.enable_memory_profiling(true, &mem_file);
+      }
+    }
+
     TensorBundle outputs = graph.forward(inputs);
+
+    if (config.print_layer_memory_usage && epoch == 1 && num_batches == 1) {
+      graph.enable_memory_profiling(false);
+    }
+
     Tensor predictions = outputs.get("output");
 
     size_t batch_size = 1;
@@ -485,7 +503,26 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
       Tensor device_input = to_device(batch_data, model_device);
       Tensor device_labels = to_device(batch_labels, model_device);
       TensorBundle inputs{{"input", device_input}};
+
+      std::ofstream mem_file;
+      if (config.print_layer_memory_usage && steps == 0) {
+        std::string mem_csv_path = "tunx_" + artifact_name + "_" + csv_timestamp() + "_memory.csv";
+        if (!config.log_dir.empty()) {
+          mem_csv_path = config.log_dir + "/" + mem_csv_path;
+        }
+        mem_file.open(mem_csv_path);
+        if (mem_file.is_open()) {
+          mem_file << "layer,peak_usage_bytes,retained_bytes,unused_bytes,reserved_bytes\n";
+          graph.enable_memory_profiling(true, &mem_file);
+        }
+      }
+
       TensorBundle outputs = graph.forward(inputs);
+
+      if (config.print_layer_memory_usage && steps == 0) {
+        graph.enable_memory_profiling(false);
+      }
+
       Tensor predictions = outputs.get("output");
       float loss;
       criterion->compute_loss(predictions, device_labels, loss);

@@ -144,6 +144,11 @@ public:
     timing_order_.clear();
   }
 
+  void enable_memory_profiling(bool enable, std::ostream *os = nullptr) {
+    enable_memory_profiling_ = enable;
+    memory_profile_stream_ = os;
+  }
+
 private:
   // backend
   IAllocator *param_allocator_;
@@ -166,6 +171,8 @@ private:
   ExecutionMode mode_ = ExecutionMode::TRAIN;
   size_t node_count_ = 0;
   std::set<std::string> used_uids_;
+  bool enable_memory_profiling_ = false;
+  std::ostream *memory_profile_stream_ = nullptr;
 
   int node_in_degree(const Node &node) const;
   int node_out_degree(const Node &node) const;
