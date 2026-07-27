@@ -52,6 +52,9 @@ public:
                                std::string(cudaGetErrorString(err)));
     }
   }
+  cuda_stream(CUDADevice &device, cudaStream_t stream)
+      : device_(&device),
+        stream_(stream) {}
 
   ~cuda_stream() { cudaStreamDestroy(stream_); }
 

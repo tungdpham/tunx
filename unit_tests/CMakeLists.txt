@@ -16,6 +16,7 @@ set(TEST_FILES
     test_cpu_engine.cpp
     test_cuda_engine.cpp
     test_cudnn_engine.cpp
+    test_del_allocator_v2.cpp
 )
 
 foreach(test_file IN LISTS TEST_FILES)
