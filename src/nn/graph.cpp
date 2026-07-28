@@ -416,10 +416,9 @@ void Graph::forward_edge(Edge &edge, size_t pid) {
     size_t peak_edge_usage = peak_usage - usage_before;
     size_t retained = usage_after - usage_before;
     if (memory_profile_stream_) {
-      *memory_profile_stream_ << fmt::format("{},{},{},{},{}\n", edge->layer()->name(),
-                                             peak_edge_usage, retained,
-                                             workspace_allocator_->unused(),
-                                             workspace_allocator_->reserved());
+      *memory_profile_stream_ << fmt::format(
+          "{},{},{},{},{}\n", edge->layer()->name(), peak_edge_usage, retained,
+          workspace_allocator_->unused(), workspace_allocator_->reserved());
     } else {
       fmt::print(
           "Layer {} peak usage: {:.2f} MB, retained: {:.2f} MB, unused: {:.2f} MB, reserved: "
@@ -461,8 +460,8 @@ void Graph::backward_edge(Edge &edge, size_t pid) {
 
 namespace {
 
-constexpr std::array<char, 4> kGraphStateMagic{'T', 'N', 'N', 'G'};
-constexpr std::uint32_t kGraphStateVersion = 2;
+constexpr std::array<char, 4> kGraphStateMagic{'T', 'U', 'N', 'X'};
+constexpr std::uint32_t kGraphStateVersion = 3;
 
 template <typename T>
 void write_binary(std::ostream &stream, const T &value) {

@@ -17,72 +17,80 @@
 #include <stdexcept>
 
 #include "nlohmann/json_fwd.hpp"
-#include "nn/block.hpp"
 #include "nn/layer.hpp"
 #include "nn/layer_factory.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
-Vec<Tensor> SequentialImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) {
-  if (layers_.empty()) {
+Vec<Tensor> SequentialOp::forward(OpContext &ctx, const Vec<Tensor> &inputs, Vec<Layer> layers, const Config &config) {
+  if (layers.empty()) {
     throw std::runtime_error("Cannot forward through empty sequential model");
   }
   Vec<Tensor> current_inputs = inputs;
   Vec<Tensor> current_outputs;
-  if (layers_.size() % 2 == 0) {
+  if (layers.size() % 2 == 0) {
     // assuming we are on the reverse side of input, flip so output of last layer is always opposite
     // side of input.
-    ws_allocator_->flip();
+    ctx.ws_allocator->flip();
   }
-  for (size_t i = 0; i < layers_.size(); ++i) {
-    current_outputs = layers_[i].forward(current_inputs, residuals["layer_" + std::to_string(i)]);
+  for (size_t i = 0; i < layers.size(); ++i) {
+    current_outputs = layers[i].forward(current_inputs, ctx.residuals["layer_" + std::to_string(i)]);
     current_inputs = Vec<Tensor>(current_outputs.begin(), current_outputs.end());
-    if (i != layers_.size() - 1) {
-      ws_allocator_->flip();
+    if (i != layers.size() - 1) {
+      ctx.ws_allocator->flip();
     }
   }
   return current_outputs;
 }
 
-Vec<Tensor> SequentialImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &residuals) {
-  if (layers_.empty()) {
+Vec<Tensor> SequentialOp::backward(OpContext &ctx, const Vec<Tensor> &grad_outputs, Vec<Layer> layers, const Config &config) {
+  if (layers.empty()) {
     throw std::runtime_error("Cannot backward through empty sequential model");
   }
   Vec<Tensor> current_gradients = grad_outputs;
   Vec<Tensor> grad_inputs;
-  if (layers_.size() % 2 == 0) {
+  if (layers.size() % 2 == 0) {
     // flip so grad output of last layer is always opposite side of input.
-    ws_allocator_->flip();
+    ctx.ws_allocator->flip();
   }
-  for (int i = static_cast<int>(layers_.size()) - 1; i >= 0; --i) {
-    grad_inputs = layers_[i].backward(current_gradients, residuals["layer_" + std::to_string(i)]);
+  for (int i = static_cast<int>(layers.size()) - 1; i >= 0; --i) {
+    grad_inputs = layers[i].backward(current_gradients, ctx.residuals["layer_" + std::to_string(i)]);
     current_gradients = Vec<Tensor>(grad_inputs.begin(), grad_inputs.end());
     if (i != 0) {
-      ws_allocator_->flip();  // algorithm 1 definitely applies
+      ctx.ws_allocator->flip();  // algorithm 1 definitely applies
     }
   }
   return grad_inputs;
 }
 
-SequentialImpl::SequentialImpl(Vec<Layer> layers, const std::string &name)
-    : Block(name),
-      layers_(std::move(layers)) {}
+Sequential::Sequential(Vec<Layer> layers, const std::string &name)
+    : FunctionalLayer(SequentialOp::Config{}, name) {
+  for (auto &layer : layers) {
+    impl_->register_layer(std::move(layer));
+  }
+}
 
-Vec<Vec<size_t>> SequentialImpl::output_shapes(const Vec<Vec<size_t>> &input_shapes) const {
-  if (layers_.empty()) {
+Vec<Vec<size_t>> SequentialOp::output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config) {
+  // We can't implement output_shapes statically easily without layers list.
+  // Wait, FunctionalLayer overrides output_shapes, but Sequential needs it directly.
+  return input_shapes; 
+}
+
+Vec<Vec<size_t>> Sequential::output_shapes(const Vec<Vec<size_t>> &input_shapes) const {
+  if (impl_->layers().empty()) {
     return input_shapes;
   }
 
   Vec<Vec<size_t>> current_shapes = input_shapes;
-  for (const auto &layer : layers_) {
-    current_shapes = layer.output_shapes(current_shapes);
+  for (const auto &layer : impl_->layers()) {
+    current_shapes = layer->output_shapes(current_shapes);
   }
 
   return current_shapes;
 }
 
-void SequentialImpl::print_summary(const Vec<size_t> &input_shape) const {
-  if (layers_.empty()) {
+void Sequential::print_summary(const Vec<size_t> &input_shape) const {
+  if (impl_->layers().empty()) {
     std::cout << "Empty model.\n";
     return;
   }
@@ -98,40 +106,45 @@ void SequentialImpl::print_summary(const Vec<size_t> &input_shape) const {
   };
 
   std::cout << std::string(100, '=') << "\n";
-  std::cout << "Model Summary: " << name_ << "\n";
+  std::cout << "Model Summary: " << impl_->name() << "\n";
   std::cout << std::string(100, '=') << "\n";
-  std::cout << std::left << std::setw(20) << "LayerImpl (Type)" << std::setw(20) << "Input Shape"
+  std::cout << std::left << std::setw(20) << "Layer (Type)" << std::setw(20) << "Input Shape"
             << std::setw(20) << "Output Shape" << "\n";
 
   Vec<size_t> current_shape = input_shape;
-  for (size_t i = 0; i < layers_.size(); ++i) {
-    const auto &layer = layers_[i];
+  for (size_t i = 0; i < impl_->layers().size(); ++i) {
+    const auto &layer = impl_->layers()[i];
     std::cout << std::left << std::setw(20)
-              << (layer.get_config().name.empty() ? layer.type() : layer.get_config().name);
+              << (layer->get_config().name.empty() ? layer->type() : layer->get_config().name);
 
     std::cout << std::setw(20) << format_shape(current_shape);
 
-    auto output_shape = layer.output_shapes({current_shape})[0];
+    auto output_shape = layer->output_shapes({current_shape})[0];
     std::cout << std::setw(20) << format_shape(output_shape) << "\n";
-    current_shape = layer.output_shapes({current_shape})[0];
+    current_shape = layer->output_shapes({current_shape})[0];
   }
   std::cout << std::string(100, '-') << "\n";
 }
 
-LayerConfig SequentialImpl::get_config() const {
-  LayerConfig config;
-  config.name = name_;
-  config.type = TYPE_NAME;
+LayerConfig SequentialOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig cfg;
+  cfg.name = name;
+  cfg.type = TYPE_NAME;
+  return cfg;
+}
+
+LayerConfig Sequential::get_config() const {
+  LayerConfig config = impl_->get_config();
   nlohmann::json layers_config = nlohmann::json::array();
-  for (const auto &layer : layers_) {
-    auto layer_config = layer.get_config();
+  for (const auto &layer : impl_->layers()) {
+    auto layer_config = layer->get_config();
     layers_config.push_back(layer_config.to_json());
   }
   config.set("layers", layers_config);
   return config;
 }
 
-std::shared_ptr<SequentialImpl> SequentialImpl::create_from_config(const LayerConfig &config) {
+Layer Sequential::create_from_config(const LayerConfig &config) {
   Vec<Layer> layers;
   nlohmann::json layers_json = config.get<nlohmann::json>("layers", nlohmann::json::array());
   if (!layers_json.is_array()) {
@@ -143,7 +156,7 @@ std::shared_ptr<SequentialImpl> SequentialImpl::create_from_config(const LayerCo
     auto layer = LayerFactory::create(layer_config);
     layers.push_back(std::move(layer));
   }
-  return std::make_shared<SequentialImpl>(std::move(layers), config.name);
+  return tunx::Layer(Sequential(std::move(layers), config.name));
 }
 
 }  // namespace tunx

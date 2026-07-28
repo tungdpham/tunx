@@ -111,11 +111,10 @@ public:
     register_layer_type<PositionalEmbedding>();
     register_layer_type<Slice>();
     register_layer_type<Embedding>();
-    register_layer_type<SDPAImpl>();
-    register_layer_type<ResidualBlockImpl>();
-    register_layer_type<FlashAttentionBlockImpl>();
+    register_layer_type<SDPA>();
+    register_layer_type<ResidualBlock>();
+    register_layer_type<Sequential>();
     register_layer_type<Transpose>();
-    register_layer_type<SequentialImpl>();
 
     register_layer_type<Add>();
     register_layer_type<Sub>();

@@ -7,64 +7,36 @@
 #pragma once
 
 #include <cstddef>
-#include <memory>
 #include <string>
 
-#include "nn/graph.hpp"
-#include "nn/layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
 
-// Scaled Dot-Product Attention LayerImpl
-// Accepts 3 inputs: Q (B,H,S,D), K (B,H,S,D), V (B,H,S,D)
-// Outputs: O (B,H,S,D)
-class SDPAImpl : public LayerImpl {
-private:
-  float attn_scale_;  // Attention scale factor (typically 1/sqrt(head_dim))
-  bool is_causal_;    // Whether to apply causal masking
-  bool is_training_;
+struct SDPAOp {
+  static constexpr const char *TYPE_NAME = "sdpa";
 
-  Vec<Tensor> forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) override;
-  Vec<Tensor> backward_impl(const Vec<Tensor> &grad_outputs, Residuals &residuals) override;
+  struct Config {
+    float attn_scale = 1.0f;
+    bool is_causal = false;
+  };
 
+  static Tensor forward(OpContext &ctx, const Tensor &q, const Tensor &k, const Tensor &v,
+                        const Config &config);
+
+  static Vec<Tensor> backward(OpContext &ctx, const Tensor &grad_output, const Config &config);
+
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config);
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
+};
+
+class SDPA : public FunctionalLayer<SDPAOp> {
 public:
   static constexpr const char *TYPE_NAME = "sdpa";
 
-  // attn_scale typically = 1/sqrt(head_dim)
-  SDPAImpl(float attn_scale = 1.0f, bool is_causal = false, const std::string &name = "sdpa");
-
-  ~SDPAImpl() override;
-
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const override;
-
-  Node operator()(const Node &q, const Node &k, const Node &v) {
-    if (!q || !k || !v) {
-      throw std::runtime_error("Input nodes cannot be null");
-    }
-    Graph *graph = q->graph();
-    if (graph != k->graph() || graph != v->graph()) {
-      throw std::runtime_error("All input nodes must belong to the same graph");
-    }
-    Node output = graph->make_node();
-
-    std::shared_ptr<LayerImpl> self = shared_from_this();
-
-    graph->add_edge(self, {q, k, v}, {output});
-    return output;
-  }
-
-  static std::shared_ptr<SDPAImpl> create_from_config(const LayerConfig &config);
-};
-
-class SDPA : public LayerRef<SDPAImpl> {
-public:
-  explicit SDPA(float attn_scale = 1.0f, bool is_causal = false, const std::string &name = "sdpa")
-      : LayerRef(std::make_shared<SDPAImpl>(attn_scale, is_causal, name)) {}
-
-  using LayerRef<SDPAImpl>::LayerRef;
+  SDPA(float attn_scale = 1.0f, bool is_causal = false, const std::string &name = "sdpa");
 };
 
 }  // namespace tunx

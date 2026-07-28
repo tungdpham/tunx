@@ -33,6 +33,7 @@ struct OpContext {
   DType_t compute_dtype;
   bool use_seed;
   unsigned long long srand_seed;
+  DELAllocatorV2* ws_allocator;
 
   Tensor make_tensor(const Vec<size_t>& shape, DType_t dtype) const {
     return layer->make_tensor(shape, dtype);
@@ -103,7 +104,8 @@ public:
                      this->param_dtype_,
                      this->compute_dtype_,
                      this->use_seed_,
-                     this->srand_seed_};
+                     this->srand_seed_,
+                     this->ws_allocator_};
   }
 
   template <typename... Args>
@@ -159,6 +161,19 @@ protected:
       constexpr size_t idx = count_type_before<Tensor, typename TraitsType::args_tuple, I>();
       if (idx >= inputs.size()) throw std::runtime_error("Not enough inputs provided to layer.");
       return inputs[idx];
+    } else if constexpr (std::is_same_v<BaseType, Vec<Tensor>>) {
+      return inputs;
+    } else if constexpr (std::is_same_v<BaseType, Layer>) {
+      constexpr size_t idx = count_type_before<Layer, typename TraitsType::args_tuple, I>();
+      if (idx >= this->registered_layers_.size())
+        throw std::runtime_error("Not enough layers registered in layer.");
+      return Layer(this->registered_layers_[idx]);
+    } else if constexpr (std::is_same_v<BaseType, Vec<Layer>>) {
+      Vec<Layer> res;
+      for (const auto& l : this->registered_layers_) {
+        res.push_back(Layer(l));
+      }
+      return res;
     } else if constexpr (std::is_same_v<BaseType, Param>) {
       constexpr size_t idx = count_type_before<Param, typename TraitsType::args_tuple, I>();
       if (idx >= this->params_.size())
@@ -208,10 +223,20 @@ protected:
 public:
   std::string type() const override { return Op::TYPE_NAME; }
 
-  LayerConfig get_config() const override { return Op::get_config(config_, this->name_); }
+  LayerConfig get_config() const override { 
+    if constexpr (requires { Op::get_config(config_, this->name_, this->registered_layers_); }) {
+      return Op::get_config(config_, this->name_, this->registered_layers_);
+    } else {
+      return Op::get_config(config_, this->name_); 
+    }
+  }
 
   Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>>& input_shapes) const override {
-    return Op::output_shapes(input_shapes, config_);
+    if constexpr (requires { Op::output_shapes(input_shapes, config_, this->registered_layers_); }) {
+      return Op::output_shapes(input_shapes, config_, this->registered_layers_);
+    } else {
+      return Op::output_shapes(input_shapes, config_);
+    }
   }
 };
 

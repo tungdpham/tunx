@@ -10,31 +10,28 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
-#include <unordered_map>
-
-#include "nn/activations_impl/base_activation.hpp"
-#include "nn/block.hpp"
-#include "nn/blocks_impl/sequential.hpp"
-#include "nn/graph.hpp"
+#include "nn/functional_layer.hpp"
 #include "nn/layer.hpp"
+#include "tensor/tensor.hpp"
 
 namespace tunx {
 
-/**
- * @brief Residual block implementing f(x) = g(x) + h(x) (g is main path function and h is shortcut)
- * @note g(x) and h(x) must output matching dimensions for addition.
- */
-class ResidualBlockImpl : public Block {
-private:
-  Sequential main_path_;
-  Sequential shortcut_path_;
-  std::unique_ptr<ActivationFunction> final_activation_;
-  std::unordered_map<size_t, Tensor> pre_activation_cache_;
-  std::string activation_type_;
+struct ResidualBlockOp {
+  static constexpr const char *TYPE_NAME = "residual_block";
+  struct Config {
+    std::string activation = "relu";
+    bool has_shortcut = false;
+  };
 
-  Vec<Tensor> forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) override;
-  Vec<Tensor> backward_impl(const Vec<Tensor> &grad_outputs, Residuals &residuals) override;
+  static Vec<Tensor> forward(OpContext &ctx, const Vec<Tensor> &inputs, Vec<Layer> layers, const Config &config);
+  static Vec<Tensor> backward(OpContext &ctx, const Vec<Tensor> &grad_outputs, Vec<Layer> layers, const Config &config);
 
+  static LayerConfig get_config(const Config &config, const std::string &name, const Vec<std::shared_ptr<LayerImpl>> &registered_layers);
+  static Config parse_config(const LayerConfig &config);
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config, const Vec<std::shared_ptr<LayerImpl>> &registered_layers);
+};
+
+class ResidualBlock : public FunctionalLayer<ResidualBlockOp> {
 public:
   /**
    * @brief Constructs a residual block
@@ -43,59 +40,15 @@ public:
    * @param final_activation Activation applied after addition (e.g., "relu")
    * @param name LayerImpl name
    */
-  ResidualBlockImpl(Vec<Layer> main_path, Vec<Layer> shortcut_path,
-                    const std::string &final_activation = "relu",
-                    const std::string &name = "residual_block");
-
-  ResidualBlockImpl(Sequential main_path, Sequential shortcut_path,
-                    const std::string &final_activation = "relu",
-                    const std::string &name = "residual_block");
-
-  ResidualBlockImpl(const ResidualBlockImpl &other);
-
-  static constexpr const char *TYPE_NAME = "residual_block";
-
-  Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const override;
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  static std::shared_ptr<ResidualBlockImpl> create_from_config(const LayerConfig &config);
-
-  const Vec<Layer> layers() const override {
-    Vec<Layer> all_layers = {main_path_};
-    if (shortcut_path_) {
-      all_layers.push_back(shortcut_path_);
-    }
-    return all_layers;
-  }
-
-  Node operator()(const Node &input) {
-    if (!input) {
-      throw std::runtime_error("Input node is null");
-    }
-    Graph *graph = input->graph();
-    Node output = graph->make_node();
-
-    std::shared_ptr<LayerImpl> self = shared_from_this();
-
-    graph->add_edge(self, {input}, {output});
-    return output;
-  }
-};
-
-class ResidualBlock : public LayerRef<ResidualBlockImpl> {
-public:
   ResidualBlock(Vec<Layer> main_path, Vec<Layer> shortcut_path,
                 const std::string &final_activation = "relu",
-                const std::string &name = "residual_block")
-      : LayerRef(std::make_shared<ResidualBlockImpl>(std::move(main_path), std::move(shortcut_path),
-                                                     final_activation, name)) {}
+                const std::string &name = "residual_block");
 
-  ResidualBlock(Sequential main_path, Sequential shortcut_path,
+  ResidualBlock(tunx::Layer main_path, tunx::Layer shortcut_path,
                 const std::string &final_activation = "relu",
-                const std::string &name = "residual_block")
-      : LayerRef(std::make_shared<ResidualBlockImpl>(std::move(main_path), std::move(shortcut_path),
-                                                     final_activation, name)) {}
+                const std::string &name = "residual_block");
 
-  using LayerRef<ResidualBlockImpl>::LayerRef;
+  static Layer create_from_config(const LayerConfig &config);
 };
+
 }  // namespace tunx

@@ -43,18 +43,19 @@ inline size_t get_shapes_bytes(const Vec<Vec<size_t>> &shapes, DType_t dtype) {
   return total_bytes;
 }
 
-struct ResidualObject {
-public:
+class ResidualObject {
+private:
   struct Impl {
     using ResidualValue =
         std::variant<std::monostate, std::map<std::string, ResidualObject>, Tensor>;
 
     ResidualValue data;
   };
-  std::shared_ptr<Impl> impl;
+  std::shared_ptr<Impl> impl_;
 
+public:
   ResidualObject()
-      : impl(std::make_shared<Impl>()) {}
+      : impl_(std::make_shared<Impl>()) {}
   ~ResidualObject() = default;
   ResidualObject(const ResidualObject &) = default;
   ResidualObject &operator=(const ResidualObject &) = default;
@@ -62,37 +63,37 @@ public:
   ResidualObject &operator=(ResidualObject &&) = default;
 
   ResidualObject &operator[](const std::string &key) {
-    if (impl->data.index() == 0) {
-      impl->data = std::map<std::string, ResidualObject>{};
-    } else if (impl->data.index() == 1) {
+    if (impl_->data.index() == 0) {
+      impl_->data = std::map<std::string, ResidualObject>{};
+    } else if (impl_->data.index() == 1) {
       // already a map, do nothing
-    } else if (impl->data.index() == 2) {
+    } else if (impl_->data.index() == 2) {
       throw std::runtime_error("ResidualObject: Attempting to index into a leaf node");
     }
 
-    return std::get<1>(impl->data)[key];
+    return std::get<1>(impl_->data)[key];
   }
 
   ResidualObject &operator=(const Tensor &tensor) {
-    if (impl->data.index() == 0) {
-      impl->data = tensor;
-    } else if (impl->data.index() == 1) {
+    if (impl_->data.index() == 0) {
+      impl_->data = tensor;
+    } else if (impl_->data.index() == 1) {
       throw std::runtime_error("ResidualObject: Attempting to assign a Tensor to a non-leaf node");
     }
     return *this;
   }
 
   operator Tensor &() {
-    if (impl->data.index() != 2) {
+    if (impl_->data.index() != 2) {
       throw std::runtime_error("ResidualObject: Attempting to convert a non-leaf node to Tensor");
     }
-    return std::get<2>(impl->data);
+    return std::get<2>(impl_->data);
   }
 
   void print(std::ostream &os, int indent = 0) const {
     std::string indent_str(indent * 2, ' ');
-    if (!impl) {
-      os << indent_str << "<null impl>\n";
+    if (!impl_) {
+      os << indent_str << "<null impl_>\n";
       return;
     }
 
@@ -124,7 +125,7 @@ public:
             os << "])\n";
           }
         },
-        impl->data);
+        impl_->data);
   }
 
   friend std::ostream &operator<<(std::ostream &os, const ResidualObject &obj) {
@@ -177,6 +178,9 @@ public:
   virtual Vec<Param> params();
   virtual const Vec<Param> params() const;
 
+  void register_layer(std::shared_ptr<LayerImpl> layer) { registered_layers_.push_back(std::move(layer)); }
+  const Vec<std::shared_ptr<LayerImpl>>& layers() const { return registered_layers_; }
+
   void zero_grads() {
     for (auto &param : params_) {
       param.zero_grad(engine_handle_.get_stream());
@@ -207,6 +211,7 @@ protected:
   unsigned long long srand_seed_ = 0;
   std::string name_;
   Vec<Param> params_;
+  Vec<std::shared_ptr<LayerImpl>> registered_layers_;
   DType_t io_dtype_ = DType_t::FP32;       // data type for input/output tensors
   DType_t param_dtype_ = DType_t::FP32;    // data type for parameters/gradients
   DType_t compute_dtype_ = DType_t::FP32;  // data type for internal computations

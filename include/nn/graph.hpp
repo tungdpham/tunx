@@ -67,15 +67,6 @@ struct GraphOpts {
 
 class Graph {
 public:
-  struct Opts {
-    Engine engine = nullptr;
-    stream s = nullptr;
-    unsigned long long seed = 0;
-    DType_t io_dtype = DType_t::FP32;
-    DType_t param_dtype = DType_t::FP32;
-    DType_t compute_dtype = DType_t::FP32;
-  };
-
   Graph() = default;
 
   void save_state(std::ostream &stream) const;
