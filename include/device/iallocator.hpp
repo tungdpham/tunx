@@ -24,7 +24,7 @@ public:
 
   // reserve some memory for future use, so that subsequent allocate() can reuse them without going
   // through device allocation path. This is optional and can be a no-op for some allocators.
-  virtual void reserve(size_t size) = 0;
+  virtual void ensure(size_t size) = 0;
 
   virtual Device &device() const = 0;
 };

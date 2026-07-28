@@ -213,11 +213,11 @@ public:
     slabs_.clear();
     free_by_size_.clear();
     reserved_ = 0;
-    in_use_ = 0;
-    unusued_ = 0;
+    allocated_ = 0;
   }
 
-  void reserve(size_t size) override {
+  // ensure that we have at least `size` free space
+  void ensure(size_t size) override {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t aligned_size = align_up(size, DEFAULT_ALIGNMENT);
 
@@ -241,21 +241,14 @@ public:
     return reserved_;
   }
 
-  size_t in_use() const {
+  size_t allocated() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return in_use_;
+    return allocated_;
   }
 
   size_t unused() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    size_t total = 0;
-    for (auto &slab : slabs_) {
-      total += slab.available_space();
-    }
-    for (auto &free_block : free_by_size_) {
-      total += free_block.first * free_block.second.size();
-    }
-    return total;
+    return reserved_ - allocated_;
   }
 
   Device &device() const override { return device_; }
@@ -293,15 +286,14 @@ private:
   std::list<Slab> slabs_;
   std::map<size_t, std::set<Block>> free_by_size_;  // size -> set of blocks
   size_t reserved_ = 0;
-  size_t in_use_ = 0;
-  size_t unusued_ = 0;
+  size_t allocated_ = 0;
 
   std::vector<std::function<void(size_t)>> allocation_hooks_;
 
   void set_allocated(size_t new_total) {
-    in_use_ = new_total;
+    allocated_ = new_total;
     for (auto &hook : allocation_hooks_) {
-      hook(in_use_);
+      hook(allocated_);
     }
   }
 
@@ -309,9 +301,7 @@ private:
     void *slice_ptr = static_cast<unsigned char *>(slab->ptr) + offset;
 
     slab->active_allocations++;
-    in_use_ += actual_size;
-    unusued_ -= actual_size;
-    set_allocated(in_use_);
+    set_allocated(allocated_ + actual_size);
 
     auto self_shared = shared_from_this();
 
@@ -320,7 +310,7 @@ private:
         [self_shared, slab, offset, actual_size](device_storage *storage) {
           std::lock_guard<std::mutex> lock(self_shared->mutex_);
           self_shared->reclaim(slab, offset, actual_size);
-          self_shared->set_allocated(self_shared->in_use_ - actual_size);
+          self_shared->set_allocated(self_shared->allocated_ - actual_size);
           delete storage;
         });
 
@@ -394,8 +384,8 @@ private:
           remove_from_free_map(block_size, {&*it, block_offset, block_size});
         }
         device_.deallocate_aligned_memory(it->ptr);
-        it = slabs_.erase(it);
         reserved_ -= it->size;
+        it = slabs_.erase(it);
       } else {
         ++it;
       }

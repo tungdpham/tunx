@@ -142,7 +142,7 @@ public:
     free_blocks_by_offset_.emplace(0, slab_size_);
   }
 
-  void reserve(size_t size) override {
+  void ensure(size_t size) override {
     return;  // no op
   }
 

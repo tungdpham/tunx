@@ -129,7 +129,7 @@ public:
     free_by_size_.clear();
   }
 
-  void reserve(size_t size) override {
+  void ensure(size_t size) override {
     std::lock_guard<std::mutex> lock(mutex_);
     if (capacity_ >= size) {
       return;  // already have enough capacity

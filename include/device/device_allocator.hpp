@@ -46,7 +46,7 @@ public:
     // no-op since we don't cache any memory blocks
   }
 
-  void reserve(size_t size) override {
+  void ensure(size_t size) override {
     // no-op since we don't cache any memory blocks
   }
 

@@ -60,8 +60,12 @@ public:
     free_blocks_.clear();
   }
 
-  void reserve(size_t size) override {
-    // pre-allocate a block of memory to be used in future allocate() calls
+  void ensure(size_t size) override {
+    auto it = free_blocks_.lower_bound(size);
+    if (it != free_blocks_.end()) {
+      return;
+    }
+    // if not enough space allocate new
     device_storage *ptr = allocate_storage(size);
     std::lock_guard<std::mutex> lock(mutex_);
     free_blocks_.emplace(ptr->capacity(), ptr);  // add to free blocks for future reuse

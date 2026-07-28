@@ -404,13 +404,13 @@ void Graph::forward_edge(Edge &edge, size_t pid) {
                         // forward pass
   Vec<Tensor> output_data;
   if (enable_memory_profiling_ && workspace_allocator_) {
-    size_t usage_before = workspace_allocator_->in_use();
-    size_t peak_usage = workspace_allocator_->in_use();
+    size_t usage_before = workspace_allocator_->allocated();
+    size_t peak_usage = workspace_allocator_->allocated();
     size_t hook_id = workspace_allocator_->add_allocation_hook([&peak_usage](size_t current_usage) {
       peak_usage = std::max(peak_usage, current_usage);  // Hook to track peak memory
     });
     output_data = edge->layer()->forward(input_data, residuals);
-    size_t usage_after = workspace_allocator_->in_use();
+    size_t usage_after = workspace_allocator_->allocated();
     workspace_allocator_->remove_allocation_hook(hook_id);
 
     size_t peak_edge_usage = peak_usage - usage_before;
