@@ -9,9 +9,20 @@
 #include <stdexcept>
 
 #include "nn/engines/iengine.hpp"
+#include "tensor/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
+
+void LayerNormOp::init(OpContext &ctx, const Config &config) {
+  size_t normalized_shape = config.normalized_shape;
+
+  Param gamma = ctx.make_param({normalized_shape});
+  fill(gamma.data(), 1.0f);
+
+  Param beta = ctx.make_param({normalized_shape});
+  fill(beta.data(), 0.0f);
+}
 
 Vec<Vec<size_t>> LayerNormOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
                                             const Config &config) {

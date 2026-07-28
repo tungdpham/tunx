@@ -6,15 +6,36 @@
  */
 #include "nn/layers_impl/dense.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <stdexcept>
 
 #include "nn/engines/engine_handle.hpp"
 #include "nn/engines/iengine.hpp"
 #include "nn/stats/stats.hpp"
+#include "tensor/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
+
+void DenseOp::init(OpContext &ctx, const Config &config) {
+  size_t input_features = config.input_features;
+  size_t output_features = config.output_features;
+
+  float stddev = static_cast<float>(1.0 / std::sqrt(static_cast<double>(input_features)));
+  long long seed =
+      ctx.use_seed ? ctx.srand_seed : std::chrono::system_clock::now().time_since_epoch().count();
+
+  Param weights = ctx.make_param({input_features, output_features});
+  fill_normal(weights.data(), 0, stddev, seed);
+
+  if (config.use_bias) {
+    Param bias = ctx.make_param({output_features});
+    fill_normal(bias.data(), 0, stddev, seed);
+  } else {
+    ctx.make_param({0});
+  }
+}
 
 Vec<Vec<size_t>> DenseOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
                                         const Config &config) {

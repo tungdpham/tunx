@@ -6,6 +6,7 @@
  */
 #include "nn/layers_impl/embedding.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <stdexcept>
 
@@ -14,6 +15,22 @@
 #include "type/type.hpp"
 
 namespace tunx {
+
+void EmbeddingOp::init(OpContext &ctx, const Config &config) {
+  size_t vocab_size = config.vocab_size;
+  size_t embed_dim = config.embed_dim;
+  size_t padding_idx = config.padding_idx;
+  float stddev = static_cast<float>(1.0 / std::sqrt(static_cast<double>(embed_dim)));
+  long long seed =
+      ctx.use_seed ? ctx.srand_seed : std::chrono::system_clock::now().time_since_epoch().count();
+  Param weight = ctx.make_param({vocab_size, embed_dim});
+  fill_normal(weight.data(), 0, stddev, seed);
+  if (padding_idx < vocab_size) {
+    for (size_t i = 0; i < embed_dim; ++i) {
+      DISPATCH_DTYPE(weight.dtype(), T, weight.data().at<T>({padding_idx, i}) = 0.0f);
+    }
+  }
+}
 
 Vec<Vec<size_t>> EmbeddingOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
                                             const Config &config) {

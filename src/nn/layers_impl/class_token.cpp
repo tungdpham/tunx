@@ -6,13 +6,24 @@
  */
 #include "nn/layers_impl/class_token.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <stdexcept>
 
 #include "nn/engines/iengine.hpp"
+#include "tensor/ops.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
+
+void ClassTokenOp::init(OpContext &ctx, const Config &config) {
+  size_t embed_dim = config.embed_dim;
+  float bound = static_cast<float>(1.0 / std::sqrt(static_cast<double>(embed_dim)));
+  long long seed =
+      ctx.use_seed ? ctx.srand_seed : std::chrono::system_clock::now().time_since_epoch().count();
+  Param class_token = ctx.make_param({embed_dim});
+  fill_normal(class_token.data(), 0, bound, seed);
+}
 
 Vec<Vec<size_t>> ClassTokenOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
                                              const Config &config) {

@@ -11,10 +11,27 @@
 #include <stdexcept>
 
 #include "nn/engines/iengine.hpp"
+#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
+
+void BatchNormOp::init(OpContext &ctx, const Config &config) {
+  size_t num_features = config.num_features;
+
+  Param gamma = ctx.make_param({num_features});
+  fill(gamma.data(), 1.0f);
+
+  Param beta = ctx.make_param({num_features});
+  fill(beta.data(), 0.0f);
+
+  Param running_mean = ctx.make_param({num_features});
+  fill(running_mean.grad(), 0.0f);
+
+  Param running_var = ctx.make_param({num_features});
+  fill(running_var.grad(), 1.0f);
+}
 
 Vec<Vec<size_t>> BatchNormOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
                                             const Config &config) {

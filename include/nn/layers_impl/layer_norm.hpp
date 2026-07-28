@@ -25,6 +25,7 @@ struct LayerNormOp {
     bool affine = true;
   };
 
+  static void init(OpContext &ctx, const Config &config);
   static Tensor forward(OpContext &ctx, const Tensor &input, const Param &gamma, const Param &beta,
                         const Config &config);
   static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &gamma, Param &beta,
@@ -39,19 +40,7 @@ class LayerNorm : public FunctionalLayer<LayerNormOp> {
 public:
   LayerNorm(size_t normalized_shape, float epsilon = 1e-5f, bool affine = true,
             const std::string &name = "layer_norm")
-      : FunctionalLayer(LayerNormOp::Config{normalized_shape, epsilon, affine}, name) {
-    if (affine) {
-      impl_->register_param("gamma", {normalized_shape},
-                            [](Param &p, OpContext &ctx) { fill(p.data(), 1.0f); });
-      impl_->register_param("beta", {normalized_shape},
-                            [](Param &p, OpContext &ctx) { fill(p.data(), 0.0f); });
-    } else {
-      impl_->register_param("gamma", {normalized_shape},
-                            [](Param &p, OpContext &ctx) { fill(p.data(), 1.0f); });
-      impl_->register_param("beta", {normalized_shape},
-                            [](Param &p, OpContext &ctx) { fill(p.data(), 0.0f); });
-    }
-  }
+      : FunctionalLayer(LayerNormOp::Config{normalized_shape, epsilon, affine}, name) {}
 };
 
 }  // namespace tunx

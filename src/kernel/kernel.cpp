@@ -19,8 +19,9 @@ void copy(const dptr src, dptr dst, size_t size, stream s) {
     if (src_device.device_type() == DeviceType::CPU) {
       return create_cpu_task(src_device, s, kernel::cpu::copy, DType_t::BYTE, src.get(), dst.get(),
                              size);
+    }
 #ifdef TUNX_USE_CUDA
-    } else if (src_device.device_type() == DeviceType::CUDA) {
+    else if (src_device.device_type() == DeviceType::CUDA) {
       return create_cuda_task(src_device, s, kernel::cuda::copy, DType_t::BYTE, src.get(),
                               dst.get(), size);
     }

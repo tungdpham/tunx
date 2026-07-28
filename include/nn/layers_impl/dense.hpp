@@ -6,7 +6,6 @@
  */
 #pragma once
 
-#include <chrono>
 #include <string>
 
 #include "nn/functional_layer.hpp"
@@ -23,6 +22,7 @@ struct DenseOp {
     bool use_bias = true;
   };
 
+  static void init(OpContext &ctx, const Config &config);
   static Tensor forward(OpContext &ctx, const Tensor &input, const Param &weights,
                         const Param &bias, const Config &config);
   static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &weights, Param &bias,
@@ -37,25 +37,6 @@ public:
   Dense(size_t input_features, size_t output_features, bool use_bias = true,
         const std::string &name = "dense")
       : FunctionalLayer(DenseOp::Config{input_features, output_features, use_bias},
-                        name) {
-    impl_->register_param(
-        "weights", {input_features, output_features}, [input_features](Param &p, OpContext &ctx) {
-          float stddev = static_cast<float>(1.0 / std::sqrt(static_cast<double>(input_features)));
-          long long seed = ctx.use_seed
-                               ? ctx.srand_seed
-                               : std::chrono::system_clock::now().time_since_epoch().count();
-          fill_normal(p.data(), 0, stddev, seed);
-        });
-    if (use_bias) {
-      impl_->register_param("bias", {output_features}, [input_features](Param &p, OpContext &ctx) {
-        float stddev = static_cast<float>(1.0 / std::sqrt(static_cast<double>(input_features)));
-        long long seed = ctx.use_seed ? ctx.srand_seed
-                                      : std::chrono::system_clock::now().time_since_epoch().count();
-        fill_normal(p.data(), 0, stddev, seed);
-      });
-    } else {
-      impl_->register_param("bias_dummy", {0}, nullptr);
-    }
-  }
+                        name) {}
 };
 }  // namespace tunx

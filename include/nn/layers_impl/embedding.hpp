@@ -6,13 +6,11 @@
  */
 #pragma once
 
-#include <chrono>
 #include <cmath>
 #include <string>
 
 #include "nn/functional_layer.hpp"
 #include "nn/param.hpp"
-#include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
@@ -25,6 +23,7 @@ struct EmbeddingOp {
     size_t padding_idx = static_cast<size_t>(-1);
   };
 
+  static void init(OpContext &ctx, const Config &config);
   static Tensor forward(OpContext &ctx, const Tensor &input, const Param &weight,
                         const Config &config);
   static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &weight,
@@ -38,21 +37,6 @@ class Embedding : public FunctionalLayer<EmbeddingOp> {
 public:
   Embedding(size_t vocab_size, size_t embed_dim, size_t padding_idx = static_cast<size_t>(-1),
             const std::string &name = "embedding")
-      : FunctionalLayer(EmbeddingOp::Config{vocab_size, embed_dim, padding_idx}, name) {
-    impl_->register_param(
-        "weight", {vocab_size, embed_dim},
-        [vocab_size, embed_dim, padding_idx](Param &p, OpContext &ctx) {
-          float stddev = static_cast<float>(1.0 / std::sqrt(static_cast<double>(embed_dim)));
-          long long seed = ctx.use_seed
-                               ? ctx.srand_seed
-                               : std::chrono::system_clock::now().time_since_epoch().count();
-          fill_normal(p.data(), 0, stddev, seed);
-          if (padding_idx < vocab_size) {
-            for (size_t i = 0; i < embed_dim; ++i) {
-              DISPATCH_DTYPE(p.dtype(), T, p.data().at<T>({padding_idx, i}) = 0.0f);
-            }
-          }
-        });
-  }
+      : FunctionalLayer(EmbeddingOp::Config{vocab_size, embed_dim, padding_idx}, name) {}
 };
 }  // namespace tunx

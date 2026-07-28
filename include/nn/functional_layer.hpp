@@ -19,6 +19,7 @@
 #include "nn/layer.hpp"
 #include "nn/param.hpp"
 #include "tensor/tensor.hpp"
+#include "type/type.hpp"
 
 namespace tunx {
 
@@ -39,7 +40,8 @@ struct OpContext {
     return layer->make_tensor(shape, dtype);
   }
 
-  Param make_param(const Vec<size_t>& shape, DType_t dtype) const {
+  Param make_param(const Vec<size_t>& shape, DType_t dtype = DType_t::UNKNOWN) const {
+    if (dtype == DType_t::UNKNOWN) dtype = param_dtype;
     return layer->make_param(shape, dtype);
   }
 };
@@ -138,6 +140,9 @@ public:
 protected:
   void init_impl() override {
     OpContext ctx = make_context();
+    if constexpr (requires { Op::init(ctx, config_); }) {
+      Op::init(ctx, config_);
+    }
     for (const auto& def : param_defs_) {
       DType_t t = def.dtype == DType_t::UNKNOWN ? this->param_dtype_ : def.dtype;
       Param p = this->make_param(def.shape, t);
@@ -223,16 +228,18 @@ protected:
 public:
   std::string type() const override { return Op::TYPE_NAME; }
 
-  LayerConfig get_config() const override { 
+  LayerConfig get_config() const override {
     if constexpr (requires { Op::get_config(config_, this->name_, this->registered_layers_); }) {
       return Op::get_config(config_, this->name_, this->registered_layers_);
     } else {
-      return Op::get_config(config_, this->name_); 
+      return Op::get_config(config_, this->name_);
     }
   }
 
   Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>>& input_shapes) const override {
-    if constexpr (requires { Op::output_shapes(input_shapes, config_, this->registered_layers_); }) {
+    if constexpr (requires {
+                    Op::output_shapes(input_shapes, config_, this->registered_layers_);
+                  }) {
       return Op::output_shapes(input_shapes, config_, this->registered_layers_);
     } else {
       return Op::output_shapes(input_shapes, config_);

@@ -34,8 +34,6 @@ struct SDPAOp {
 
 class SDPA : public FunctionalLayer<SDPAOp> {
 public:
-  static constexpr const char *TYPE_NAME = "sdpa";
-
   SDPA(float attn_scale = 1.0f, bool is_causal = false, const std::string &name = "sdpa");
 };
 

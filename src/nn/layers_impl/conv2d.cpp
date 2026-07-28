@@ -20,6 +20,28 @@
 
 namespace tunx {
 
+void Conv2DOp::init(OpContext &ctx, const Config &config) {
+  size_t in_channels = config.in_channels;
+  size_t out_channels = config.out_channels;
+  size_t kernel_h = config.kernel_h;
+  size_t kernel_w = config.kernel_w;
+
+  float stddev =
+      static_cast<float>(1.0 / std::sqrt(static_cast<double>(in_channels * kernel_h * kernel_w)));
+  long long seed =
+      ctx.use_seed ? ctx.srand_seed : std::chrono::system_clock::now().time_since_epoch().count();
+
+  Param weight = ctx.make_param({out_channels, kernel_h, kernel_w, in_channels});
+  fill_normal(weight.data(), 0, stddev, seed);
+
+  if (config.use_bias) {
+    Param bias = ctx.make_param({out_channels});
+    fill_normal(bias.data(), 0, stddev, seed);
+  } else {
+    ctx.make_param({0});
+  }
+}
+
 Tensor Conv2DOp::forward(OpContext &ctx, const Tensor &input, const Param &weight,
                          const Param &bias, const Config &config) {
   if (input.dims() != 4) {
@@ -187,30 +209,6 @@ Conv2D::Conv2D(size_t in_channels, size_t out_channels, size_t kernel_h, size_t 
                const std::string &name)
     : FunctionalLayer(Conv2DOp::Config{in_channels, out_channels, kernel_h, kernel_w, stride_h,
                                        stride_w, pad_h, pad_w, use_bias},
-                      name) {
-  impl_->register_param(
-      "weight", {out_channels, kernel_h, kernel_w, in_channels},
-      [in_channels, kernel_h, kernel_w](Param &p, OpContext &ctx) {
-        float stddev = static_cast<float>(
-            1.0 / std::sqrt(static_cast<double>(in_channels * kernel_h * kernel_w)));
-        long long seed = ctx.use_seed ? ctx.srand_seed
-                                      : std::chrono::system_clock::now().time_since_epoch().count();
-        fill_normal(p.data(), 0, stddev, seed);
-      });
-
-  if (use_bias) {
-    impl_->register_param(
-        "bias", {out_channels}, [in_channels, kernel_h, kernel_w](Param &p, OpContext &ctx) {
-          float stddev = static_cast<float>(
-              1.0 / std::sqrt(static_cast<double>(in_channels * kernel_h * kernel_w)));
-          long long seed = ctx.use_seed
-                               ? ctx.srand_seed
-                               : std::chrono::system_clock::now().time_since_epoch().count();
-          fill_normal(p.data(), 0, stddev, seed);
-        });
-  } else {
-    impl_->register_param("bias_dummy", {0}, nullptr);
-  }
-}
+                      name) {}
 
 }  // namespace tunx

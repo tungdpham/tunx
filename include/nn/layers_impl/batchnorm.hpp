@@ -27,6 +27,7 @@ struct BatchNormOp {
     bool use_relu = false;
   };
 
+  static void init(OpContext &ctx, const Config &config);
   static Tensor forward(OpContext &ctx, const Tensor &input, const Param &gamma, const Param &beta,
                         Param &running_mean, Param &running_var, const Config &config);
   static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &gamma, Param &beta,
@@ -42,17 +43,7 @@ public:
   BatchNorm(size_t num_features, float epsilon = 1e-5f, float momentum = 0.1f, bool affine = true,
             bool use_relu = false, const std::string &name = "batchnorm")
       : FunctionalLayer(BatchNormOp::Config{num_features, epsilon, momentum, affine, use_relu},
-                        name) {
-    impl_->register_param("gamma", {num_features},
-                          [](Param &p, OpContext &ctx) { fill(p.data(), 1.0f); });
-    impl_->register_param("beta", {num_features},
-                          [](Param &p, OpContext &ctx) { fill(p.data(), 0.0f); });
-
-    impl_->register_param("running_mean", {num_features},
-                          [](Param &p, OpContext &ctx) { fill(p.grad(), 0.0f); });
-    impl_->register_param("running_var", {num_features},
-                          [](Param &p, OpContext &ctx) { fill(p.grad(), 1.0f); });
-  }
+                        name) {}
 };
 
 }  // namespace tunx

@@ -6,7 +6,6 @@
  */
 #pragma once
 
-#include <chrono>
 #include <string>
 
 #include "nn/functional_layer.hpp"
@@ -22,6 +21,7 @@ struct PositionalEmbeddingOp {
     size_t seq_len;
   };
 
+  static void init(OpContext &ctx, const Config &config);
   static Tensor forward(OpContext &ctx, const Tensor &input, const Param &pos_embedding,
                         const Config &config);
   static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &pos_embedding,
@@ -34,15 +34,6 @@ struct PositionalEmbeddingOp {
 class PositionalEmbedding : public FunctionalLayer<PositionalEmbeddingOp> {
 public:
   PositionalEmbedding(size_t embed_dim, size_t seq_len, const std::string &name = "pos_embedding")
-      : FunctionalLayer(PositionalEmbeddingOp::Config{embed_dim, seq_len}, name) {
-    impl_->register_param(
-        "pos_embedding", {seq_len, embed_dim}, [embed_dim](Param &p, OpContext &ctx) {
-          float bound = static_cast<float>(1.0 / std::sqrt(static_cast<double>(embed_dim)));
-          long long seed = ctx.use_seed
-                               ? ctx.srand_seed
-                               : std::chrono::system_clock::now().time_since_epoch().count();
-          fill_normal(p.data(), 0, bound, seed);
-        });
-  }
+      : FunctionalLayer(PositionalEmbeddingOp::Config{embed_dim, seq_len}, name) {}
 };
 }  // namespace tunx

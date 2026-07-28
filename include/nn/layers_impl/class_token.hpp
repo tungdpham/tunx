@@ -5,7 +5,6 @@
  * project root for the full license text.
  */
 #pragma once
-#include <chrono>
 #include <string>
 
 #include "nn/functional_layer.hpp"
@@ -20,6 +19,7 @@ struct ClassTokenOp {
     size_t embed_dim;
   };
 
+  static void init(OpContext &ctx, const Config &config);
   static Tensor forward(OpContext &ctx, const Tensor &input, const Param &class_token,
                         const Config &config);
   static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &class_token,
@@ -32,13 +32,6 @@ struct ClassTokenOp {
 class ClassToken : public FunctionalLayer<ClassTokenOp> {
 public:
   ClassToken(size_t embed_dim, const std::string &name = "class_token")
-      : FunctionalLayer(ClassTokenOp::Config{embed_dim}, name) {
-    impl_->register_param("class_token", {embed_dim}, [embed_dim](Param &p, OpContext &ctx) {
-      float bound = static_cast<float>(1.0 / std::sqrt(static_cast<double>(embed_dim)));
-      long long seed = ctx.use_seed ? ctx.srand_seed
-                                    : std::chrono::system_clock::now().time_since_epoch().count();
-      fill_normal(p.data(), 0, bound, seed);
-    });
-  }
+      : FunctionalLayer(ClassTokenOp::Config{embed_dim}, name) {}
 };
 }  // namespace tunx

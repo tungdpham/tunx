@@ -6,6 +6,7 @@
  */
 #include "nn/layers_impl/positional_embedding.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <stdexcept>
 
@@ -15,6 +16,16 @@
 #include "type/type.hpp"
 
 namespace tunx {
+
+void PositionalEmbeddingOp::init(OpContext &ctx, const Config &config) {
+  size_t embed_dim = config.embed_dim;
+  size_t seq_len = config.seq_len;
+  float bound = static_cast<float>(1.0 / std::sqrt(static_cast<double>(embed_dim)));
+  long long seed =
+      ctx.use_seed ? ctx.srand_seed : std::chrono::system_clock::now().time_since_epoch().count();
+  Param pos_embedding = ctx.make_param({seq_len, embed_dim});
+  fill_normal(pos_embedding.data(), 0, bound, seed);
+}
 
 Vec<Vec<size_t>> PositionalEmbeddingOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
                                                       const Config &config) {

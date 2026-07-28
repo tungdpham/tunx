@@ -649,6 +649,8 @@ inline void cd_copy(const Tensor &a, Tensor &c, stream stream = nullptr) {
     throw std::runtime_error("cd_copy: CUDA not enabled for CUDA to CPU copy");
 #endif
   } else {
+    (void)dtype;
+    (void)size;
     throw std::runtime_error("cd_copy: Unsupported device type combination");
   }
 }
