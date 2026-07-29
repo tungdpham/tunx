@@ -128,6 +128,27 @@ public:
         impl_->data);
   }
 
+  size_t num_bytes() const {
+    if (!impl_) return 0;
+    return std::visit(
+        [](auto &&arg) -> size_t {
+          using T = std::decay_t<decltype(arg)>;
+          if constexpr (std::is_same_v<T, std::monostate>) {
+            return 0;
+          } else if constexpr (std::is_same_v<T, std::map<std::string, ResidualObject>>) {
+            size_t total = 0;
+            for (const auto &[key, value] : arg) {
+              total += value.num_bytes();
+            }
+            return total;
+          } else if constexpr (std::is_same_v<T, Tensor>) {
+            return arg.num_bytes();
+          }
+          return 0;
+        },
+        impl_->data);
+  }
+
   friend std::ostream &operator<<(std::ostream &os, const ResidualObject &obj) {
     obj.print(os, 0);
     return os;

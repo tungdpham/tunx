@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "common/csv_logger.hpp"
 #include "device/del_allocator_v2.hpp"
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
@@ -135,9 +136,25 @@ public:
     timing_order_.clear();
   }
 
-  void enable_memory_profiling(bool enable, std::ostream *os = nullptr) {
+  void enable_memory_profiling(bool enable, CsvLogger *logger = nullptr) {
     enable_memory_profiling_ = enable;
-    memory_profile_stream_ = os;
+    memory_profile_logger_ = logger;
+  }
+
+  size_t max_temp_workspace() const { return max_temp_workspace_; }
+  size_t residuals_memory_bytes() const {
+    size_t total = 0;
+    for (const auto &edge : edges_) {
+      total += edge->residuals_memory_bytes();
+    }
+    return total;
+  }
+  size_t gradients_memory_bytes() {
+    size_t total = 0;
+    for (auto &p : params()) {
+      total += p.grad().num_bytes();
+    }
+    return total;
   }
 
 private:
@@ -163,7 +180,8 @@ private:
   size_t node_count_ = 0;
   std::set<std::string> used_uids_;
   bool enable_memory_profiling_ = false;
-  std::ostream *memory_profile_stream_ = nullptr;
+  CsvLogger *memory_profile_logger_ = nullptr;
+  size_t max_temp_workspace_ = 0;
 
   int node_in_degree(const Node &node) const;
   int node_out_degree(const Node &node) const;

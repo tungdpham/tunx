@@ -415,10 +415,18 @@ void Graph::forward_edge(Edge &edge, size_t pid) {
 
     size_t peak_edge_usage = peak_usage - usage_before;
     size_t retained = usage_after - usage_before;
-    if (memory_profile_stream_) {
-      *memory_profile_stream_ << fmt::format(
-          "{},{},{},{},{}\n", edge->layer()->name(), peak_edge_usage, retained,
-          workspace_allocator_->unused(), workspace_allocator_->reserved());
+    
+    // Track maximum temporary workspace memory across all edges
+    max_temp_workspace_ = std::max(max_temp_workspace_, peak_edge_usage - retained);
+
+    if (memory_profile_logger_) {
+      std::unordered_map<std::string, std::string> row;
+      row["layer"] = edge->layer()->name();
+      row["peak_usage_bytes"] = std::to_string(peak_edge_usage);
+      row["retained_bytes"] = std::to_string(retained);
+      row["unused_bytes"] = std::to_string(workspace_allocator_->unused());
+      row["reserved_bytes"] = std::to_string(workspace_allocator_->reserved());
+      memory_profile_logger_->log(row);
     } else {
       fmt::print(
           "Layer {} peak usage: {:.2f} MB, retained: {:.2f} MB, unused: {:.2f} MB, reserved: "

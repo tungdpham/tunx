@@ -35,6 +35,14 @@ public:
 
   void clear_residuals(size_t pid) { residuals_cache_.erase(pid); }
 
+  size_t residuals_memory_bytes() const {
+    size_t total = 0;
+    for (const auto &[pid, res] : residuals_cache_) {
+      total += res.num_bytes();
+    }
+    return total;
+  }
+
 private:
   std::shared_ptr<LayerImpl> layer_;
   Vec<Node> producers_;

@@ -21,11 +21,10 @@
 #include <memory>
 
 #include "data_loading/batch_prefetcher.hpp"
-#include "device/device_type.hpp"
 #include "device/pool_allocator.hpp"
 #include "device/stream.hpp"
-#include "nn/csv_logger.hpp"
-#include "nn/metrics.hpp"
+#include "nn/metrics_logger.hpp"
+#include "nn/metrics_computer.hpp"
 #include "threading/thread_wrapper.hpp"
 #include "type/type.hpp"
 
@@ -33,16 +32,14 @@ using namespace std;
 
 namespace tunx {
 
-static std::string normalize_train_mode(std::string mode) {
-  for (char &c : mode) {
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+static std::string training_artifact_name(const TrainingConfig &config) {
+  if (!config.model_name.empty()) {
+    return config.model_name;
   }
-  if (mode == "epoch" || mode == "batch" || mode == "auto") {
-    return mode;
+  if (!config.model_path.empty()) {
+    return std::filesystem::path(config.model_path).stem().string();
   }
-  std::cerr << "Warning: invalid TRAIN_MODE/tunx_TRAIN_MODE=\"" << mode
-            << "\". Expected epoch, batch, or auto. Falling back to auto." << std::endl;
-  return "auto";
+  return "graph";
 }
 
 void print_timing_table(const std::vector<std::pair<std::string, double>> &timings) {
@@ -56,165 +53,10 @@ void print_timing_table(const std::vector<std::pair<std::string, double>> &timin
   }
 }
 
-static std::string training_artifact_name(const TrainingConfig &config) {
-  if (!config.model_name.empty()) {
-    return config.model_name;
-  }
-  if (!config.model_path.empty()) {
-    return std::filesystem::path(config.model_path).stem().string();
-  }
-  return "graph";
-}
-
-static void parse_optimizer_json(const nlohmann::json &j, OptimizerConfig &cfg) {
-  cfg.type = j.value("type", cfg.type.empty() ? "adam" : cfg.type);
-  for (auto &[k, v] : j.items()) {
-    if (k == "type" || k == "name") continue;
-    if (v.is_boolean())
-      cfg.set(k, v.get<bool>());
-    else if (v.is_number())
-      cfg.set(k, v.get<float>());
-    else if (v.is_string())
-      cfg.set<string>(k, v.get<string>());
-  }
-}
-
-static void parse_scheduler_json(const nlohmann::json &j, SchedulerConfig &cfg) {
-  cfg.type = j.value("type", cfg.type.empty() ? "no_op" : cfg.type);
-  for (auto &[k, v] : j.items()) {
-    if (k == "type" || k == "name") continue;
-    if (v.is_boolean())
-      cfg.set(k, v.get<bool>());
-    else if (v.is_number_integer())
-      cfg.set(k, v.get<size_t>());
-    else if (v.is_number_float())
-      cfg.set(k, v.get<float>());
-    else if (v.is_string())
-      cfg.set<string>(k, v.get<string>());
-    else if (v.is_array()) {
-      vector<size_t> arr;
-      for (const auto &item : v) arr.push_back(item.get<size_t>());
-      cfg.set(k, arr);
-    }
-  }
-}
-
-static void parse_loss_json(const nlohmann::json &j, LossConfig &cfg) {
-  cfg.type = j.value("type", cfg.type.empty() ? "logsoftmax_cross_entropy" : cfg.type);
-  for (auto &[k, v] : j.items()) {
-    if (k == "type" || k == "name") continue;
-    if (v.is_boolean())
-      cfg.set(k, v.get<bool>());
-    else if (v.is_number())
-      cfg.set(k, v.get<double>());
-    else if (v.is_string())
-      cfg.set<string>(k, v.get<string>());
-  }
-}
-
-void TrainingConfig::print_config() const {
-  cout << "Training Configuration:" << endl;
-  cout << "  Epochs: " << epochs << endl;
-  cout << "  Batch Size: " << batch_size << endl;
-  cout << "  Max Steps: " << max_steps << endl;
-  cout << "  Train Mode: " << train_mode << endl;
-  cout << "  Initial Learning Rate: " << lr_initial << endl;
-  cout << "  Gradient Accumulation Steps: " << gradient_accumulation_steps << endl;
-  cout << "  Progress Print Interval (batches): " << progress_print_interval << endl;
-  cout << "  Number of Threads: " << num_threads << endl;
-  cout << "  Profiler Type: "
-       << (profiler_type == ProfilerType::NONE
-               ? "None"
-               : (profiler_type == ProfilerType::NORMAL ? "Normal" : "Cumulative"))
-       << endl;
-  cout << "  Print LayerImpl Profiling Info: " << (print_layer_profiling ? "Yes" : "No") << endl;
-  cout << "  Print LayerImpl Memory Usage: " << (print_layer_memory_usage ? "Yes" : "No") << endl;
-  cout << "  Number of Microbatches: " << num_microbatches << endl;
-  cout << "  Device ID: " << device_type_to_string(device_id.type) + std::to_string(device_id.id)
-       << endl;
-  cout << "  Data Prefetch: " << (prefetch_data ? "Yes" : "No") << endl;
-  cout << "  Prefetch Depth: " << prefetch_depth << endl;
-  cout << "  Async Pipeline Flag: " << (async_pipeline ? "Yes" : "No") << endl;
-  cout << "  Augmentation: " << (augmentation ? "Yes" : "No") << endl;
-  cout << "  Optimizer Type: " << optimizer_config.type << endl;
-  cout << "  Scheduler Type: " << scheduler_config.type << endl;
-  cout << "  Loss Type: " << loss_config.type << endl;
-}
-
-void TrainingConfig::load_from_json(const string &config_path) {
-  ifstream file(config_path);
-  if (!file.is_open()) {
-    throw runtime_error("Failed to open config file: " + config_path);
-  }
-
-  nlohmann::json config;
-  file >> config;
-  file.close();
-
-  epochs = config.value("epochs", epochs);
-  batch_size = config.value("batch_size", batch_size);
-  max_steps = config.value("max_steps", max_steps);
-  train_mode = normalize_train_mode(config.value("train_mode", train_mode));
-  lr_initial = config.value("lr_initial", lr_initial);
-  gradient_accumulation_steps =
-      config.value("gradient_accumulation_steps", gradient_accumulation_steps);
-  progress_print_interval = config.value("progress_print_interval", progress_print_interval);
-  num_threads = config.value("num_threads", num_threads);
-  string profiler_type_str = config.value("profiler_type", "NONE");
-  if (profiler_type_str == "NORMAL") {
-    profiler_type = ProfilerType::NORMAL;
-  } else if (profiler_type_str == "CUMULATIVE") {
-    profiler_type = ProfilerType::CUMULATIVE;
-  } else {
-    profiler_type = ProfilerType::NONE;
-  }
-  print_layer_profiling = config.value("print_layer_profiling", print_layer_profiling);
-  print_layer_memory_usage = config.value("print_layer_memory_usage", print_layer_memory_usage);
-  num_microbatches = config.value("num_microbatches", num_microbatches);
-  if (config.contains("device")) {
-    string device_str = config["device"];
-    device_id = DeviceID::from_string(device_str);
-  }
-  model_name = config.value("model_name", model_name);
-  model_path = config.value("model_path", model_path);
-  dataset_name = config.value("dataset_name", dataset_name);
-  dataset_path = config.value("dataset_path", dataset_path);
-  string io_dtype_str = config.value("io_dtype", dtype_to_string(io_dtype));
-  io_dtype = string_to_dtype(io_dtype_str);
-  string param_dtype_str = config.value("param_dtype", dtype_to_string(param_dtype));
-  param_dtype = string_to_dtype(param_dtype_str);
-  string compute_dtype_str = config.value("compute_dtype", dtype_to_string(compute_dtype));
-  compute_dtype = string_to_dtype(compute_dtype_str);
-
-  prefetch_data = config.value("prefetch_data", prefetch_data);
-  prefetch_depth = config.value("prefetch_depth", prefetch_depth);
-  async_pipeline = config.value("async_pipeline", async_pipeline);
-  augmentation = config.value("augmentation", augmentation);
-
-  // Parse LogMode settings from JSON
-  if (config.contains("log_mode")) {
-    auto log_config = config["log_mode"];
-    log_mode.log_loss = log_config.value("log_loss", log_mode.log_loss);
-    log_mode.log_accuracy = log_config.value("log_accuracy", log_mode.log_accuracy);
-    log_mode.log_precision = log_config.value("log_precision", log_mode.log_precision);
-    log_mode.log_recall = log_config.value("log_recall", log_mode.log_recall);
-    log_mode.log_f1_score = log_config.value("log_f1_score", log_mode.log_f1_score);
-    log_mode.log_perplexity = log_config.value("log_perplexity", log_mode.log_perplexity);
-    log_mode.log_top_k_accuracy =
-        log_config.value("log_top_k_accuracy", log_mode.log_top_k_accuracy);
-    log_mode.log_mae = log_config.value("log_mae", log_mode.log_mae);
-    log_mode.log_mse = log_config.value("log_mse", log_mode.log_mse);
-    log_mode.log_rmse = log_config.value("log_rmse", log_mode.log_rmse);
-  }
-  if (config.contains("optimizer")) parse_optimizer_json(config["optimizer"], optimizer_config);
-  if (config.contains("scheduler")) parse_scheduler_json(config["scheduler"], scheduler_config);
-  if (config.contains("loss")) parse_loss_json(config["loss"], loss_config);
-}
-
 static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
                           unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
                           unique_ptr<Scheduler> &scheduler, const TrainingConfig &config,
-                          CsvLogger &logger, int epoch) {
+                          MetricsLogger &logger, int epoch, std::unique_ptr<CsvLogger> &mem_logger) {
   auto train_start = chrono::high_resolution_clock::now();
   Tensor batch_data, batch_labels;
   Device &model_device = graph.device();
@@ -256,16 +98,9 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
     TensorBundle inputs{{"input", device_input}};
 
-    std::ofstream mem_file;
     if (config.print_layer_memory_usage && epoch == 1 && num_batches == 1) {
-      std::string mem_csv_path = "tunx_" + training_artifact_name(config) + "_" + csv_timestamp() + "_memory.csv";
-      if (!config.log_dir.empty()) {
-        mem_csv_path = config.log_dir + "/" + mem_csv_path;
-      }
-      mem_file.open(mem_csv_path);
-      if (mem_file.is_open()) {
-        mem_file << "layer,peak_usage_bytes,retained_bytes,unused_bytes,reserved_bytes\n";
-        graph.enable_memory_profiling(true, &mem_file);
+      if (mem_logger) {
+        graph.enable_memory_profiling(true, mem_logger.get());
       }
     }
 
@@ -273,6 +108,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
     if (config.print_layer_memory_usage && epoch == 1 && num_batches == 1) {
       graph.enable_memory_profiling(false);
+      if (mem_logger) mem_logger->flush();
     }
 
     Tensor predictions = outputs.get("output");
@@ -287,10 +123,13 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     criterion->compute_loss(predictions, device_labels, loss);
     total_loss += loss;
 
+    MetricsComputer metrics_comp(config.log_mode);
+    ComputedMetrics computed_metrics = metrics_comp.compute(predictions, device_labels, loss);
+    int batch_corrects = computed_metrics.corrects;
+
     Tensor loss_gradient = Tensor(predictions.shape(), batch_data.dtype(), mem_pool);
     criterion->compute_gradient(predictions, device_labels, loss_gradient);
 
-    int batch_corrects = compute_class_corrects(predictions, device_labels);
     predictions = Tensor();  // free prediction buffer early
 
     if (config.gradient_accumulation_steps > 1) {
@@ -318,41 +157,21 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     }
 
     // Log batch metrics
-    std::unordered_map<std::string, double> step_metrics;
+    computed_metrics.time_ms = batch_duration.count();
     if (config.log_mode.log_accuracy) {
       total_corrects += batch_corrects;
-      step_metrics["accuracy_pct"] = batch_corrects / static_cast<double>(batch_size);
     }
-    if (config.log_mode.log_loss) {
-      step_metrics["loss"] = loss;
-    }
-    if (config.log_mode.log_precision) {
-      step_metrics["precision"] = compute_precision(predictions, device_labels);
-    }
-    if (config.log_mode.log_recall) {
-      step_metrics["recall"] = compute_recall(predictions, device_labels);
-    }
-    if (config.log_mode.log_f1_score) {
-      step_metrics["f1_score"] = compute_f1_score(predictions, device_labels);
-    }
-    if (config.log_mode.log_perplexity) {
-      step_metrics["perplexity"] = std::exp(static_cast<double>(loss));
-    }
-    if (config.log_mode.log_top_k_accuracy) {
-      step_metrics["top_k_accuracy"] = compute_top_k_accuracy(predictions, device_labels, 5);
-    }
-    step_metrics["time_ms"] = batch_duration.count();
-    logger.log_train_step(epoch, num_batches, step_metrics);
+    logger.log_train_step(epoch, num_batches, computed_metrics);
 
     if (num_batches % config.progress_print_interval == 0) {
       cout << "Batch ID: " << num_batches << ", Batch's Loss: " << fixed << setprecision(4) << loss
            << ", Cumulative Accuracy: " << setprecision(2)
            << (total_corrects * 100.0 / total_class_num) << "%";
-      if (config.log_mode.log_f1_score && step_metrics.count("f1_score")) {
-        cout << ", F1: " << setprecision(4) << step_metrics["f1_score"];
+      if (config.log_mode.log_f1_score && computed_metrics.f1_score) {
+        cout << ", F1: " << setprecision(4) << *computed_metrics.f1_score;
       }
-      if (config.log_mode.log_perplexity && step_metrics.count("perplexity")) {
-        cout << ", PPL: " << setprecision(2) << step_metrics["perplexity"];
+      if (config.log_mode.log_perplexity && computed_metrics.perplexity) {
+        cout << ", PPL: " << setprecision(2) << *computed_metrics.perplexity;
       }
       cout << ", Batch Time: " << batch_duration.count() << "ms" << endl;
       /*
@@ -379,12 +198,12 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 static void train_val(Graph &graph, unique_ptr<Dataset> &train_dataset,
                       unique_ptr<Dataset> &val_dataset, unique_ptr<Optimizer> &optimizer,
                       const unique_ptr<Loss> &criterion, unique_ptr<Scheduler> &scheduler,
-                      const TrainingConfig &config) {
+                      const TrainingConfig &config, std::unique_ptr<CsvLogger> &mem_logger) {
   ThreadWrapper thread_wrapper({config.num_threads});
 
   double best_val_accuracy = 0.0;
   const std::string artifact_name = training_artifact_name(config);
-  CsvLogger logger("tunx_" + artifact_name, config.log_dir, &config.log_mode);
+  MetricsLogger logger("tunx_" + artifact_name, config.log_dir, config.log_mode);
 
   thread_wrapper.execute([&]() -> void {
     for (int epoch = 0; epoch < config.epochs; ++epoch) {
@@ -392,11 +211,11 @@ static void train_val(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
       // train phrase
       auto [avg_train_loss, avg_train_accuracy] = train_epoch(
-          graph, train_dataset, optimizer, criterion, scheduler, config, logger, epoch + 1);
+          graph, train_dataset, optimizer, criterion, scheduler, config, logger, epoch + 1, mem_logger);
 
       // validation phrase
       auto [avg_val_loss, avg_val_accuracy] =
-          validate_model(graph, val_dataset, criterion, config, &logger, epoch + 1);
+          validate_model(graph, val_dataset, criterion, config, logger, epoch + 1);
 
       if (avg_val_accuracy > best_val_accuracy) {
         best_val_accuracy = avg_val_accuracy;
@@ -446,7 +265,8 @@ static void train_val(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
 static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
                        const unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
-                       const unique_ptr<Scheduler> &scheduler, const TrainingConfig &config) {
+                       const unique_ptr<Scheduler> &scheduler, const TrainingConfig &config,
+                       std::unique_ptr<CsvLogger> &mem_logger) {
   ThreadWrapper thread_wrapper({config.num_threads});
 
   Tensor batch_data, batch_labels;
@@ -460,7 +280,7 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
   int grad_accum_counter = 0;
   const std::string artifact_name = training_artifact_name(config);
-  CsvLogger logger("tunx_" + artifact_name, config.log_dir, &config.log_mode);
+  MetricsLogger logger("tunx_" + artifact_name, config.log_dir, config.log_mode);
 
   train_dataset->reset();
   auto start_time = chrono::high_resolution_clock::now();
@@ -504,16 +324,9 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
       Tensor device_labels = to_device(batch_labels, model_device);
       TensorBundle inputs{{"input", device_input}};
 
-      std::ofstream mem_file;
       if (config.print_layer_memory_usage && steps == 0) {
-        std::string mem_csv_path = "tunx_" + artifact_name + "_" + csv_timestamp() + "_memory.csv";
-        if (!config.log_dir.empty()) {
-          mem_csv_path = config.log_dir + "/" + mem_csv_path;
-        }
-        mem_file.open(mem_csv_path);
-        if (mem_file.is_open()) {
-          mem_file << "layer,peak_usage_bytes,retained_bytes,unused_bytes,reserved_bytes\n";
-          graph.enable_memory_profiling(true, &mem_file);
+        if (mem_logger) {
+          graph.enable_memory_profiling(true, mem_logger.get());
         }
       }
 
@@ -521,32 +334,16 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
       if (config.print_layer_memory_usage && steps == 0) {
         graph.enable_memory_profiling(false);
+        if (mem_logger) mem_logger->flush();
       }
 
       Tensor predictions = outputs.get("output");
       float loss;
       criterion->compute_loss(predictions, device_labels, loss);
 
-      int corrects = compute_class_corrects(predictions, device_labels);
-
-      // Compute additional metrics before freeing predictions
-      std::unordered_map<std::string, double> train_step_metrics;
-      if (config.log_mode.log_precision) {
-        train_step_metrics["precision"] = compute_precision(predictions, device_labels);
-      }
-      if (config.log_mode.log_recall) {
-        train_step_metrics["recall"] = compute_recall(predictions, device_labels);
-      }
-      if (config.log_mode.log_f1_score) {
-        train_step_metrics["f1_score"] = compute_f1_score(predictions, device_labels);
-      }
-      if (config.log_mode.log_perplexity) {
-        train_step_metrics["perplexity"] = std::exp(static_cast<double>(loss));
-      }
-      if (config.log_mode.log_top_k_accuracy) {
-        train_step_metrics["top_k_accuracy"] =
-            compute_top_k_accuracy(predictions, device_labels, 5);
-      }
+      MetricsComputer metrics_comp(config.log_mode);
+      ComputedMetrics computed_metrics = metrics_comp.compute(predictions, device_labels, loss);
+      int corrects = computed_metrics.corrects;
 
       Tensor loss_gradient = Tensor(predictions.shape(), batch_data.dtype(), mem_pool);
       criterion->compute_gradient(predictions, device_labels, loss_gradient);
@@ -576,26 +373,17 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
       double batch_acc_pct = corrects * 100.0 / num_samples;
 
       // Log batch metrics for benchmarking.
-      {
-        if (config.log_mode.log_loss) {
-          train_step_metrics["loss"] = loss;
-        }
-        if (config.log_mode.log_accuracy) {
-          train_step_metrics["accuracy_pct"] = batch_acc_pct;
-        }
-        train_step_metrics["time_ms"] = batch_duration.count();
-
-        logger.log_train_step(1, steps, train_step_metrics);
-      }
+      computed_metrics.time_ms = batch_duration.count();
+      logger.log_train_step(1, steps, computed_metrics);
 
       if (steps % config.progress_print_interval == 0) {
         cout << "Batch ID: " << steps << ", Batch's Loss: " << fixed << setprecision(4) << loss
              << ", Batch's Accuracy: " << setprecision(2) << batch_acc_pct << "%";
-        if (config.log_mode.log_f1_score && train_step_metrics.count("f1_score")) {
-          cout << ", F1: " << setprecision(4) << train_step_metrics["f1_score"];
+        if (config.log_mode.log_f1_score && computed_metrics.f1_score) {
+          cout << ", F1: " << setprecision(4) << *computed_metrics.f1_score;
         }
-        if (config.log_mode.log_perplexity && train_step_metrics.count("perplexity")) {
-          cout << ", PPL: " << setprecision(2) << train_step_metrics["perplexity"];
+        if (config.log_mode.log_perplexity && computed_metrics.perplexity) {
+          cout << ", PPL: " << setprecision(2) << *computed_metrics.perplexity;
         }
         cout << ", Batch Time: " << batch_duration.count() << "ms" << endl;
       }
@@ -636,16 +424,27 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
 
   bool is_val = config.max_steps == -1;
 
+  std::unique_ptr<CsvLogger> mem_logger;
+  if (config.print_layer_memory_usage) {
+    std::string artifact_name = training_artifact_name(config);
+    std::vector<std::string> headers = {"layer", "peak_usage_bytes", "retained_bytes", "unused_bytes", "reserved_bytes"};
+    std::string mem_csv_path = "tunx_" + artifact_name + "_" + csv_timestamp() + "_memory.csv";
+    if (!config.log_dir.empty()) {
+      mem_csv_path = config.log_dir + "/" + mem_csv_path;
+    }
+    mem_logger = std::make_unique<CsvLogger>("memory", mem_csv_path, headers);
+  }
+
   if (is_val) {
-    train_val(graph, train_dataset, val_dataset, optimizer, criterion, scheduler, config);
+    train_val(graph, train_dataset, val_dataset, optimizer, criterion, scheduler, config, mem_logger);
   } else {
-    train_step(graph, train_dataset, optimizer, criterion, scheduler, config);
+    train_step(graph, train_dataset, optimizer, criterion, scheduler, config, mem_logger);
   }
 }
 
-Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
-                      const unique_ptr<Loss> &criterion, const TrainingConfig &config,
-                      CsvLogger *logger, int epoch) {
+static Result validate_model_impl(Graph &graph, unique_ptr<Dataset> &val_dataset,
+                                  const unique_ptr<Loss> &criterion, const TrainingConfig &config,
+                                  MetricsLogger *logger, int epoch) {
   Tensor batch_data, batch_labels;
 
   graph.set_mode(ExecutionMode::EVAL);
@@ -667,37 +466,15 @@ Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
     float loss;
     criterion->compute_loss(predictions, device_labels, loss);
     val_loss += loss;
-    int batch_corrects = compute_class_corrects(predictions, device_labels);
+    
+    MetricsComputer metrics_comp(config.log_mode);
+    ComputedMetrics computed_metrics = metrics_comp.compute(predictions, device_labels, loss);
+    int batch_corrects = computed_metrics.corrects;
     val_corrects += batch_corrects;
     ++val_batches;
 
     if (logger) {
-      std::unordered_map<std::string, double> metrics;
-      double batch_acc_pct = batch_corrects / static_cast<double>(config.batch_size) * 100.0;
-
-      if (config.log_mode.log_loss) {
-        metrics["loss"] = loss;
-      }
-      if (config.log_mode.log_accuracy) {
-        metrics["accuracy_pct"] = batch_acc_pct;
-      }
-      if (config.log_mode.log_precision) {
-        metrics["precision"] = compute_precision(predictions, device_labels);
-      }
-      if (config.log_mode.log_recall) {
-        metrics["recall"] = compute_recall(predictions, device_labels);
-      }
-      if (config.log_mode.log_f1_score) {
-        metrics["f1_score"] = compute_f1_score(predictions, device_labels);
-      }
-      if (config.log_mode.log_perplexity) {
-        metrics["perplexity"] = std::exp(static_cast<double>(loss));
-      }
-      if (config.log_mode.log_top_k_accuracy) {
-        metrics["top_k_accuracy"] = compute_top_k_accuracy(predictions, device_labels, 5);
-      }
-
-      logger->log_val_step(epoch, val_batches, metrics);
+      logger->log_val_step(epoch, val_batches, computed_metrics);
     }
   }
 
@@ -705,6 +482,17 @@ Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
   double avg_val_accuracy = val_corrects / val_dataset->size();
 
   return {avg_val_loss, avg_val_accuracy};
+}
+
+Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
+                      const unique_ptr<Loss> &criterion, const TrainingConfig &config,
+                      MetricsLogger &logger, int epoch) {
+  return validate_model_impl(graph, val_dataset, criterion, config, &logger, epoch);
+}
+
+Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
+                      const unique_ptr<Loss> &criterion, const TrainingConfig &config) {
+  return validate_model_impl(graph, val_dataset, criterion, config, nullptr, 0);
 }
 
 }  // namespace tunx

@@ -13,7 +13,7 @@
 
 #include "coordinator.hpp"
 #include "data_loading/batch_prefetcher.hpp"
-#include "nn/csv_logger.hpp"
+#include "common/csv_logger.hpp"
 #include "nn/train.hpp"
 #include "tensor/ops.hpp"
 #include "threading/thread_wrapper.hpp"
@@ -103,25 +103,29 @@ inline Result train_semi_async_epoch(Coordinator &coordinator,
       double acc_pct =
           total_samples > 0 ? static_cast<double>(total_corrects) / total_samples * 100.0 : 0.0;
 
-      std::unordered_map<std::string, double> metrics;
+      std::unordered_map<std::string, std::string> metrics;
+      metrics["epoch"] = std::to_string(epoch);
+      metrics["step"] = std::to_string(batch_index + 1);
+      metrics["timestamp_ms"] = std::to_string(get_timestamp_ms());
+
       if (config.log_mode.log_loss) {
         // Keep legacy "loss" as the per-batch loss for backward compatibility.
         const double batch_loss = static_cast<double>(loss);
         const double avg_loss = (batch_index + 1) > 0 ? static_cast<double>(total_loss) /
                                                             static_cast<double>(batch_index + 1)
                                                       : batch_loss;
-        metrics["loss"] = batch_loss;
-        metrics["batch_loss"] = batch_loss;
-        metrics["avg_loss"] = avg_loss;
-        metrics["perplexity"] = std::exp(batch_loss);
-        metrics["avg_perplexity"] = std::exp(avg_loss);
+        metrics["loss"] = fmt::format("{:.6f}", batch_loss);
+        metrics["batch_loss"] = fmt::format("{:.6f}", batch_loss);
+        metrics["avg_loss"] = fmt::format("{:.6f}", avg_loss);
+        metrics["perplexity"] = fmt::format("{:.6f}", std::exp(batch_loss));
+        metrics["avg_perplexity"] = fmt::format("{:.6f}", std::exp(avg_loss));
       }
       if (config.log_mode.log_accuracy) {
-        metrics["accuracy_pct"] = acc_pct;
+        metrics["accuracy_pct"] = fmt::format("{:.6f}", acc_pct);
       }
-      metrics["time_ms"] = time_ms;
+      metrics["time_ms"] = std::to_string(time_ms);
 
-      logger.log_train_step(epoch, static_cast<int>(batch_index + 1), metrics);
+      logger.log(metrics);
     }
 
     if ((batch_index + 1) % config.progress_print_interval == 0) {
@@ -177,18 +181,22 @@ inline Result validate_semi_async_epoch(Coordinator &coordinator,
 
     // Log per-batch validation metrics
     {
-      std::unordered_map<std::string, double> metrics;
+      std::unordered_map<std::string, std::string> metrics;
+      metrics["epoch"] = std::to_string(epoch);
+      metrics["step"] = std::to_string(val_batches);
+      metrics["timestamp_ms"] = std::to_string(get_timestamp_ms());
+
       if (config.log_mode.log_loss) {
-        metrics["loss"] = static_cast<double>(val_loss);
+        metrics["loss"] = fmt::format("{:.6f}", static_cast<double>(val_loss));
       }
       if (config.log_mode.log_accuracy) {
         double batch_acc_pct = val_correct / static_cast<double>(config.batch_size) * 100.0;
-        metrics["accuracy_pct"] = batch_acc_pct;
+        metrics["accuracy_pct"] = fmt::format("{:.6f}", batch_acc_pct);
       }
       if (config.log_mode.log_perplexity) {
-        metrics["perplexity"] = std::exp(static_cast<double>(val_loss));
+        metrics["perplexity"] = fmt::format("{:.6f}", std::exp(static_cast<double>(val_loss)));
       }
-      logger.log_val_step(epoch, val_batches, metrics);
+      logger.log(metrics);
     }
   }
 
@@ -285,25 +293,29 @@ inline void train_semi_async_step(Coordinator &coordinator, std::unique_ptr<Data
       double acc_pct =
           class_samples > 0 ? static_cast<double>(corrects) / class_samples * 100.0 : 0.0;
 
-      std::unordered_map<std::string, double> metrics;
+      std::unordered_map<std::string, std::string> metrics;
+      metrics["epoch"] = "1";
+      metrics["step"] = std::to_string(step + 1);
+      metrics["timestamp_ms"] = std::to_string(get_timestamp_ms());
+
       if (config.log_mode.log_loss) {
         const double batch_loss = static_cast<double>(loss);
 
-        metrics["loss"] = batch_loss;
-        metrics["batch_loss"] = batch_loss;
-        metrics["avg_loss"] = avg_loss;
+        metrics["loss"] = fmt::format("{:.6f}", batch_loss);
+        metrics["batch_loss"] = fmt::format("{:.6f}", batch_loss);
+        metrics["avg_loss"] = fmt::format("{:.6f}", avg_loss);
 
-        metrics["perplexity"] = ppl;
-        metrics["avg_perplexity"] = avg_ppl;
+        metrics["perplexity"] = fmt::format("{:.6f}", ppl);
+        metrics["avg_perplexity"] = fmt::format("{:.6f}", avg_ppl);
       }
 
       if (config.log_mode.log_accuracy) {
-        metrics["accuracy_pct"] = acc_pct;
+        metrics["accuracy_pct"] = fmt::format("{:.6f}", acc_pct);
       }
 
-      metrics["time_ms"] = time_ms;
+      metrics["time_ms"] = std::to_string(time_ms);
 
-      logger.log_train_step(1, step + 1, metrics);
+      logger.log(metrics);
     }
 
     if ((step + 1) % config.progress_print_interval == 0) {
@@ -328,7 +340,26 @@ inline void train_model(Coordinator &coordinator, std::unique_ptr<Dataset> &trai
                         TrainingConfig config = TrainingConfig()) {
   coordinator.start_profiling();
   ThreadWrapper thread_wrapper({config.num_threads});
-  CsvLogger logger("tunx_" + config.model_name, config.log_dir, &config.log_mode);
+  
+  std::string ts = csv_timestamp();
+  std::string batch_path = config.log_dir + "/" + config.model_name + "_" + ts + "_batch.csv";
+  std::string val_path = config.log_dir + "/" + config.model_name + "_" + ts + "_val.csv";
+  std::string epoch_path = config.log_dir + "/" + config.model_name + "_" + ts + "_epoch.csv";
+
+  std::vector<std::string> train_step_metrics = {"epoch", "step", "timestamp_ms", "time_ms"};
+  if (config.log_mode.log_loss) { train_step_metrics.push_back("loss"); train_step_metrics.push_back("batch_loss"); train_step_metrics.push_back("avg_loss"); train_step_metrics.push_back("perplexity"); train_step_metrics.push_back("avg_perplexity"); }
+  if (config.log_mode.log_accuracy) train_step_metrics.push_back("accuracy_pct");
+  CsvLogger train_logger("train_batch", batch_path, train_step_metrics);
+
+  std::vector<std::string> val_step_metrics = {"epoch", "step", "timestamp_ms"};
+  if (config.log_mode.log_loss) { val_step_metrics.push_back("loss"); val_step_metrics.push_back("perplexity"); }
+  if (config.log_mode.log_accuracy) val_step_metrics.push_back("accuracy_pct");
+  CsvLogger val_logger("val_batch", val_path, val_step_metrics);
+
+  std::vector<std::string> epoch_metrics = {"epoch", "timestamp_ms", "epoch_total_time_ms", "train_time_ms", "val_time_ms"};
+  if (config.log_mode.log_loss) { epoch_metrics.push_back("train_loss"); epoch_metrics.push_back("val_loss"); }
+  if (config.log_mode.log_accuracy) { epoch_metrics.push_back("train_accuracy_pct"); epoch_metrics.push_back("val_accuracy_pct"); }
+  CsvLogger epoch_logger("epoch", epoch_path, epoch_metrics);
 
   const bool use_epoch_mode =
       (config.train_mode == "epoch") || (config.train_mode == "auto" && config.max_steps == -1);
@@ -342,12 +373,12 @@ inline void train_model(Coordinator &coordinator, std::unique_ptr<Dataset> &trai
 
         auto train_start = std::chrono::high_resolution_clock::now();
         auto [train_loss, train_acc] = train_semi_async_epoch(coordinator, train_dataset, criterion,
-                                                              config, logger, epoch + 1);
+                                                              config, train_logger, epoch + 1);
         auto train_end = std::chrono::high_resolution_clock::now();
 
         auto val_start = std::chrono::high_resolution_clock::now();
         auto [val_loss, val_acc] = validate_semi_async_epoch(coordinator, val_dataset, criterion,
-                                                             config, logger, epoch + 1);
+                                                             config, val_logger, epoch + 1);
         auto val_end = std::chrono::high_resolution_clock::now();
 
         auto epoch_total_end = std::chrono::high_resolution_clock::now();
@@ -364,33 +395,37 @@ inline void train_model(Coordinator &coordinator, std::unique_ptr<Dataset> &trai
                   << " ms | val_time=" << val_time_ms << " ms | total_time=" << epoch_total_time_ms
                   << " ms" << std::endl;
 
-        std::unordered_map<std::string, double> metrics;
+        std::unordered_map<std::string, std::string> metrics;
+        metrics["epoch"] = std::to_string(epoch + 1);
+        metrics["timestamp_ms"] = std::to_string(get_timestamp_ms());
         if (config.log_mode.log_loss) {
-          metrics["train_loss"] = train_loss;
-          metrics["val_loss"] = val_loss;
+          metrics["train_loss"] = fmt::format("{:.6f}", train_loss);
+          metrics["val_loss"] = fmt::format("{:.6f}", val_loss);
         }
         if (config.log_mode.log_accuracy) {
-          metrics["train_accuracy_pct"] = train_acc;
-          metrics["val_accuracy_pct"] = val_acc;
+          metrics["train_accuracy_pct"] = fmt::format("{:.6f}", train_acc);
+          metrics["val_accuracy_pct"] = fmt::format("{:.6f}", val_acc);
         }
 
-        metrics["train_time_ms"] = static_cast<double>(train_time_ms);
-        metrics["val_time_ms"] = static_cast<double>(val_time_ms);
-        metrics["epoch_total_time_ms"] = static_cast<double>(epoch_total_time_ms);
+        metrics["train_time_ms"] = std::to_string(train_time_ms);
+        metrics["val_time_ms"] = std::to_string(val_time_ms);
+        metrics["epoch_total_time_ms"] = std::to_string(epoch_total_time_ms);
 
-        logger.log_epoch(epoch + 1, metrics);
+        epoch_logger.log(metrics);
       }
     } else {
       TrainingConfig batch_config = config;
       if (batch_config.max_steps <= 0) {
         batch_config.max_steps = static_cast<int64>(train_dataset->size());
       }
-      train_semi_async_step(coordinator, train_dataset, criterion, batch_config, logger);
+      train_semi_async_step(coordinator, train_dataset, criterion, batch_config, train_logger);
     }
 
     coordinator.fetch_profiling();
     coordinator.print_logs();
-    logger.flush();
+    train_logger.flush();
+    val_logger.flush();
+    epoch_logger.flush();
   });
 }
 
