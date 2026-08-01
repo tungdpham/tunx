@@ -20,3 +20,5 @@ create_executable(gpt2_inference.cpp LIBS tunx_lib)
 
 # Test executables
 create_executable(graph_api_v2_test.cpp LIBS tunx_lib)
+
+create_executable(alloc_simulation.cpp)
