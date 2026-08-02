@@ -335,8 +335,9 @@ public:
     return peak;
   }
 
-  void rank_execution_orders(
+  std::map<std::string, double> rank_execution_orders(
       const std::vector<std::pair<std::string, std::vector<std::string>>>& named_orders) {
+    std::map<std::string, double> efficiencies;
     std::cout << "=== Execution Order Memory Efficiency Ranking ===\n";
 
     struct OrderResult {
@@ -374,16 +375,17 @@ public:
     std::sort(results.begin(), results.end(),
               [](const OrderResult& a, const OrderResult& b) { return a.peak_mem < b.peak_mem; });
 
-    if (results.empty()) return;
+    if (results.empty()) return efficiencies;
 
     size_t best_peak = results.front().peak_mem;
 
     for (size_t i = 0; i < results.size(); ++i) {
       const auto& res = results[i];
+      double efficiency = 100.0;
       std::cout << i + 1 << ". " << res.name << " Order\n";
       std::cout << "   Peak Memory: " << res.peak_mem << " bytes\n";
       if (res.peak_mem > best_peak) {
-        double efficiency = 100.0 * (static_cast<double>(best_peak) / res.peak_mem);
+        efficiency = 100.0 * (static_cast<double>(best_peak) / res.peak_mem);
         double savings = 100.0 * (1.0 - static_cast<double>(best_peak) / res.peak_mem);
         std::cout << "   Compared to best: +" << (res.peak_mem - best_peak) << " bytes overhead ("
                   << std::fixed << std::setprecision(1) << savings << "% potential savings)\n";
@@ -392,6 +394,7 @@ public:
       } else {
         std::cout << "   Compared to best: Optimal (100.0% efficiency)\n";
       }
+      efficiencies[res.name] = efficiency;
       std::cout << "   Order: ";
       for (size_t j = 0; j < res.order.size(); j++) {
         std::cout << res.order[j];
@@ -399,6 +402,7 @@ public:
       }
       std::cout << "\n\n";
     }
+    return efficiencies;
   }
 
   std::vector<std::string> find_simple_execution_order() {
@@ -431,73 +435,174 @@ public:
       }
     }
 
-    std::map<std::string, int> in_degree;
+    struct MacroNode {
+      std::string id;
+      std::vector<std::string> ops;
+      long long a;
+      long long b;
+    };
+
+    std::map<std::string, MacroNode> macros;
+    std::map<std::string, std::set<std::string>> macro_deps;
+    std::map<std::string, std::set<std::string>> macro_dependents;
+
     for (auto& id : op_ids) {
-      in_degree[id] = static_cast<int>(deps[id].size());
+      auto& node = op_nodes_.at(id);
+      long long all_outputs = 0;
+      for (auto* t : node.outputs()) {
+        all_outputs += t->size();
+      }
+
+      long long workspace = node.workspace_req();
+      long long total_memory_for_execution = all_outputs + workspace;
+
+      long long memory_generate = all_outputs;
+      long long memory_consumes = 0;
+      for (auto* t : node.inputs()) {
+        if (t->out_ref_count() == 1) {
+          memory_consumes += t->size();
+        }
+      }
+
+      MacroNode mn;
+      mn.id = id;
+      mn.ops = {id};
+      mn.a = total_memory_for_execution;
+      mn.b = memory_generate - memory_consumes;
+      macros[id] = mn;
+
+      macro_deps[id] = deps[id];
+      macro_dependents[id] = dependents[id];
     }
 
-    std::vector<std::string> order;
-    std::set<std::string> executed;
+    auto compare = [](const MacroNode& i, const MacroNode& j) {
+      long long cost_ij = std::max(i.a, i.b + j.a);
+      long long cost_ji = std::max(j.a, j.b + i.a);
+      if (cost_ij != cost_ji) return cost_ij < cost_ji;
+      if (i.b != j.b) return i.b < j.b;
+      return i.a < j.a;
+    };
+
+    int next_macro_id = 0;
+    while (true) {
+      std::string best_Y = "";
+      std::string best_X = "";
+
+      for (auto& [Y_id, Y_node] : macros) {
+        if (macro_deps[Y_id].size() == 1) {
+          std::string X_id = *macro_deps[Y_id].begin();
+          auto& X_node = macros[X_id];
+
+          if (compare(Y_node, X_node)) {
+            if (best_Y == "" || compare(Y_node, macros[best_Y])) {
+              best_Y = Y_id;
+              best_X = X_id;
+            }
+          }
+        }
+      }
+
+      if (best_Y == "") break;
+
+      std::string XY_id = "macro_" + std::to_string(next_macro_id++);
+      MacroNode XY;
+      XY.id = XY_id;
+      XY.ops = macros[best_X].ops;
+      XY.ops.insert(XY.ops.end(), macros[best_Y].ops.begin(), macros[best_Y].ops.end());
+      XY.a = std::max(macros[best_X].a, macros[best_X].b + macros[best_Y].a);
+      XY.b = macros[best_X].b + macros[best_Y].b;
+
+      macros[XY_id] = XY;
+
+      macro_deps[XY_id] = macro_deps[best_X];
+      macro_dependents[XY_id] = macro_dependents[best_X];
+      macro_dependents[XY_id].erase(best_Y);
+      for (auto& child : macro_dependents[best_Y]) {
+        macro_dependents[XY_id].insert(child);
+      }
+
+      for (auto& parent : macro_deps[best_X]) {
+        macro_dependents[parent].erase(best_X);
+        macro_dependents[parent].insert(XY_id);
+      }
+      for (auto& child : macro_dependents[best_X]) {
+        if (child != best_Y) {
+          macro_deps[child].erase(best_X);
+          macro_deps[child].insert(XY_id);
+        }
+      }
+      for (auto& child : macro_dependents[best_Y]) {
+        macro_deps[child].erase(best_Y);
+        macro_deps[child].insert(XY_id);
+      }
+
+      macros.erase(best_X);
+      macros.erase(best_Y);
+      macro_deps.erase(best_X);
+      macro_deps.erase(best_Y);
+      macro_dependents.erase(best_X);
+      macro_dependents.erase(best_Y);
+    }
+
+    std::vector<std::string> final_order;
+    std::set<std::string> executed_macros;
+    std::vector<std::string> ready_macros;
+
+    for (auto& [id, deps_set] : macro_deps) {
+      if (deps_set.empty()) {
+        ready_macros.push_back(id);
+      }
+    }
+
+    while (final_order.size() < op_ids.size()) {
+      if (ready_macros.empty()) {
+        throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
+      }
+
+      std::string best_macro = ready_macros[0];
+      int best_idx = 0;
+      for (size_t i = 1; i < ready_macros.size(); ++i) {
+        if (compare(macros[ready_macros[i]], macros[best_macro])) {
+          best_macro = ready_macros[i];
+          best_idx = static_cast<int>(i);
+        }
+      }
+
+      executed_macros.insert(best_macro);
+      ready_macros.erase(ready_macros.begin() + best_idx);
+
+      for (auto& op : macros[best_macro].ops) {
+        final_order.push_back(op);
+      }
+
+      for (auto& child : macro_dependents[best_macro]) {
+        bool ready = true;
+        for (auto& parent : macro_deps[child]) {
+          if (!executed_macros.count(parent)) {
+            ready = false;
+            break;
+          }
+        }
+        if (ready) {
+          ready_macros.push_back(child);
+        }
+      }
+    }
 
     for (auto* act : inputs_) {
       act->allocate_data();
     }
-
-    while (order.size() < op_ids.size()) {
-      std::string best_op = "";
-      long long best_score = std::numeric_limits<long long>::lowest();
-
-      for (auto& id : op_ids) {
-        if (executed.count(id)) continue;
-        if (in_degree[id] != 0) continue;
-
-        auto& node = op_nodes_.at(id);
-
-        long long all_outputs = 0;
-        for (auto* t : node.outputs()) {
-          all_outputs += t->size();
-        }
-
-        long long workspace = node.workspace_req();
-        long long total_memory_for_execution = all_outputs + workspace;
-
-        long long memory_generate = all_outputs;
-        long long memory_consumes = 0;
-        for (auto* t : node.inputs()) {
-          if (t->out_ref_count() == 1) {
-            memory_consumes += t->size();
-          }
-        }
-
-        long long net_memory_generation = memory_generate - memory_consumes;
-        long long score = total_memory_for_execution - net_memory_generation;
-
-        if (best_op == "" || score > best_score) {
-          best_score = score;
-          best_op = id;
-        }
-      }
-
-      if (best_op == "") {
-        throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
-      }
-
-      executed.insert(best_op);
-      order.push_back(best_op);
-      for (auto& dep : dependents[best_op]) {
-        in_degree[dep]--;
-      }
-      op_nodes_.at(best_op).run();
+    for (auto& op : final_order) {
+      op_nodes_.at(op).run();
     }
-
-    for (auto it = order.rbegin(); it != order.rend(); ++it) {
+    for (auto it = final_order.rbegin(); it != final_order.rend(); ++it) {
       op_nodes_.at(*it).undo_run();
     }
     for (auto* act : inputs_) {
       act->deallocate_data();
     }
 
-    return order;
+    return final_order;
   }
 
   std::vector<std::string> find_improved_execution_order() {
@@ -945,6 +1050,42 @@ public:
 
     return best_order;
   }
+
+  void export_to_dot(const std::string& filename) const {
+    std::ofstream out(filename);
+    out << "digraph ComputationGraph {\n";
+    out << "  rankdir=LR;\n";
+
+    // Draw Operation Nodes
+    out << "  node [shape=box, style=filled, fillcolor=lightgray, fontname=\"Arial\"];\n";
+    for (const auto& [id, op] : op_nodes_) {
+      out << "  \"" << id << "\" [label=\"" << id << "\\nWorkspace: " << op.workspace_req()
+          << "\"];\n";
+    }
+
+    // Draw Tensor/Activation Nodes
+    out << "  node [shape=ellipse, style=filled, fillcolor=lightblue];\n";
+    std::set<std::string> drawn_tensors;
+    auto draw_tensor = [&](const ActNode* t) {
+      if (drawn_tensors.insert(t->uuid()).second) {
+        out << "  \"" << t->uuid() << "\" [label=\"" << t->uuid() << "\\nSize: " << t->size()
+            << "\"];\n";
+      }
+    };
+
+    // Connect Nodes
+    for (const auto& [id, op] : op_nodes_) {
+      for (auto* t : op.inputs()) {
+        draw_tensor(t);
+        out << "  \"" << t->uuid() << "\" -> \"" << id << "\";\n";
+      }
+      for (auto* t : op.outputs()) {
+        draw_tensor(t);
+        out << "  \"" << id << "\" -> \"" << t->uuid() << "\";\n";
+      }
+    }
+    out << "}\n";
+  }
 };
 
 size_t random_act_size() {
@@ -1068,34 +1209,83 @@ Graph random_graph(int depth, int& node_counter) {
   return g;
 }
 
+Graph random_m_sequences_graph(int m, int length, int& node_counter) {
+  Graph g;
+  for (int i = 0; i < m; ++i) {
+    auto input = g.add_act("input_" + std::to_string(i), random_act_size());
+    g.set_input_tensors(input);
+
+    ActNode* curr = input;
+    for (int j = 0; j < length; ++j) {
+      std::string prefix = "seq_" + std::to_string(i) + "_" + std::to_string(j);
+      auto next_act = g.add_act(prefix, random_act_size());
+      g.add_node(prefix + "_op", random_ws_size(), {curr}, {next_act});
+      curr = next_act;
+    }
+    g.set_output_tensors(curr);
+  }
+  return g;
+}
+
 signed main() {
   srand(static_cast<unsigned int>(time(nullptr)));
 
   int trials;
   std::cin >> trials;
+  int original_trials = trials;
+  std::map<std::string, std::vector<double>> all_efficiencies;
 
   while (trials--) {
     global_mem = 0;
     max_global_mem = 0;
 
     int node_counter = 0;
-    Graph g = random_graph(7, node_counter);
+    // Graph g = random_graph(7, node_counter);
+    int m = 3;       // Number of independent sequences
+    int length = 5;  // Length of each sequence
+    Graph g = random_m_sequences_graph(m, length, node_counter);
 
     g.print_graph();
+    g.export_to_dot("graph.dot");
 
     auto best_order = g.find_minimum_memory_execution_order();
 
     auto simple_order = g.find_simple_execution_order();
     auto improved_order = g.find_improved_execution_order();
 
-    g.rank_execution_orders(
+    auto effs = g.rank_execution_orders(
         {{"BEST", best_order}, {"SIMPLE", simple_order}, {"IMPROVED", improved_order}});
+    for (const auto& [name, eff] : effs) {
+      all_efficiencies[name].push_back(eff);
+    }
 
-    // if (!best_order.empty()) {
-    //   g.simulate_and_print("BEST", best_order);
-    // }
-    // g.simulate_and_print("SIMPLE", simple_order);
-    // g.simulate_and_print("IMPROVED", improved_order);
+    g.simulate_and_print("BEST", best_order);
+    g.simulate_and_print("SIMPLE", simple_order);
+    g.simulate_and_print("IMPROVED", improved_order);
+  }
+
+  std::cout << "=== Efficiency Overview (" << original_trials << " trials) ===\n";
+  for (auto& [name, effs] : all_efficiencies) {
+    if (effs.empty()) continue;
+    std::sort(effs.begin(), effs.end());
+    double sum = 0;
+    for (double e : effs) sum += e;
+    double avg = sum / effs.size();
+    double worst = effs.front();
+    double best = effs.back();
+
+    // Percentiles (sorted ascending, so index 0 is worst)
+    double p10 = effs[effs.size() * 10 / 100];
+    double p50 = effs[effs.size() * 50 / 100];
+    double p90 = effs[effs.size() * 90 / 100];
+
+    std::cout << name << " Order:\n";
+    std::cout << "  Average: " << std::fixed << std::setprecision(2) << avg << "%\n";
+    std::cout << "  Worst:   " << std::fixed << std::setprecision(2) << worst << "%\n";
+    std::cout << "  p10:     " << std::fixed << std::setprecision(2) << p10 << "%\n";
+    std::cout << "  Median:  " << std::fixed << std::setprecision(2) << p50 << "%\n";
+    std::cout << "  p90:     " << std::fixed << std::setprecision(2) << p90 << "%\n";
+    std::cout << "  Best:    " << std::fixed << std::setprecision(2) << best << "%\n\n";
   }
 
   return 0;
