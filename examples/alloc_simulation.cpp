@@ -605,204 +605,6 @@ public:
     return final_order;
   }
 
-  std::vector<std::string> find_improved_execution_order() {
-    std::vector<std::string> op_ids;
-    for (auto& [id, _] : op_nodes_) {
-      op_ids.push_back(id);
-    }
-
-    std::map<std::string, std::string> tensor_producer;
-    for (auto& [op_id, node] : op_nodes_) {
-      for (auto* t : node.outputs()) {
-        tensor_producer[t->uuid()] = op_id;
-      }
-    }
-
-    std::map<std::string, std::set<std::string>> deps;
-    std::map<std::string, std::set<std::string>> dependents;
-    for (auto& [op_id, node] : op_nodes_) {
-      deps[op_id] = {};
-      for (auto* t : node.inputs()) {
-        auto it = tensor_producer.find(t->uuid());
-        if (it != tensor_producer.end()) {
-          deps[op_id].insert(it->second);
-        }
-      }
-    }
-    for (auto& [op_id, dep_set] : deps) {
-      for (auto& dep : dep_set) {
-        dependents[dep].insert(op_id);
-      }
-    }
-
-    // Build a map: tensor uuid -> list of consumer op ids
-    std::map<std::string, std::vector<std::string>> tensor_consumers;
-    for (auto& [op_id, node] : op_nodes_) {
-      for (auto* t : node.inputs()) {
-        tensor_consumers[t->uuid()].push_back(op_id);
-      }
-    }
-
-    std::map<std::string, int> in_degree;
-    for (auto& id : op_ids) {
-      in_degree[id] = static_cast<int>(deps[id].size());
-    }
-
-    // Compute the total output memory footprint of the subtree rooted at each op.
-    // This estimates how much additional live memory a branch will eventually create.
-    // We sum the output tensor sizes of all ops transitively downstream (including self).
-    std::map<std::string, long long> subtree_mem;
-    // Also compute critical_path: the longest path (in # ops) from this op to any
-    // terminal op (op with no dependents). Shorter = closer to completing a branch.
-    std::map<std::string, int> critical_path;
-    {
-      std::map<std::string, int> tmp_in_degree = in_degree;
-      std::queue<std::string> q;
-      std::vector<std::string> topo_order;
-      for (auto& [id, deg] : tmp_in_degree) {
-        if (deg == 0) q.push(id);
-      }
-      while (!q.empty()) {
-        auto curr = q.front();
-        q.pop();
-        topo_order.push_back(curr);
-        for (auto& next : dependents[curr]) {
-          tmp_in_degree[next]--;
-          if (tmp_in_degree[next] == 0) q.push(next);
-        }
-      }
-
-      // Initialize each op's subtree_mem with its own output sizes + workspace
-      for (auto& id : op_ids) {
-        auto& node = op_nodes_.at(id);
-        long long mem = static_cast<long long>(node.workspace_req());
-        for (auto* t : node.outputs()) {
-          mem += static_cast<long long>(t->size());
-        }
-        subtree_mem[id] = mem;
-        critical_path[id] = 1;
-      }
-      // Traverse in reverse topological order to accumulate
-      for (auto it = topo_order.rbegin(); it != topo_order.rend(); ++it) {
-        for (auto& dep : deps[*it]) {
-          subtree_mem[dep] += subtree_mem[*it];
-          critical_path[dep] = std::max(critical_path[dep], critical_path[*it] + 1);
-        }
-      }
-    }
-
-    std::vector<std::string> order;
-    std::set<std::string> executed;
-    // Track when each op was executed (order index) for recency scoring
-    std::map<std::string, int> execution_timestamp;
-
-    for (auto* act : inputs_) {
-      act->allocate_data();
-    }
-
-    while (order.size() < op_ids.size()) {
-      std::string best_op = "";
-      // Score tuple: lower is better
-      std::tuple<long long, long long, long long> best_score;
-      bool first = true;
-
-      for (auto& id : op_ids) {
-        if (executed.count(id)) continue;
-        if (in_degree[id] != 0) continue;
-
-        auto& node = op_nodes_.at(id);
-
-        // Compute how much memory this op frees (inputs at last ref)
-        long long freed_input_sizes = 0;
-        for (auto* t : node.inputs()) {
-          if (t->out_ref_count() == 1) {
-            freed_input_sizes += static_cast<long long>(t->size());
-          }
-        }
-
-        long long output_sizes = 0;
-        for (auto* t : node.outputs()) {
-          output_sizes += static_cast<long long>(t->size());
-        }
-
-        // Net memory delta: negative = frees memory, positive = consumes memory
-        long long net_delta = output_sizes - freed_input_sizes;
-
-        // Recency: when was the most recent producer of this op's inputs executed?
-        // Higher recency = this op is on the currently active branch.
-        // Lower recency = this op branches off from an older tensor.
-        // We NEGATE recency because lower score = better, and higher recency = better.
-        long long max_producer_time = -1;
-        for (auto& dep_id : deps[id]) {
-          auto it = execution_timestamp.find(dep_id);
-          if (it != execution_timestamp.end()) {
-            max_producer_time = std::max(max_producer_time, static_cast<long long>(it->second));
-          }
-        }
-        // For ops with no executed dependencies (roots), use -1
-        long long recency = -max_producer_time;  // negate: more recent = lower score = better
-
-        // Consumer urgency: how many downstream ops this would make ready
-        long long urgency_bonus = 0;
-        for (auto* t : node.outputs()) {
-          auto cit = tensor_consumers.find(t->uuid());
-          if (cit != tensor_consumers.end()) {
-            for (auto& consumer_id : cit->second) {
-              if (executed.count(consumer_id)) continue;
-              int remaining = in_degree[consumer_id];
-              if (deps[consumer_id].count(id)) {
-                remaining -= 1;
-              }
-              if (remaining == 0) {
-                urgency_bonus += 1000;
-              }
-            }
-          }
-        }
-
-        // Score: (recency, net_delta - urgency, subtree_mem)
-        //
-        // Primary: recency — continue the current active branch (depth-first)
-        //   Most recently produced inputs = most negative = best
-        //
-        // Secondary: net memory delta adjusted by urgency
-        //   Among ops at the same recency level, prefer those that free memory
-        //   and enable downstream consumers
-        //
-        // Tertiary: subtree memory (tiebreaker)
-        //   Among equal candidates, defer ops with larger downstream memory
-        auto score = std::make_tuple(recency, net_delta - urgency_bonus, subtree_mem[id]);
-
-        if (first || score < best_score) {
-          best_score = score;
-          best_op = id;
-          first = false;
-        }
-      }
-
-      if (best_op == "") {
-        throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
-      }
-
-      execution_timestamp[best_op] = static_cast<int>(order.size());
-      executed.insert(best_op);
-      order.push_back(best_op);
-      for (auto& dep : dependents[best_op]) {
-        in_degree[dep]--;
-      }
-      op_nodes_.at(best_op).run();
-    }
-
-    for (auto it = order.rbegin(); it != order.rend(); ++it) {
-      op_nodes_.at(*it).undo_run();
-    }
-    for (auto* act : inputs_) {
-      act->deallocate_data();
-    }
-
-    return order;
-  }
-
   // Optimized search for the execution order with minimum peak memory.
   // Uses branch-and-bound pruning, heuristic-guided candidate ordering,
   // bitmask memoization, and iterative DFS to avoid stack overflow.
@@ -1200,7 +1002,7 @@ Graph sample_graph() {
   return g;
 }
 
-Graph random_graph(int depth, int& node_counter) {
+Graph random_diamond_graph(int depth, int& node_counter) {
   Graph g;
   auto input = g.add_act("input", 10000);
   g.set_input_tensors(input);
@@ -1227,6 +1029,72 @@ Graph random_m_sequences_graph(int m, int length, int& node_counter) {
   return g;
 }
 
+void build_random_branching_dag(Graph& g, ActNode* input, int depth, int& node_counter) {
+  if (depth == 0) {
+    g.set_output_tensors(input);
+    return;
+  }
+
+  std::string prefix = "b" + std::to_string(depth) + "_" + std::to_string(node_counter++);
+  bool is_seq = (rand() % 3 > 0);
+
+  if (is_seq) {
+    auto next_act = g.add_act(prefix + "_seq", random_act_size());
+    g.add_node(prefix + "_seq_conv", random_ws_size(), {input}, {next_act});
+    build_random_branching_dag(g, next_act, depth - 1, node_counter);
+  } else {
+    int num_branches = rand() % 2 + 2;
+    for (int i = 0; i < num_branches; ++i) {
+      auto next_act = g.add_act(prefix + "_branch" + std::to_string(i), random_act_size());
+      g.add_node(prefix + "_conv" + std::to_string(i), random_ws_size(), {input}, {next_act});
+      build_random_branching_dag(g, next_act, depth - 1, node_counter);
+    }
+  }
+}
+
+Graph random_branching_graph(int depth, int& node_counter) {
+  Graph g;
+  auto input = g.add_act("input", random_act_size());
+  g.set_input_tensors(input);
+  build_random_branching_dag(g, input, depth, node_counter);
+  return g;
+}
+
+ActNode* build_random_joining_dag(Graph& g, int depth, int& node_counter) {
+  if (depth == 0) {
+    std::string prefix = "j" + std::to_string(depth) + "_" + std::to_string(node_counter++);
+    auto input = g.add_act(prefix + "_input", random_act_size());
+    g.set_input_tensors(input);
+    return input;
+  }
+
+  std::string prefix = "j" + std::to_string(depth) + "_" + std::to_string(node_counter++);
+  bool is_seq = (rand() % 2 == 0);
+
+  if (is_seq) {
+    auto input = build_random_joining_dag(g, depth - 1, node_counter);
+    auto output = g.add_act(prefix + "_seq_out", random_act_size());
+    g.add_node(prefix + "_seq_conv", random_ws_size(), {input}, {output});
+    return output;
+  } else {
+    int num_joining = rand() % 3 + 2;
+    std::vector<ActNode*> inputs;
+    for (int i = 0; i < num_joining; ++i) {
+      inputs.push_back(build_random_joining_dag(g, depth - 1, node_counter));
+    }
+    auto output = g.add_act(prefix + "_merge", random_act_size());
+    g.add_node(prefix + "_add", random_ws_size(), inputs, {output});
+    return output;
+  }
+}
+
+Graph random_joining_graph(int depth, int& node_counter) {
+  Graph g;
+  auto output = build_random_joining_dag(g, depth, node_counter);
+  g.set_output_tensors(output);
+  return g;
+}
+
 signed main() {
   srand(static_cast<unsigned int>(time(nullptr)));
 
@@ -1240,10 +1108,12 @@ signed main() {
     max_global_mem = 0;
 
     int node_counter = 0;
-    // Graph g = random_graph(7, node_counter);
-    int m = 3;       // Number of independent sequences
-    int length = 5;  // Length of each sequence
-    Graph g = random_m_sequences_graph(m, length, node_counter);
+    // Graph g = random_diamond_graph(6, node_counter);
+    // Graph g = random_branching_graph(3, node_counter);
+    Graph g = random_joining_graph(3, node_counter);
+    // int m = 4;        // Number of independent sequences
+    // int length = 10;  // Length of each sequence
+    // Graph g = random_m_sequences_graph(m, length, node_counter);
 
     g.print_graph();
     g.export_to_dot("graph.dot");
@@ -1251,17 +1121,14 @@ signed main() {
     auto best_order = g.find_minimum_memory_execution_order();
 
     auto simple_order = g.find_simple_execution_order();
-    auto improved_order = g.find_improved_execution_order();
 
-    auto effs = g.rank_execution_orders(
-        {{"BEST", best_order}, {"SIMPLE", simple_order}, {"IMPROVED", improved_order}});
+    auto effs = g.rank_execution_orders({{"BEST", best_order}, {"SIMPLE", simple_order}});
     for (const auto& [name, eff] : effs) {
       all_efficiencies[name].push_back(eff);
     }
 
     g.simulate_and_print("BEST", best_order);
     g.simulate_and_print("SIMPLE", simple_order);
-    g.simulate_and_print("IMPROVED", improved_order);
   }
 
   std::cout << "=== Efficiency Overview (" << original_trials << " trials) ===\n";

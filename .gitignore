@@ -111,3 +111,6 @@ doc/Doxyfile.doxygen_xml
 
 # private
 private/
+
+# agents
+/.agents/
