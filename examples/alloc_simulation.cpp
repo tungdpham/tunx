@@ -213,6 +213,89 @@ public:
     outputs_.push_back(node);
   }
 
+  std::pair<std::map<std::string, std::set<std::string>>,
+            std::map<std::string, std::set<std::string>>>
+  get_dependencies() const {
+    std::map<std::string, std::string> tensor_producer;
+    for (const auto& [op_id, node] : op_nodes_) {
+      for (auto* t : node.outputs()) {
+        tensor_producer[t->uuid()] = op_id;
+      }
+    }
+
+    std::map<std::string, std::set<std::string>> deps;
+    std::map<std::string, std::set<std::string>> dependents;
+    for (const auto& [op_id, node] : op_nodes_) {
+      deps[op_id] = {};
+      for (auto* t : node.inputs()) {
+        auto it = tensor_producer.find(t->uuid());
+        if (it != tensor_producer.end()) {
+          deps[op_id].insert(it->second);
+        }
+      }
+    }
+    for (const auto& [op_id, dep_set] : deps) {
+      for (const auto& dep : dep_set) {
+        dependents[dep].insert(op_id);
+      }
+    }
+    return {deps, dependents};
+  }
+
+  void print_graph() const {
+    std::cout << "--- Graph Structure ---\n";
+    std::cout << "Inputs: ";
+    for (auto* act : inputs_) std::cout << act->uuid() << " ";
+    std::cout << "\nOutputs: ";
+    for (auto* act : outputs_) std::cout << act->uuid() << " ";
+    std::cout << "\n\nOperations (Topological Order):\n";
+
+    auto [deps, dependents] = get_dependencies();
+
+    std::map<std::string, int> in_degree;
+    for (const auto& [id, _] : op_nodes_) {
+      in_degree[id] = static_cast<int>(deps.at(id).size());
+    }
+
+    std::vector<std::string> order;
+    std::queue<std::string> q;
+    for (const auto& [id, deg] : in_degree) {
+      if (deg == 0) q.push(id);
+    }
+
+    while (!q.empty()) {
+      std::string curr = q.front();
+      q.pop();
+      order.push_back(curr);
+      for (const auto& next : dependents[curr]) {
+        in_degree[next]--;
+        if (in_degree[next] == 0) {
+          q.push(next);
+        }
+      }
+    }
+
+    // Fallback for any disconnected/cyclic nodes (though shouldn't happen here)
+    if (order.size() != op_nodes_.size()) {
+      for (const auto& [id, _] : op_nodes_) {
+        if (std::find(order.begin(), order.end(), id) == order.end()) {
+          order.push_back(id);
+        }
+      }
+    }
+
+    for (const auto& id : order) {
+      const auto& op = op_nodes_.at(id);
+      std::cout << "  " << id << " (workspace: " << op.workspace_req() << ")";
+      std::cout << ", Inputs: ";
+      for (auto* t : op.inputs()) std::cout << t->uuid() << " (size: " << t->size() << ")";
+      std::cout << ", Outputs: ";
+      for (auto* t : op.outputs()) std::cout << t->uuid() << " (size: " << t->size() << ")";
+      std::cout << "\n";
+    }
+    std::cout << "-----------------------\n";
+  }
+
   size_t simulate_and_print(const std::string& name, const std::vector<std::string>& order) {
     // Allocate graph input tensors
     for (auto* act : inputs_) {
@@ -356,73 +439,55 @@ public:
     std::vector<std::string> order;
     std::set<std::string> executed;
 
-    size_t prev_max = max_global_mem;
     for (auto* act : inputs_) {
       act->allocate_data();
     }
-    max_global_mem = global_mem;
 
-    auto get_score = [&](const std::string& id) {
-      auto& node = op_nodes_.at(id);
-      long long workspace = node.workspace_req();
-      long long memory_consumes = 0;
-      for (auto* t : node.inputs()) {
-        if (t->out_ref_count() == 1) {
-          memory_consumes += t->size();
+    while (order.size() < op_ids.size()) {
+      std::string best_op = "";
+      long long best_score = std::numeric_limits<long long>::lowest();
+
+      for (auto& id : op_ids) {
+        if (executed.count(id)) continue;
+        if (in_degree[id] != 0) continue;
+
+        auto& node = op_nodes_.at(id);
+
+        long long all_outputs = 0;
+        for (auto* t : node.outputs()) {
+          all_outputs += t->size();
+        }
+
+        long long workspace = node.workspace_req();
+        long long total_memory_for_execution = all_outputs + workspace;
+
+        long long memory_generate = all_outputs;
+        long long memory_consumes = 0;
+        for (auto* t : node.inputs()) {
+          if (t->out_ref_count() == 1) {
+            memory_consumes += t->size();
+          }
+        }
+
+        long long net_memory_generation = memory_generate - memory_consumes;
+        long long score = total_memory_for_execution - net_memory_generation;
+
+        if (best_op == "" || score > best_score) {
+          best_score = score;
+          best_op = id;
         }
       }
-      return workspace + memory_consumes;
-    };
 
-    struct CompareScore {
-      bool operator()(const std::pair<long long, std::string>& a,
-                      const std::pair<long long, std::string>& b) const {
-        if (a.first != b.first) return a.first < b.first;
-        return a.second > b.second;
+      if (best_op == "") {
+        throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
       }
-    };
 
-    std::priority_queue<std::pair<long long, std::string>,
-                        std::vector<std::pair<long long, std::string>>, CompareScore>
-        pq;
-    std::set<std::string> ready_set;
-
-    for (auto& id : op_ids) {
-      if (in_degree[id] == 0) {
-        ready_set.insert(id);
-      }
-    }
-
-    for (auto& id : ready_set) {
-      pq.push({get_score(id), id});
-    }
-
-    while (!pq.empty()) {
-      auto [score, best_op] = pq.top();
-      pq.pop();
-
-      if (!ready_set.count(best_op)) continue;
-
-      ready_set.erase(best_op);
       executed.insert(best_op);
       order.push_back(best_op);
-      op_nodes_.at(best_op).run();
-
       for (auto& dep : dependents[best_op]) {
         in_degree[dep]--;
-        if (in_degree[dep] == 0) {
-          ready_set.insert(dep);
-        }
       }
-
-      // Re-evaluate scores for all ready nodes as they might have increased
-      for (auto& id : ready_set) {
-        pq.push({get_score(id), id});
-      }
-    }
-
-    if (order.size() < op_ids.size()) {
-      throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
+      op_nodes_.at(best_op).run();
     }
 
     for (auto it = order.rbegin(); it != order.rend(); ++it) {
@@ -431,22 +496,16 @@ public:
     for (auto* act : inputs_) {
       act->deallocate_data();
     }
-    max_global_mem = prev_max;
 
     return order;
   }
 
-  // bruteforce on permutation of valid execution orders to find one with best memory efficiency
-  // a valid execution order is a topological sort of the graph.
-  std::pair<std::vector<std::string>, std::vector<std::string>>
-  find_minimum_memory_execution_order() {
-    // Collect all op UUIDs.
+  std::vector<std::string> find_improved_execution_order() {
     std::vector<std::string> op_ids;
     for (auto& [id, _] : op_nodes_) {
       op_ids.push_back(id);
     }
 
-    // Build a map: act node uuid -> the op that produces it (as an output).
     std::map<std::string, std::string> tensor_producer;
     for (auto& [op_id, node] : op_nodes_) {
       for (auto* t : node.outputs()) {
@@ -454,10 +513,8 @@ public:
       }
     }
 
-    // Build dependency graph between ops.
-    // op A depends on op B if any of A's inputs are produced by B.
-    std::map<std::string, std::set<std::string>> deps;        // op -> set of ops it depends on
-    std::map<std::string, std::set<std::string>> dependents;  // op -> set of ops that depend on it
+    std::map<std::string, std::set<std::string>> deps;
+    std::map<std::string, std::set<std::string>> dependents;
     for (auto& [op_id, node] : op_nodes_) {
       deps[op_id] = {};
       for (auto* t : node.inputs()) {
@@ -473,24 +530,267 @@ public:
       }
     }
 
+    // Build a map: tensor uuid -> list of consumer op ids
+    std::map<std::string, std::vector<std::string>> tensor_consumers;
+    for (auto& [op_id, node] : op_nodes_) {
+      for (auto* t : node.inputs()) {
+        tensor_consumers[t->uuid()].push_back(op_id);
+      }
+    }
+
+    std::map<std::string, int> in_degree;
+    for (auto& id : op_ids) {
+      in_degree[id] = static_cast<int>(deps[id].size());
+    }
+
+    // Compute the total output memory footprint of the subtree rooted at each op.
+    // This estimates how much additional live memory a branch will eventually create.
+    // We sum the output tensor sizes of all ops transitively downstream (including self).
+    std::map<std::string, long long> subtree_mem;
+    // Also compute critical_path: the longest path (in # ops) from this op to any
+    // terminal op (op with no dependents). Shorter = closer to completing a branch.
+    std::map<std::string, int> critical_path;
+    {
+      std::map<std::string, int> tmp_in_degree = in_degree;
+      std::queue<std::string> q;
+      std::vector<std::string> topo_order;
+      for (auto& [id, deg] : tmp_in_degree) {
+        if (deg == 0) q.push(id);
+      }
+      while (!q.empty()) {
+        auto curr = q.front();
+        q.pop();
+        topo_order.push_back(curr);
+        for (auto& next : dependents[curr]) {
+          tmp_in_degree[next]--;
+          if (tmp_in_degree[next] == 0) q.push(next);
+        }
+      }
+
+      // Initialize each op's subtree_mem with its own output sizes + workspace
+      for (auto& id : op_ids) {
+        auto& node = op_nodes_.at(id);
+        long long mem = static_cast<long long>(node.workspace_req());
+        for (auto* t : node.outputs()) {
+          mem += static_cast<long long>(t->size());
+        }
+        subtree_mem[id] = mem;
+        critical_path[id] = 1;
+      }
+      // Traverse in reverse topological order to accumulate
+      for (auto it = topo_order.rbegin(); it != topo_order.rend(); ++it) {
+        for (auto& dep : deps[*it]) {
+          subtree_mem[dep] += subtree_mem[*it];
+          critical_path[dep] = std::max(critical_path[dep], critical_path[*it] + 1);
+        }
+      }
+    }
+
+    std::vector<std::string> order;
+    std::set<std::string> executed;
+    // Track when each op was executed (order index) for recency scoring
+    std::map<std::string, int> execution_timestamp;
+
+    for (auto* act : inputs_) {
+      act->allocate_data();
+    }
+
+    while (order.size() < op_ids.size()) {
+      std::string best_op = "";
+      // Score tuple: lower is better
+      std::tuple<long long, long long, long long> best_score;
+      bool first = true;
+
+      for (auto& id : op_ids) {
+        if (executed.count(id)) continue;
+        if (in_degree[id] != 0) continue;
+
+        auto& node = op_nodes_.at(id);
+
+        // Compute how much memory this op frees (inputs at last ref)
+        long long freed_input_sizes = 0;
+        for (auto* t : node.inputs()) {
+          if (t->out_ref_count() == 1) {
+            freed_input_sizes += static_cast<long long>(t->size());
+          }
+        }
+
+        long long output_sizes = 0;
+        for (auto* t : node.outputs()) {
+          output_sizes += static_cast<long long>(t->size());
+        }
+
+        // Net memory delta: negative = frees memory, positive = consumes memory
+        long long net_delta = output_sizes - freed_input_sizes;
+
+        // Recency: when was the most recent producer of this op's inputs executed?
+        // Higher recency = this op is on the currently active branch.
+        // Lower recency = this op branches off from an older tensor.
+        // We NEGATE recency because lower score = better, and higher recency = better.
+        long long max_producer_time = -1;
+        for (auto& dep_id : deps[id]) {
+          auto it = execution_timestamp.find(dep_id);
+          if (it != execution_timestamp.end()) {
+            max_producer_time = std::max(max_producer_time, static_cast<long long>(it->second));
+          }
+        }
+        // For ops with no executed dependencies (roots), use -1
+        long long recency = -max_producer_time;  // negate: more recent = lower score = better
+
+        // Consumer urgency: how many downstream ops this would make ready
+        long long urgency_bonus = 0;
+        for (auto* t : node.outputs()) {
+          auto cit = tensor_consumers.find(t->uuid());
+          if (cit != tensor_consumers.end()) {
+            for (auto& consumer_id : cit->second) {
+              if (executed.count(consumer_id)) continue;
+              int remaining = in_degree[consumer_id];
+              if (deps[consumer_id].count(id)) {
+                remaining -= 1;
+              }
+              if (remaining == 0) {
+                urgency_bonus += 1000;
+              }
+            }
+          }
+        }
+
+        // Score: (recency, net_delta - urgency, subtree_mem)
+        //
+        // Primary: recency — continue the current active branch (depth-first)
+        //   Most recently produced inputs = most negative = best
+        //
+        // Secondary: net memory delta adjusted by urgency
+        //   Among ops at the same recency level, prefer those that free memory
+        //   and enable downstream consumers
+        //
+        // Tertiary: subtree memory (tiebreaker)
+        //   Among equal candidates, defer ops with larger downstream memory
+        auto score = std::make_tuple(recency, net_delta - urgency_bonus, subtree_mem[id]);
+
+        if (first || score < best_score) {
+          best_score = score;
+          best_op = id;
+          first = false;
+        }
+      }
+
+      if (best_op == "") {
+        throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
+      }
+
+      execution_timestamp[best_op] = static_cast<int>(order.size());
+      executed.insert(best_op);
+      order.push_back(best_op);
+      for (auto& dep : dependents[best_op]) {
+        in_degree[dep]--;
+      }
+      op_nodes_.at(best_op).run();
+    }
+
+    for (auto it = order.rbegin(); it != order.rend(); ++it) {
+      op_nodes_.at(*it).undo_run();
+    }
+    for (auto* act : inputs_) {
+      act->deallocate_data();
+    }
+
+    return order;
+  }
+
+  // Optimized search for the execution order with minimum peak memory.
+  // Uses branch-and-bound pruning, heuristic-guided candidate ordering,
+  // bitmask memoization, and iterative DFS to avoid stack overflow.
+  std::vector<std::string> find_minimum_memory_execution_order() {
+    // Collect all op UUIDs and assign bit indices.
+    std::vector<std::string> op_ids;
+    std::map<std::string, int> op_index;  // op uuid -> bit index
+    for (auto& [id, _] : op_nodes_) {
+      op_index[id] = static_cast<int>(op_ids.size());
+      op_ids.push_back(id);
+    }
+    const int n = static_cast<int>(op_ids.size());
+    if (n > 256) {
+      throw std::runtime_error("Too many ops for bitmask memoization (max 256).");
+    }
+
+    auto [deps, dependents] = get_dependencies();
+
     // Compute in-degree for each op (number of unresolved dependencies).
     std::map<std::string, int> in_degree;
     for (auto& id : op_ids) {
       in_degree[id] = static_cast<int>(deps[id].size());
     }
 
-    // Track the best (minimum peak memory) and worst ordering found so far.
-    size_t best_peak = std::numeric_limits<size_t>::max();
-    size_t worst_peak = 0;
-    std::vector<std::string> best_order;
-    std::vector<std::string> worst_order;
-    int num_orderings = 0;
+    // Heuristic scoring: prefer ops that free the most memory relative to workspace cost.
+    // Lower score = more memory freed = more promising to explore first.
+    auto get_score = [&](const std::string& id) -> long long {
+      auto& node = op_nodes_.at(id);
+      long long score = static_cast<long long>(node.workspace_req());
+      // Subtract memory freed by inputs at last reference (will be deallocated).
+      for (auto* t : node.inputs()) {
+        if (t->out_ref_count() == 1) {
+          score -= static_cast<long long>(t->size());
+        }
+      }
+      // Add memory consumed by outputs.
+      for (auto* t : node.outputs()) {
+        score += static_cast<long long>(t->size());
+      }
+      return score;
+    };
 
-    // Backtracking enumeration of all valid topological orderings.
-    // Uses OpNode::run()/undo_run() to simulate memory allocation inline,
-    // avoiding the need for a separate simulate pass.
+    // Memoization: executed_bitmask -> best peak memory reaching this state.
+    // If we reach the same set of executed ops with a worse peak, we can prune.
+    std::unordered_map<std::bitset<256>, size_t> memo;
+
+    // Track the best (minimum peak memory) ordering found so far.
+    // Seed with the heuristic ordering to enable aggressive pruning from the start.
+    size_t best_peak = std::numeric_limits<size_t>::max();
+    std::vector<std::string> best_order;
+    int num_orderings = 0;
+    int num_pruned = 0;
+
+    // --- Seed best_peak with the greedy heuristic solution ---
+    {
+      auto heuristic_order = find_simple_execution_order();
+      if (!heuristic_order.empty()) {
+        // Simulate to get the peak memory of the heuristic solution.
+        for (auto* act : inputs_) {
+          act->allocate_data();
+        }
+        size_t saved = max_global_mem;
+        max_global_mem = global_mem;
+        for (const auto& op_id : heuristic_order) {
+          op_nodes_.at(op_id).run();
+        }
+        best_peak = max_global_mem;
+        best_order = heuristic_order;
+        num_orderings = 1;  // Count heuristic as first explored ordering.
+        // Undo
+        for (auto it = heuristic_order.rbegin(); it != heuristic_order.rend(); ++it) {
+          op_nodes_.at(*it).undo_run();
+        }
+        for (auto* act : inputs_) {
+          act->deallocate_data();
+        }
+        max_global_mem = saved;
+      }
+    }
+
+    // --- Iterative DFS with explicit stack ---
+    // Each stack frame stores the state needed for backtracking.
+    struct Frame {
+      std::vector<std::string> candidates;  // sorted ready ops for this level
+      int candidate_idx;                    // which candidate we're currently trying
+      std::string chosen_op;                // the op we chose (empty if not yet chosen)
+      size_t saved_max;                     // max_global_mem before running this op
+      std::bitset<256> executed_mask;       // bitmask of executed ops before this frame
+    };
+
     std::vector<std::string> current_order;
     std::set<std::string> executed;
+    std::bitset<256> executed_mask;
 
     size_t prev_max = max_global_mem;
     // Allocate graph input tensors before starting the search.
@@ -499,53 +799,143 @@ public:
     }
     max_global_mem = global_mem;
 
-    std::function<void()> backtrack = [&]() {
-      if (current_order.size() == op_ids.size()) {
-        num_orderings++;
-        if (max_global_mem < best_peak) {
-          best_peak = max_global_mem;
-          best_order = current_order;
-        }
-        if (max_global_mem > worst_peak) {
-          worst_peak = max_global_mem;
-          worst_order = current_order;
-        }
-        return;
-      }
-
+    // Build initial candidates.
+    auto get_sorted_candidates = [&]() -> std::vector<std::string> {
+      std::vector<std::pair<long long, std::string>> scored;
       for (auto& id : op_ids) {
         if (executed.count(id)) continue;
         if (in_degree[id] != 0) continue;
+        scored.push_back({get_score(id), id});
+      }
+      // Sort ascending: lowest score (most memory-freeing) first.
+      std::sort(scored.begin(), scored.end());
+      std::vector<std::string> result;
+      result.reserve(scored.size());
+      for (auto& [s, id] : scored) {
+        result.push_back(std::move(id));
+      }
+      return result;
+    };
 
-        // Choose this op: run it (allocates outputs, frees consumed inputs).
+    std::vector<Frame> stack;
+    // Push initial frame.
+    stack.push_back({get_sorted_candidates(), 0, "", 0, std::bitset<256>()});
+
+    while (!stack.empty()) {
+      auto& frame = stack.back();
+
+      // If we previously chose an op, we need to undo it before trying the next.
+      if (!frame.chosen_op.empty()) {
+        // Undo the previously chosen op.
+        op_nodes_.at(frame.chosen_op).undo_run();
+        max_global_mem = frame.saved_max;
+        current_order.pop_back();
+        executed.erase(frame.chosen_op);
+        executed_mask.reset(op_index[frame.chosen_op]);
+        for (auto& dep : dependents[frame.chosen_op]) {
+          in_degree[dep]++;
+        }
+        frame.chosen_op.clear();
+        frame.candidate_idx++;  // move to next candidate
+      }
+
+      // Try the next candidate.
+      bool pushed_child = false;
+      while (frame.candidate_idx < static_cast<int>(frame.candidates.size())) {
+        const auto& id = frame.candidates[frame.candidate_idx];
+
+        // Choose this op.
         executed.insert(id);
+        executed_mask.set(op_index[id]);
         current_order.push_back(id);
         for (auto& dep : dependents[id]) {
           in_degree[dep]--;
         }
 
-        size_t saved_max = max_global_mem;
+        frame.saved_max = max_global_mem;
+        frame.chosen_op = id;
         op_nodes_.at(id).run();
 
-        backtrack();
-
-        // Unchoose: undo the op (restores inputs, deallocates outputs).
-        op_nodes_.at(id).undo_run();
-        max_global_mem = saved_max;
-
-        current_order.pop_back();
-        executed.erase(id);
-        for (auto& dep : dependents[id]) {
-          in_degree[dep]++;
+        // Branch-and-bound: prune if current peak already exceeds best found.
+        // Use > (not >=) because max_global_mem is monotonically non-decreasing,
+        // so a path at exactly best_peak can still complete but can't improve.
+        if (max_global_mem > best_peak) {
+          num_pruned++;
+          // Undo and try next candidate.
+          op_nodes_.at(id).undo_run();
+          max_global_mem = frame.saved_max;
+          current_order.pop_back();
+          executed.erase(id);
+          executed_mask.reset(op_index[id]);
+          for (auto& dep : dependents[id]) {
+            in_degree[dep]++;
+          }
+          frame.chosen_op.clear();
+          frame.candidate_idx++;
+          continue;
         }
-      }
-    };
 
-    backtrack();
+        // Memoization: check if we've seen this state with better or equal peak.
+        auto memo_it = memo.find(executed_mask);
+        if (memo_it != memo.end() && memo_it->second <= max_global_mem) {
+          num_pruned++;
+          // Undo and try next candidate.
+          op_nodes_.at(id).undo_run();
+          max_global_mem = frame.saved_max;
+          current_order.pop_back();
+          executed.erase(id);
+          executed_mask.reset(op_index[id]);
+          for (auto& dep : dependents[id]) {
+            in_degree[dep]++;
+          }
+          frame.chosen_op.clear();
+          frame.candidate_idx++;
+          continue;
+        }
+        memo[executed_mask] = max_global_mem;
+
+        // Check if we've completed a full ordering.
+        if (static_cast<int>(current_order.size()) == n) {
+          num_orderings++;
+          if (max_global_mem < best_peak) {
+            best_peak = max_global_mem;
+            best_order = current_order;
+          }
+          // Don't push a child frame; the while loop will undo and try next.
+          // Advance candidate_idx so the undo at top of loop triggers correctly
+          // by leaving chosen_op set — the top-of-loop will undo it.
+          break;
+        }
+
+        // Push child frame with new candidates.
+        stack.push_back({get_sorted_candidates(), 0, "", 0, executed_mask});
+        pushed_child = true;
+        break;
+      }
+
+      // If no more candidates and we didn't push a child, pop this frame.
+      if (!pushed_child && (frame.chosen_op.empty() ||
+                            frame.candidate_idx >= static_cast<int>(frame.candidates.size()) - 1)) {
+        // If there's still a chosen op that needs undoing (complete ordering case).
+        if (!frame.chosen_op.empty()) {
+          op_nodes_.at(frame.chosen_op).undo_run();
+          max_global_mem = frame.saved_max;
+          current_order.pop_back();
+          executed.erase(frame.chosen_op);
+          executed_mask.reset(op_index[frame.chosen_op]);
+          for (auto& dep : dependents[frame.chosen_op]) {
+            in_degree[dep]++;
+          }
+        }
+        stack.pop_back();
+      }
+    }
 
     // Print results.
     std::cout << "=== Memory-Optimal Execution Order Search ===\n";
-    std::cout << "Total valid topological orderings explored: " << num_orderings << "\n\n";
+    std::cout << "Total valid orderings explored: " << num_orderings << "\n";
+    std::cout << "Total subtrees pruned: " << num_pruned << "\n";
+    std::cout << "Best peak memory: " << best_peak << " bytes\n\n";
 
     // Deallocate graph input tensors after the search.
     for (auto* act : inputs_) {
@@ -553,7 +943,7 @@ public:
     }
     max_global_mem = prev_max;
 
-    return {best_order, worst_order};
+    return best_order;
   }
 };
 
@@ -562,7 +952,14 @@ size_t random_act_size() {
   if (rand_val < 30) return 1280;
   if (rand_val < 60) return 2560;
   if (rand_val < 80) return 5120;
-  if (rand_val < 90) return 10240;
+  return 10240;
+}
+
+size_t random_ws_size() {
+  int rand_val = rand() % 100;
+  if (rand_val < 30) return 512;
+  if (rand_val < 60) return 1024;
+  if (rand_val < 80) return 2048;
   return 4096;
 }
 
@@ -577,31 +974,31 @@ ActNode* build_random_diamond_dag(Graph& g, ActNode* input, int depth, int& node
 
   if (structure_type == 0) {
     // Sequential
-    auto act = g.add_act(prefix + "_seq_act", 1000 + rand() % 1000);
-    g.add_node(prefix + "_seq_conv", 500 + rand() % 500, {input}, {act});
+    auto act = g.add_act(prefix + "_seq", random_act_size());
+    g.add_node(prefix + "_seq_conv", random_ws_size(), {input}, {act});
     return build_random_diamond_dag(g, act, depth - 1, node_counter);
   } else if (structure_type == 1) {
     // Diamond
-    auto left_act = g.add_act(prefix + "_left_act", 1000 + rand() % 1000);
-    g.add_node(prefix + "_left_conv", 500 + rand() % 500, {input}, {left_act});
+    auto left_act = g.add_act(prefix + "_left", random_act_size());
+    g.add_node(prefix + "_left_conv", random_ws_size(), {input}, {left_act});
     auto left_out = build_random_diamond_dag(g, left_act, depth - 1, node_counter);
 
-    auto right_act = g.add_act(prefix + "_right_act", 1000 + rand() % 1000);
-    g.add_node(prefix + "_right_conv", 500 + rand() % 500, {input}, {right_act});
+    auto right_act = g.add_act(prefix + "_right", random_act_size());
+    g.add_node(prefix + "_right_conv", random_ws_size(), {input}, {right_act});
     auto right_out = build_random_diamond_dag(g, right_act, depth - 1, node_counter);
 
-    auto merge_act = g.add_act(prefix + "_merge_act", 1000 + rand() % 1000);
-    g.add_node(prefix + "_add", 100 + rand() % 100, {left_out, right_out}, {merge_act});
+    auto merge_act = g.add_act(prefix + "_merge", random_act_size());
+    g.add_node(prefix + "_add", random_ws_size(), {left_out, right_out}, {merge_act});
 
     return merge_act;
   } else {
     // Residual (skip connection)
-    auto main_act = g.add_act(prefix + "_main_act", 1000 + rand() % 1000);
-    g.add_node(prefix + "_main_conv", 500 + rand() % 500, {input}, {main_act});
+    auto main_act = g.add_act(prefix + "_main", random_act_size());
+    g.add_node(prefix + "_main_conv", random_ws_size(), {input}, {main_act});
     auto main_out = build_random_diamond_dag(g, main_act, depth - 1, node_counter);
 
-    auto merge_act = g.add_act(prefix + "_res_add_act", 1000 + rand() % 1000);
-    g.add_node(prefix + "_res_add", 100 + rand() % 100, {main_out, input}, {merge_act});
+    auto merge_act = g.add_act(prefix + "_res_add", random_act_size());
+    g.add_node(prefix + "_res_add", random_ws_size(), {main_out, input}, {merge_act});
 
     return merge_act;
   }
@@ -672,6 +1069,8 @@ Graph random_graph(int depth, int& node_counter) {
 }
 
 signed main() {
+  srand(static_cast<unsigned int>(time(nullptr)));
+
   int trials;
   std::cin >> trials;
 
@@ -680,22 +1079,23 @@ signed main() {
     max_global_mem = 0;
 
     int node_counter = 0;
-    Graph g = random_graph(3, node_counter);
+    Graph g = random_graph(7, node_counter);
+
+    g.print_graph();
+
+    auto best_order = g.find_minimum_memory_execution_order();
 
     auto simple_order = g.find_simple_execution_order();
-
-    auto [best_order, worst_order] = g.find_minimum_memory_execution_order();
+    auto improved_order = g.find_improved_execution_order();
 
     g.rank_execution_orders(
-        {{"BEST", best_order}, {"SIMPLE", simple_order}, {"WORST", worst_order}});
+        {{"BEST", best_order}, {"SIMPLE", simple_order}, {"IMPROVED", improved_order}});
 
-    if (!best_order.empty()) {
-      g.simulate_and_print("BEST", best_order);
-    }
-    if (!worst_order.empty()) {
-      g.simulate_and_print("WORST", worst_order);
-    }
-    g.simulate_and_print("SIMPLE", simple_order);
+    // if (!best_order.empty()) {
+    //   g.simulate_and_print("BEST", best_order);
+    // }
+    // g.simulate_and_print("SIMPLE", simple_order);
+    // g.simulate_and_print("IMPROVED", improved_order);
   }
 
   return 0;
