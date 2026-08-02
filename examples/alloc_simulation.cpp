@@ -1179,6 +1179,436 @@ public:
     return final_order;
   }
 
+  // Recursive macro accumulation: process join nodes bottom-up,
+  // treating inner join macros as atomic units with pre-computed (a,b) values.
+  // This preserves optimal inner orderings instead of flattening everything.
+  std::vector<std::string> find_recursive_macro_execution_order(bool print_macros = false) {
+    std::vector<std::string> op_ids;
+    for (auto& [id, _] : op_nodes_) {
+      op_ids.push_back(id);
+    }
+
+    auto [deps, dependents] = get_dependencies();
+
+    // Ensure all ops have entries in dependents (leaf ops may be missing)
+    for (const auto& id : op_ids) {
+      if (!dependents.count(id)) dependents[id] = {};
+    }
+
+    // Topological sort of all ops (so we process inner joins before outer joins)
+    std::map<std::string, int> in_deg;
+    for (const auto& id : op_ids) {
+      in_deg[id] = static_cast<int>(deps[id].size());
+    }
+    std::vector<std::string> topo_order;
+    {
+      std::queue<std::string> tq;
+      for (const auto& [id, deg] : in_deg) {
+        if (deg == 0) tq.push(id);
+      }
+      while (!tq.empty()) {
+        std::string curr = tq.front();
+        tq.pop();
+        topo_order.push_back(curr);
+        for (const auto& next : dependents[curr]) {
+          in_deg[next]--;
+          if (in_deg[next] == 0) tq.push(next);
+        }
+      }
+    }
+
+    // Stores the recursive macro info for each join node
+    struct MacroInfo {
+      std::vector<std::string> ops;  // ordered ops (including the join itself)
+      long long a;                   // peak memory overhead of the sequence
+      long long b;                   // net memory delta of the sequence
+    };
+    std::map<std::string, MacroInfo> join_macros;
+
+    // Process join nodes in topological order (inner joins first)
+    for (const auto& join_op_id : topo_order) {
+      if (deps.at(join_op_id).size() <= 1) continue;  // Not a join node
+
+      // Find exclusive ancestors, stopping at inner join macros
+      std::set<std::string> exclusive_individual_ops;
+      std::set<std::string> inner_macro_joins;
+      std::set<std::string> visited;
+
+      std::queue<std::string> q;
+      for (const auto& dep : deps.at(join_op_id)) {
+        if (dependents.at(dep).size() == 1) {
+          q.push(dep);
+        }
+      }
+
+      while (!q.empty()) {
+        std::string curr = q.front();
+        q.pop();
+        if (visited.count(curr)) continue;
+        visited.insert(curr);
+
+        if (join_macros.count(curr)) {
+          // This is an inner join with a pre-computed macro — use it as an atom
+          inner_macro_joins.insert(curr);
+          continue;
+        }
+
+        exclusive_individual_ops.insert(curr);
+        for (const auto& p : deps.at(curr)) {
+          if (dependents.at(p).size() == 1) {
+            q.push(p);
+          }
+        }
+      }
+
+      if (exclusive_individual_ops.empty() && inner_macro_joins.empty()) continue;
+
+      // Build MacroNodes for the subgraph ordering.
+      // Individual ops get fresh (a,b) values; inner macros use pre-computed ones.
+      struct MacroNode {
+        std::string id;
+        std::vector<std::string> ops;
+        long long a;
+        long long b;
+      };
+
+      std::map<std::string, MacroNode> macros;
+      std::map<std::string, std::set<std::string>> m_deps;
+      std::map<std::string, std::set<std::string>> m_dependents;
+      std::map<std::string, std::string> op_to_item;  // original op -> item id
+
+      // Create MacroNodes for individual ops
+      for (const auto& id : exclusive_individual_ops) {
+        auto& node = op_nodes_.at(id);
+        long long all_outputs = 0;
+        for (auto* t : node.outputs()) all_outputs += t->size();
+        long long workspace = node.workspace_req();
+        long long memory_consumes = 0;
+        for (auto* t : node.inputs()) {
+          if (t->out_deg() == 1) memory_consumes += t->size();
+        }
+        MacroNode mn;
+        mn.id = id;
+        mn.ops = {id};
+        mn.a = all_outputs + workspace;
+        mn.b = all_outputs - memory_consumes;
+        macros[id] = mn;
+        op_to_item[id] = id;
+        m_deps[id] = {};
+        m_dependents[id] = {};
+      }
+
+      // Create MacroNodes for inner macros (atomic units)
+      for (const auto& jid : inner_macro_joins) {
+        auto& info = join_macros[jid];
+        MacroNode mn;
+        mn.id = jid;
+        mn.ops = info.ops;
+        mn.a = info.a;
+        mn.b = info.b;
+        macros[jid] = mn;
+        for (const auto& op : info.ops) {
+          op_to_item[op] = jid;
+        }
+        m_deps[jid] = {};
+        m_dependents[jid] = {};
+      }
+
+      // Build dependencies among items in this subgraph
+      for (const auto& id : exclusive_individual_ops) {
+        for (const auto& dep : deps.at(id)) {
+          auto it = op_to_item.find(dep);
+          if (it != op_to_item.end() && it->second != id) {
+            m_deps[id].insert(it->second);
+          }
+        }
+      }
+      for (const auto& jid : inner_macro_joins) {
+        auto& info = join_macros[jid];
+        std::set<std::string> macro_op_set(info.ops.begin(), info.ops.end());
+        for (const auto& op : info.ops) {
+          for (const auto& dep : deps.at(op)) {
+            if (macro_op_set.count(dep)) continue;  // internal dep
+            auto it = op_to_item.find(dep);
+            if (it != op_to_item.end() && it->second != jid) {
+              m_deps[jid].insert(it->second);
+            }
+          }
+        }
+      }
+      for (const auto& [item, dep_set] : m_deps) {
+        for (const auto& dep : dep_set) {
+          m_dependents[dep].insert(item);
+        }
+      }
+
+      // Merge heuristic (same as get_simple_order_for_subgraph)
+      auto compare_mn = [](const MacroNode& i, const MacroNode& j) {
+        long long cost_ij = std::max(i.a, i.b + j.a);
+        long long cost_ji = std::max(j.a, j.b + i.a);
+        if (cost_ij != cost_ji) return cost_ij < cost_ji;
+        if (i.b != j.b) return i.b < j.b;
+        return i.a < j.a;
+      };
+
+      int next_id = 0;
+      while (true) {
+        std::string best_Y = "";
+        std::string best_X = "";
+        for (auto& [Y_id, Y_node] : macros) {
+          if (m_deps[Y_id].size() == 1) {
+            std::string X_id = *m_deps[Y_id].begin();
+            if (compare_mn(Y_node, macros[X_id])) {
+              if (best_Y == "" || compare_mn(Y_node, macros[best_Y])) {
+                best_Y = Y_id;
+                best_X = X_id;
+              }
+            }
+          }
+        }
+        for (auto& [X_id, dep_set] : m_dependents) {
+          if (dep_set.size() == 1) {
+            std::string Y_id = *dep_set.begin();
+            if (compare_mn(macros[Y_id], macros[X_id])) {
+              if (best_Y == "" || compare_mn(macros[Y_id], macros[best_Y])) {
+                best_Y = Y_id;
+                best_X = X_id;
+              }
+            }
+          }
+        }
+        if (best_Y == "") break;
+
+        std::string XY_id = "rm_" + std::to_string(next_id++);
+        MacroNode XY;
+        XY.id = XY_id;
+        XY.ops = macros[best_X].ops;
+        XY.ops.insert(XY.ops.end(), macros[best_Y].ops.begin(), macros[best_Y].ops.end());
+        XY.a = std::max(macros[best_X].a, macros[best_X].b + macros[best_Y].a);
+        XY.b = macros[best_X].b + macros[best_Y].b;
+        macros[XY_id] = XY;
+
+        m_deps[XY_id] = m_deps[best_X];
+        for (auto& dep : m_deps[best_Y]) {
+          if (dep != best_X) m_deps[XY_id].insert(dep);
+        }
+        m_dependents[XY_id] = m_dependents[best_X];
+        m_dependents[XY_id].erase(best_Y);
+        for (auto& child : m_dependents[best_Y]) {
+          m_dependents[XY_id].insert(child);
+        }
+        for (auto& parent : m_deps[XY_id]) {
+          m_dependents[parent].erase(best_X);
+          m_dependents[parent].erase(best_Y);
+          m_dependents[parent].insert(XY_id);
+        }
+        for (auto& child : m_dependents[XY_id]) {
+          m_deps[child].erase(best_X);
+          m_deps[child].erase(best_Y);
+          m_deps[child].insert(XY_id);
+        }
+
+        macros.erase(best_X);
+        macros.erase(best_Y);
+        m_deps.erase(best_X);
+        m_deps.erase(best_Y);
+        m_dependents.erase(best_X);
+        m_dependents.erase(best_Y);
+      }
+
+      // Topological sort of remaining macros in the subgraph
+      std::vector<std::string> subgraph_order;
+      {
+        std::set<std::string> exec_macros;
+        std::vector<std::string> ready;
+        for (auto& [id, ds] : m_deps) {
+          if (ds.empty()) ready.push_back(id);
+        }
+        size_t total_ops = 0;
+        for (auto& [_, mn] : macros) total_ops += mn.ops.size();
+
+        while (subgraph_order.size() < total_ops) {
+          std::string best = ready[0];
+          int bidx = 0;
+          for (size_t i = 1; i < ready.size(); ++i) {
+            if (compare_mn(macros[ready[i]], macros[best])) {
+              best = ready[i];
+              bidx = static_cast<int>(i);
+            }
+          }
+          exec_macros.insert(best);
+          ready.erase(ready.begin() + bidx);
+          for (auto& op : macros[best].ops) subgraph_order.push_back(op);
+          for (auto& child : m_dependents[best]) {
+            bool rdy = true;
+            for (auto& parent : m_deps[child]) {
+              if (!exec_macros.count(parent)) { rdy = false; break; }
+            }
+            if (rdy) ready.push_back(child);
+          }
+        }
+      }
+
+      // Append the join op itself
+      subgraph_order.push_back(join_op_id);
+
+      // Compute (a, b) for the full sequence by folding op-by-op.
+      // This works because (a,b) composition is associative:
+      //   (XY)Z = X(YZ) => same (a, b) result.
+      long long running_a = 0, running_b = 0;
+      bool first = true;
+      for (const auto& op_id : subgraph_order) {
+        auto& node = op_nodes_.at(op_id);
+        long long op_outputs = 0;
+        for (auto* t : node.outputs()) op_outputs += t->size();
+        long long op_workspace = node.workspace_req();
+        long long op_consumes = 0;
+        for (auto* t : node.inputs()) {
+          if (t->out_deg() == 1) op_consumes += t->size();
+        }
+        long long op_a = op_outputs + op_workspace;
+        long long op_b = op_outputs - op_consumes;
+
+        if (first) {
+          running_a = op_a;
+          running_b = op_b;
+          first = false;
+        } else {
+          running_a = std::max(running_a, running_b + op_a);
+          running_b = running_b + op_b;
+        }
+      }
+
+      join_macros[join_op_id] = {subgraph_order, running_a, running_b};
+
+      if (print_macros) {
+        std::cout << "Adding recursive macro for " << join_op_id << " with ops: ";
+        for (const auto& op : subgraph_order) std::cout << op << " ";
+        std::cout << "(a=" << running_a << ", b=" << running_b << ")\n";
+      }
+    }
+
+    // Build macro candidates from all join macros (inner + outer).
+    // The greedy loop naturally handles overlap: once an inner macro's ops
+    // are executed as part of an outer macro, the inner macro becomes invalid.
+    struct MacroCandidate {
+      std::string id;
+      std::vector<std::string> ops;
+      std::set<std::string> external_dependencies;
+    };
+    std::vector<MacroCandidate> macro_candidates;
+
+    for (const auto& [join_id, info] : join_macros) {
+      MacroCandidate mc;
+      mc.id = join_id;
+      mc.ops = info.ops;
+      std::set<std::string> op_set(info.ops.begin(), info.ops.end());
+      for (const auto& op : info.ops) {
+        for (const auto& d : deps.at(op)) {
+          if (!op_set.count(d)) mc.external_dependencies.insert(d);
+        }
+      }
+      if (print_macros) {
+        std::cout << "Recursive macro candidate " << mc.id << " with ops: ";
+        for (const auto& op : mc.ops) std::cout << op << " ";
+        std::cout << "\n";
+      }
+      macro_candidates.push_back(mc);
+    }
+
+    // Greedy evaluation loop (same strategy as find_macro_candidate_execution_order)
+    std::vector<std::string> final_order;
+    std::set<std::string> executed;
+
+    size_t prev_max = max_global_mem;
+    for (auto* act : inputs_) {
+      act->allocate_data();
+    }
+    max_global_mem = global_mem;
+
+    while (final_order.size() < op_ids.size()) {
+      std::vector<std::string> ready_ops;
+      for (const auto& op : op_ids) {
+        if (executed.count(op)) continue;
+        bool ready = true;
+        for (const auto& d : deps.at(op)) {
+          if (!executed.count(d)) { ready = false; break; }
+        }
+        if (ready) ready_ops.push_back(op);
+      }
+
+      std::vector<int> ready_macro_indices;
+      for (size_t i = 0; i < macro_candidates.size(); ++i) {
+        bool valid = true;
+        for (const auto& op : macro_candidates[i].ops) {
+          if (executed.count(op)) { valid = false; break; }
+        }
+        if (!valid) continue;
+        bool ready = true;
+        for (const auto& d : macro_candidates[i].external_dependencies) {
+          if (!executed.count(d)) { ready = false; break; }
+        }
+        if (ready) ready_macro_indices.push_back(static_cast<int>(i));
+      }
+
+      if (ready_ops.empty()) {
+        throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
+      }
+
+      long long best_delta = std::numeric_limits<long long>::max();
+      long long best_spike = std::numeric_limits<long long>::max();
+      std::vector<std::string> best_candidate_ops;
+
+      auto evaluate_candidate = [&](const std::vector<std::string>& cand_ops) {
+        size_t start_mem = global_mem;
+        size_t saved_max_mem = max_global_mem;
+        max_global_mem = global_mem;
+
+        for (const auto& op : cand_ops) {
+          op_nodes_.at(op).run();
+        }
+
+        long long spike =
+            static_cast<long long>(max_global_mem) - static_cast<long long>(start_mem);
+        long long delta = static_cast<long long>(global_mem) - static_cast<long long>(start_mem);
+
+        for (auto it = cand_ops.rbegin(); it != cand_ops.rend(); ++it) {
+          op_nodes_.at(*it).undo_run();
+        }
+        max_global_mem = saved_max_mem;
+
+        if (delta < best_delta || (delta == best_delta && spike < best_spike)) {
+          best_delta = delta;
+          best_spike = spike;
+          best_candidate_ops = cand_ops;
+        }
+      };
+
+      for (const auto& op : ready_ops) {
+        evaluate_candidate({op});
+      }
+      for (int mi : ready_macro_indices) {
+        evaluate_candidate(macro_candidates[mi].ops);
+      }
+
+      for (const auto& op : best_candidate_ops) {
+        op_nodes_.at(op).run();
+        executed.insert(op);
+        final_order.push_back(op);
+      }
+    }
+
+    for (auto it = final_order.rbegin(); it != final_order.rend(); ++it) {
+      op_nodes_.at(*it).undo_run();
+    }
+    for (auto* act : inputs_) {
+      act->deallocate_data();
+    }
+    max_global_mem = prev_max;
+
+    return final_order;
+  }
+
   void export_to_dot(const std::string& filename) const {
     std::ofstream out(filename);
     out << "digraph ComputationGraph {\n";
@@ -1449,14 +1879,18 @@ signed main() {
 
     auto macro_order = g.find_macro_candidate_execution_order();
 
+    auto recursive_order = g.find_recursive_macro_execution_order();
+
     auto effs = g.rank_execution_orders(
-        {{"BEST", best_order}, {"SIMPLE", simple_order}, {"MACRO", macro_order}});
+        {{"BEST", best_order}, {"SIMPLE", simple_order}, {"MACRO", macro_order},
+         {"RECURSIVE", recursive_order}});
 
     for (auto eff : effs) {
-      if (eff.first == "MACRO" && !near(eff.second, 100)) {
+      if ((eff.first == "RECURSIVE") && !near(eff.second, 100)) {
         g.print_graph();
         g.export_to_dot("graph.dot");
         g.find_macro_candidate_execution_order(true);
+        g.find_recursive_macro_execution_order(true);
       }
     }
     for (const auto& [name, eff] : effs) {
