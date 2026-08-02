@@ -459,7 +459,7 @@ public:
       long long memory_generate = all_outputs;
       long long memory_consumes = 0;
       for (auto* t : node.inputs()) {
-        if (t->out_ref_count() == 1) {
+        if (t->out_deg() == 1) {
           memory_consumes += t->size();
         }
       }
@@ -888,7 +888,7 @@ public:
       long long memory_generate = all_outputs;
       long long memory_consumes = 0;
       for (auto* t : node.inputs()) {
-        if (t->out_ref_count() == 1) memory_consumes += t->size();
+        if (t->out_deg() == 1) memory_consumes += t->size();
       }
 
       MacroNode mn;
