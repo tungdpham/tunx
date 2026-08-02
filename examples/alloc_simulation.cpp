@@ -501,6 +501,17 @@ public:
           }
         }
       }
+      for (auto& [X_id, dependents_set] : macro_dependents) {
+        if (dependents_set.size() == 1) {
+          std::string Y_id = *dependents_set.begin();
+          if (compare(macros[Y_id], macros[X_id])) {
+            if (best_Y == "" || compare(macros[Y_id], macros[best_Y])) {
+              best_Y = Y_id;
+              best_X = X_id;
+            }
+          }
+        }
+      }
 
       if (best_Y == "") break;
 
@@ -515,23 +526,23 @@ public:
       macros[XY_id] = XY;
 
       macro_deps[XY_id] = macro_deps[best_X];
+      for (auto& dep : macro_deps[best_Y]) {
+        if (dep != best_X) macro_deps[XY_id].insert(dep);
+      }
+
       macro_dependents[XY_id] = macro_dependents[best_X];
       macro_dependents[XY_id].erase(best_Y);
       for (auto& child : macro_dependents[best_Y]) {
         macro_dependents[XY_id].insert(child);
       }
 
-      for (auto& parent : macro_deps[best_X]) {
+      for (auto& parent : macro_deps[XY_id]) {
         macro_dependents[parent].erase(best_X);
+        macro_dependents[parent].erase(best_Y);
         macro_dependents[parent].insert(XY_id);
       }
-      for (auto& child : macro_dependents[best_X]) {
-        if (child != best_Y) {
-          macro_deps[child].erase(best_X);
-          macro_deps[child].insert(XY_id);
-        }
-      }
-      for (auto& child : macro_dependents[best_Y]) {
+      for (auto& child : macro_dependents[XY_id]) {
+        macro_deps[child].erase(best_X);
         macro_deps[child].erase(best_Y);
         macro_deps[child].insert(XY_id);
       }
@@ -853,6 +864,321 @@ public:
     return best_order;
   }
 
+  std::vector<std::string> get_simple_order_for_subgraph(
+      const std::set<std::string>& subgraph_ops) {
+    auto [deps, dependents] = get_dependencies();
+
+    struct MacroNode {
+      std::string id;
+      std::vector<std::string> ops;
+      long long a;
+      long long b;
+    };
+
+    std::map<std::string, MacroNode> macros;
+    std::map<std::string, std::set<std::string>> macro_deps;
+    std::map<std::string, std::set<std::string>> macro_dependents;
+
+    for (const auto& id : subgraph_ops) {
+      auto& node = op_nodes_.at(id);
+      long long all_outputs = 0;
+      for (auto* t : node.outputs()) all_outputs += t->size();
+      long long workspace = node.workspace_req();
+      long long total_memory_for_execution = all_outputs + workspace;
+      long long memory_generate = all_outputs;
+      long long memory_consumes = 0;
+      for (auto* t : node.inputs()) {
+        if (t->out_ref_count() == 1) memory_consumes += t->size();
+      }
+
+      MacroNode mn;
+      mn.id = id;
+      mn.ops = {id};
+      mn.a = total_memory_for_execution;
+      mn.b = memory_generate - memory_consumes;
+      macros[id] = mn;
+
+      macro_deps[id] = {};
+      for (const auto& d : deps.at(id)) {
+        if (subgraph_ops.count(d)) macro_deps[id].insert(d);
+      }
+      macro_dependents[id] = {};
+      for (const auto& d : dependents.at(id)) {
+        if (subgraph_ops.count(d)) macro_dependents[id].insert(d);
+      }
+    }
+
+    auto compare = [](const MacroNode& i, const MacroNode& j) {
+      long long cost_ij = std::max(i.a, i.b + j.a);
+      long long cost_ji = std::max(j.a, j.b + i.a);
+      if (cost_ij != cost_ji) return cost_ij < cost_ji;
+      if (i.b != j.b) return i.b < j.b;
+      return i.a < j.a;
+    };
+
+    int next_macro_id = 0;
+    while (true) {
+      std::string best_Y = "";
+      std::string best_X = "";
+      for (auto& [Y_id, Y_node] : macros) {
+        if (macro_deps[Y_id].size() == 1) {
+          std::string X_id = *macro_deps[Y_id].begin();
+          if (compare(Y_node, macros[X_id])) {
+            if (best_Y == "" || compare(Y_node, macros[best_Y])) {
+              best_Y = Y_id;
+              best_X = X_id;
+            }
+          }
+        }
+      }
+      for (auto& [X_id, dependents_set] : macro_dependents) {
+        if (dependents_set.size() == 1) {
+          std::string Y_id = *dependents_set.begin();
+          if (compare(macros[Y_id], macros[X_id])) {
+            if (best_Y == "" || compare(macros[Y_id], macros[best_Y])) {
+              best_Y = Y_id;
+              best_X = X_id;
+            }
+          }
+        }
+      }
+      if (best_Y == "") break;
+      std::string XY_id = "macro_" + std::to_string(next_macro_id++);
+      MacroNode XY;
+      XY.id = XY_id;
+      XY.ops = macros[best_X].ops;
+      XY.ops.insert(XY.ops.end(), macros[best_Y].ops.begin(), macros[best_Y].ops.end());
+      XY.a = std::max(macros[best_X].a, macros[best_X].b + macros[best_Y].a);
+      XY.b = macros[best_X].b + macros[best_Y].b;
+      macros[XY_id] = XY;
+      macro_deps[XY_id] = macro_deps[best_X];
+      for (auto& dep : macro_deps[best_Y]) {
+        if (dep != best_X) macro_deps[XY_id].insert(dep);
+      }
+
+      macro_dependents[XY_id] = macro_dependents[best_X];
+      macro_dependents[XY_id].erase(best_Y);
+      for (auto& child : macro_dependents[best_Y]) {
+        macro_dependents[XY_id].insert(child);
+      }
+
+      for (auto& parent : macro_deps[XY_id]) {
+        macro_dependents[parent].erase(best_X);
+        macro_dependents[parent].erase(best_Y);
+        macro_dependents[parent].insert(XY_id);
+      }
+      for (auto& child : macro_dependents[XY_id]) {
+        macro_deps[child].erase(best_X);
+        macro_deps[child].erase(best_Y);
+        macro_deps[child].insert(XY_id);
+      }
+
+      macros.erase(best_X);
+      macros.erase(best_Y);
+      macro_deps.erase(best_X);
+      macro_deps.erase(best_Y);
+      macro_dependents.erase(best_X);
+      macro_dependents.erase(best_Y);
+    }
+
+    std::vector<std::string> final_order;
+    std::set<std::string> executed_macros;
+    std::vector<std::string> ready_macros;
+    for (auto& [id, deps_set] : macro_deps) {
+      if (deps_set.empty()) ready_macros.push_back(id);
+    }
+    while (final_order.size() < subgraph_ops.size()) {
+      std::string best_macro = ready_macros[0];
+      int best_idx = 0;
+      for (size_t i = 1; i < ready_macros.size(); ++i) {
+        if (compare(macros[ready_macros[i]], macros[best_macro])) {
+          best_macro = ready_macros[i];
+          best_idx = static_cast<int>(i);
+        }
+      }
+      executed_macros.insert(best_macro);
+      ready_macros.erase(ready_macros.begin() + best_idx);
+      for (auto& op : macros[best_macro].ops) final_order.push_back(op);
+      for (auto& child : macro_dependents[best_macro]) {
+        bool ready = true;
+        for (auto& parent : macro_deps[child]) {
+          if (!executed_macros.count(parent)) {
+            ready = false;
+            break;
+          }
+        }
+        if (ready) ready_macros.push_back(child);
+      }
+    }
+    return final_order;
+  }
+
+  std::vector<std::string> find_macro_candidate_execution_order(bool print_macros = false) {
+    std::vector<std::string> op_ids;
+    for (auto& [id, _] : op_nodes_) {
+      op_ids.push_back(id);
+    }
+
+    auto [deps, dependents] = get_dependencies();
+
+    struct MacroCandidate {
+      std::string id;
+      std::vector<std::string> ops;
+      std::set<std::string> external_dependencies;
+    };
+    std::vector<MacroCandidate> macros;
+    int macro_counter = 0;
+
+    for (const auto& join_op_id : op_ids) {
+      if (deps.at(join_op_id).size() > 1) {
+        std::set<std::string> exclusive_ancestors;
+        std::queue<std::string> q;
+        for (const auto& dep : deps.at(join_op_id)) {
+          if (dependents.at(dep).size() == 1) {
+            q.push(dep);
+          }
+        }
+
+        while (!q.empty()) {
+          std::string curr = q.front();
+          q.pop();
+          exclusive_ancestors.insert(curr);
+          for (const auto& p : deps.at(curr)) {
+            if (dependents.at(p).size() == 1) {
+              q.push(p);
+            }
+          }
+        }
+
+        if (!exclusive_ancestors.empty()) {
+          MacroCandidate mc;
+          mc.id = "macro_" + std::to_string(macro_counter++);
+
+          mc.ops = get_simple_order_for_subgraph(exclusive_ancestors);
+          mc.ops.push_back(join_op_id);
+
+          for (const auto& op : mc.ops) {
+            for (const auto& d : deps.at(op)) {
+              if (!exclusive_ancestors.count(d) && d != join_op_id) {
+                mc.external_dependencies.insert(d);
+              }
+            }
+          }
+
+          if (print_macros) {
+            std::cout << "Adding macro with ops: ";
+            for (const auto& op : mc.ops) {
+              std::cout << op << " ";
+            }
+            std::cout << "\n";
+          }
+
+          macros.push_back(mc);
+        }
+      }
+    }
+
+    std::vector<std::string> final_order;
+    std::set<std::string> executed;
+
+    size_t prev_max = max_global_mem;
+    for (auto* act : inputs_) {
+      act->allocate_data();
+    }
+    max_global_mem = global_mem;
+
+    while (final_order.size() < op_ids.size()) {
+      std::vector<std::string> ready_ops;
+      for (const auto& op : op_ids) {
+        if (executed.count(op)) continue;
+        bool ready = true;
+        for (const auto& d : deps.at(op)) {
+          if (!executed.count(d)) {
+            ready = false;
+            break;
+          }
+        }
+        if (ready) ready_ops.push_back(op);
+      }
+
+      std::vector<int> ready_macros;
+      for (size_t i = 0; i < macros.size(); ++i) {
+        bool valid = true;
+        for (const auto& op : macros[i].ops) {
+          if (executed.count(op)) {
+            valid = false;
+            break;
+          }
+        }
+        if (!valid) continue;
+        bool ready = true;
+        for (const auto& d : macros[i].external_dependencies) {
+          if (!executed.count(d)) {
+            ready = false;
+            break;
+          }
+        }
+        if (ready) ready_macros.push_back(static_cast<int>(i));
+      }
+
+      if (ready_ops.empty()) {
+        throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
+      }
+
+      long long best_delta = std::numeric_limits<long long>::max();
+      long long best_spike = std::numeric_limits<long long>::max();
+      std::vector<std::string> best_candidate_ops;
+
+      auto evaluate_candidate = [&](const std::vector<std::string>& cand_ops) {
+        size_t start_mem = global_mem;
+        size_t saved_max_mem = max_global_mem;
+        max_global_mem = global_mem;
+
+        for (const auto& op : cand_ops) {
+          op_nodes_.at(op).run();
+        }
+
+        long long spike =
+            static_cast<long long>(max_global_mem) - static_cast<long long>(start_mem);
+        long long delta = static_cast<long long>(global_mem) - static_cast<long long>(start_mem);
+
+        for (auto it = cand_ops.rbegin(); it != cand_ops.rend(); ++it) {
+          op_nodes_.at(*it).undo_run();
+        }
+        max_global_mem = saved_max_mem;
+
+        if (delta < best_delta || (delta == best_delta && spike < best_spike)) {
+          best_delta = delta;
+          best_spike = spike;
+          best_candidate_ops = cand_ops;
+        }
+      };
+
+      for (const auto& op : ready_ops) {
+        evaluate_candidate({op});
+      }
+      for (int mi : ready_macros) {
+        evaluate_candidate(macros[mi].ops);
+      }
+
+      for (const auto& op : best_candidate_ops) {
+        op_nodes_.at(op).run();
+        executed.insert(op);
+        final_order.push_back(op);
+      }
+    }
+
+    for (auto it = final_order.rbegin(); it != final_order.rend(); ++it) {
+      op_nodes_.at(*it).undo_run();
+    }
+    for (auto* act : inputs_) {
+      act->deallocate_data();
+    }
+    max_global_mem = prev_max;
+
+    return final_order;
+  }
+
   void export_to_dot(const std::string& filename) const {
     std::ofstream out(filename);
     out << "digraph ComputationGraph {\n";
@@ -1077,7 +1403,7 @@ ActNode* build_random_joining_dag(Graph& g, int depth, int& node_counter) {
     g.add_node(prefix + "_seq_conv", random_ws_size(), {input}, {output});
     return output;
   } else {
-    int num_joining = rand() % 3 + 2;
+    int num_joining = rand() % 2 + 2;
     std::vector<ActNode*> inputs;
     for (int i = 0; i < num_joining; ++i) {
       inputs.push_back(build_random_joining_dag(g, depth - 1, node_counter));
@@ -1095,6 +1421,8 @@ Graph random_joining_graph(int depth, int& node_counter) {
   return g;
 }
 
+inline bool near(double a, double b) { return fabs(a - b) < 1e-15; }
+
 signed main() {
   srand(static_cast<unsigned int>(time(nullptr)));
 
@@ -1110,25 +1438,30 @@ signed main() {
     int node_counter = 0;
     // Graph g = random_diamond_graph(6, node_counter);
     // Graph g = random_branching_graph(3, node_counter);
-    Graph g = random_joining_graph(3, node_counter);
+    Graph g = random_joining_graph(4, node_counter);
     // int m = 4;        // Number of independent sequences
     // int length = 10;  // Length of each sequence
     // Graph g = random_m_sequences_graph(m, length, node_counter);
-
-    g.print_graph();
-    g.export_to_dot("graph.dot");
 
     auto best_order = g.find_minimum_memory_execution_order();
 
     auto simple_order = g.find_simple_execution_order();
 
-    auto effs = g.rank_execution_orders({{"BEST", best_order}, {"SIMPLE", simple_order}});
+    auto macro_order = g.find_macro_candidate_execution_order();
+
+    auto effs = g.rank_execution_orders(
+        {{"BEST", best_order}, {"SIMPLE", simple_order}, {"MACRO", macro_order}});
+
+    for (auto eff : effs) {
+      if (eff.first == "MACRO" && !near(eff.second, 100)) {
+        g.print_graph();
+        g.export_to_dot("graph.dot");
+        g.find_macro_candidate_execution_order(true);
+      }
+    }
     for (const auto& [name, eff] : effs) {
       all_efficiencies[name].push_back(eff);
     }
-
-    g.simulate_and_print("BEST", best_order);
-    g.simulate_and_print("SIMPLE", simple_order);
   }
 
   std::cout << "=== Efficiency Overview (" << original_trials << " trials) ===\n";
