@@ -102,6 +102,7 @@ include(ExecutableFunctions)
 
 add_subdirectory(examples)
 add_subdirectory(benchmarks)
+add_subdirectory(simulation)
 
 # Enable testing
 enable_testing()

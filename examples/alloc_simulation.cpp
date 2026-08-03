@@ -6,9 +6,15 @@
 size_t global_mem = 0;
 size_t max_global_mem = 0;
 
+std::function<void(size_t)> memory_hook = nullptr;
+
 void set_global_mem(size_t new_global_mem) {
   global_mem = new_global_mem;
-  max_global_mem = std::max(max_global_mem, global_mem);
+  if (memory_hook) {
+    memory_hook(global_mem);
+  } else {
+    max_global_mem = std::max(max_global_mem, global_mem);
+  }
 }
 
 class Tensor {
@@ -603,6 +609,9 @@ public:
     for (auto* act : inputs_) {
       act->allocate_data();
     }
+    size_t prev_max = max_global_mem;
+    max_global_mem = global_mem;
+
     for (auto& op : final_order) {
       op_nodes_.at(op).run();
     }
@@ -612,6 +621,7 @@ public:
     for (auto* act : inputs_) {
       act->deallocate_data();
     }
+    max_global_mem = prev_max;
 
     return final_order;
   }
@@ -774,12 +784,9 @@ public:
         frame.chosen_op = id;
         op_nodes_.at(id).run();
 
-        // Branch-and-bound: prune if current peak already exceeds best found.
-        // Use > (not >=) because max_global_mem is monotonically non-decreasing,
-        // so a path at exactly best_peak can still complete but can't improve.
+        // Branch-and-bound: prune if current peak already exceeds best found..
         if (max_global_mem > best_peak) {
           num_pruned++;
-          // Undo and try next candidate.
           op_nodes_.at(id).undo_run();
           max_global_mem = frame.saved_max;
           current_order.pop_back();
@@ -819,9 +826,6 @@ public:
             best_peak = max_global_mem;
             best_order = current_order;
           }
-          // Don't push a child frame; the while loop will undo and try next.
-          // Advance candidate_idx so the undo at top of loop triggers correctly
-          // by leaving chosen_op set — the top-of-loop will undo it.
           break;
         }
 
@@ -1022,12 +1026,10 @@ public:
     auto [deps, dependents] = get_dependencies();
 
     struct MacroCandidate {
-      std::string id;
       std::vector<std::string> ops;
       std::set<std::string> external_dependencies;
     };
     std::vector<MacroCandidate> macros;
-    int macro_counter = 0;
 
     for (const auto& join_op_id : op_ids) {
       if (deps.at(join_op_id).size() > 1) {
@@ -1052,8 +1054,6 @@ public:
 
         if (!exclusive_ancestors.empty()) {
           MacroCandidate mc;
-          mc.id = "macro_" + std::to_string(macro_counter++);
-
           mc.ops = get_simple_order_for_subgraph(exclusive_ancestors);
           mc.ops.push_back(join_op_id);
 
@@ -1131,26 +1131,49 @@ public:
 
       auto evaluate_candidate = [&](const std::vector<std::string>& cand_ops) {
         size_t start_mem = global_mem;
-        size_t saved_max_mem = max_global_mem;
-        max_global_mem = global_mem;
+        size_t local_peak = global_mem;
+
+        memory_hook = [&](size_t new_mem) {
+          if (new_mem > local_peak) local_peak = new_mem;
+        };
 
         for (const auto& op : cand_ops) {
           op_nodes_.at(op).run();
         }
 
-        long long spike =
-            static_cast<long long>(max_global_mem) - static_cast<long long>(start_mem);
+        long long spike = static_cast<long long>(local_peak) - static_cast<long long>(start_mem);
         long long delta = static_cast<long long>(global_mem) - static_cast<long long>(start_mem);
 
         for (auto it = cand_ops.rbegin(); it != cand_ops.rend(); ++it) {
           op_nodes_.at(*it).undo_run();
         }
-        max_global_mem = saved_max_mem;
 
-        if (delta < best_delta || (delta == best_delta && spike < best_spike)) {
+        memory_hook = nullptr;
+
+        if (best_candidate_ops.empty()) {
           best_delta = delta;
           best_spike = spike;
           best_candidate_ops = cand_ops;
+        } else {
+          long long i_a = spike;
+          long long i_b = delta;
+          long long j_a = best_spike;
+          long long j_b = best_delta;
+          long long cost_ij = std::max(i_a, i_b + j_a);
+          long long cost_ji = std::max(j_a, j_b + i_a);
+          bool is_better = false;
+          if (cost_ij != cost_ji)
+            is_better = cost_ij < cost_ji;
+          else if (i_b != j_b)
+            is_better = i_b < j_b;
+          else
+            is_better = i_a < j_a;
+
+          if (is_better) {
+            best_delta = delta;
+            best_spike = spike;
+            best_candidate_ops = cand_ops;
+          }
         }
       };
 
@@ -1442,7 +1465,10 @@ public:
           for (auto& child : m_dependents[best]) {
             bool rdy = true;
             for (auto& parent : m_deps[child]) {
-              if (!exec_macros.count(parent)) { rdy = false; break; }
+              if (!exec_macros.count(parent)) {
+                rdy = false;
+                break;
+              }
             }
             if (rdy) ready.push_back(child);
           }
@@ -1532,7 +1558,10 @@ public:
         if (executed.count(op)) continue;
         bool ready = true;
         for (const auto& d : deps.at(op)) {
-          if (!executed.count(d)) { ready = false; break; }
+          if (!executed.count(d)) {
+            ready = false;
+            break;
+          }
         }
         if (ready) ready_ops.push_back(op);
       }
@@ -1541,12 +1570,18 @@ public:
       for (size_t i = 0; i < macro_candidates.size(); ++i) {
         bool valid = true;
         for (const auto& op : macro_candidates[i].ops) {
-          if (executed.count(op)) { valid = false; break; }
+          if (executed.count(op)) {
+            valid = false;
+            break;
+          }
         }
         if (!valid) continue;
         bool ready = true;
         for (const auto& d : macro_candidates[i].external_dependencies) {
-          if (!executed.count(d)) { ready = false; break; }
+          if (!executed.count(d)) {
+            ready = false;
+            break;
+          }
         }
         if (ready) ready_macro_indices.push_back(static_cast<int>(i));
       }
@@ -1561,26 +1596,49 @@ public:
 
       auto evaluate_candidate = [&](const std::vector<std::string>& cand_ops) {
         size_t start_mem = global_mem;
-        size_t saved_max_mem = max_global_mem;
-        max_global_mem = global_mem;
+        size_t local_peak = global_mem;
+
+        memory_hook = [&](size_t new_mem) {
+          if (new_mem > local_peak) local_peak = new_mem;
+        };
 
         for (const auto& op : cand_ops) {
           op_nodes_.at(op).run();
         }
 
-        long long spike =
-            static_cast<long long>(max_global_mem) - static_cast<long long>(start_mem);
+        long long spike = static_cast<long long>(local_peak) - static_cast<long long>(start_mem);
         long long delta = static_cast<long long>(global_mem) - static_cast<long long>(start_mem);
 
         for (auto it = cand_ops.rbegin(); it != cand_ops.rend(); ++it) {
           op_nodes_.at(*it).undo_run();
         }
-        max_global_mem = saved_max_mem;
 
-        if (delta < best_delta || (delta == best_delta && spike < best_spike)) {
+        memory_hook = nullptr;
+
+        if (best_candidate_ops.empty()) {
           best_delta = delta;
           best_spike = spike;
           best_candidate_ops = cand_ops;
+        } else {
+          long long i_a = spike;
+          long long i_b = delta;
+          long long j_a = best_spike;
+          long long j_b = best_delta;
+          long long cost_ij = std::max(i_a, i_b + j_a);
+          long long cost_ji = std::max(j_a, j_b + i_a);
+          bool is_better = false;
+          if (cost_ij != cost_ji)
+            is_better = cost_ij < cost_ji;
+          else if (i_b != j_b)
+            is_better = i_b < j_b;
+          else
+            is_better = i_a < j_a;
+
+          if (is_better) {
+            best_delta = delta;
+            best_spike = spike;
+            best_candidate_ops = cand_ops;
+          }
         }
       };
 
@@ -1825,7 +1883,7 @@ ActNode* build_random_joining_dag(Graph& g, int depth, int& node_counter) {
   }
 
   std::string prefix = "j" + std::to_string(depth) + "_" + std::to_string(node_counter++);
-  bool is_seq = (rand() % 2 == 0);
+  bool is_seq = (rand() % 3 > 0);
 
   if (is_seq) {
     auto input = build_random_joining_dag(g, depth - 1, node_counter);
@@ -1881,12 +1939,13 @@ signed main() {
 
     auto recursive_order = g.find_recursive_macro_execution_order();
 
-    auto effs = g.rank_execution_orders(
-        {{"BEST", best_order}, {"SIMPLE", simple_order}, {"MACRO", macro_order},
-         {"RECURSIVE", recursive_order}});
+    auto effs = g.rank_execution_orders({{"BEST", best_order},
+                                         {"SIMPLE", simple_order},
+                                         {"MACRO", macro_order},
+                                         {"RECURSIVE", recursive_order}});
 
     for (auto eff : effs) {
-      if ((eff.first == "RECURSIVE") && !near(eff.second, 100)) {
+      if ((eff.first == "MACRO") && !near(eff.second, 100)) {
         g.print_graph();
         g.export_to_dot("graph.dot");
         g.find_macro_candidate_execution_order(true);
