@@ -6,6 +6,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <queue>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -434,11 +435,16 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph) {
 
   std::vector<std::string> final_order;
   std::set<std::string> executed_macros;
-  std::vector<std::string> ready_macros;
+
+  auto pq_compare = [&macros, &compare](const std::string& a, const std::string& b) {
+    return compare(macros[b], macros[a]);
+  };
+  std::priority_queue<std::string, std::vector<std::string>, decltype(pq_compare)> ready_macros(
+      pq_compare);
 
   for (auto& [id, deps_set] : macro_deps) {
     if (deps_set.empty()) {
-      ready_macros.push_back(id);
+      ready_macros.push(id);
     }
   }
 
@@ -447,17 +453,10 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph) {
       throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
     }
 
-    std::string best_macro = ready_macros[0];
-    int best_idx = 0;
-    for (size_t i = 1; i < ready_macros.size(); ++i) {
-      if (compare(macros[ready_macros[i]], macros[best_macro])) {
-        best_macro = ready_macros[i];
-        best_idx = static_cast<int>(i);
-      }
-    }
+    std::string best_macro = ready_macros.top();
+    ready_macros.pop();
 
     executed_macros.insert(best_macro);
-    ready_macros.erase(ready_macros.begin() + best_idx);
 
     for (auto& op : macros[best_macro].ops) {
       final_order.push_back(op);
@@ -472,7 +471,7 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph) {
         }
       }
       if (ready) {
-        ready_macros.push_back(child);
+        ready_macros.push(child);
       }
     }
   }
@@ -557,13 +556,10 @@ int main() {
 
   while (trials--) {
     // You can switch the graph generator just like alloc_simulation
-    Graph g = random_joining_graph(5);
+    Graph g = random_joining_graph(4);
     // Graph g = random_branching_graph(3);
     // Graph g = random_m_sequences_graph(3, 10);
 
-    // To prevent printing of DFS exploration steps to stdout from finding optimal execution
-    // (since it can clutter output for large trials), we could normally silence them, but
-    // since the user's find_minimum_memory_execution_order has couts, they will show up.
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
 
@@ -575,7 +571,7 @@ int main() {
         save_graph_to_dot(g, "graph.dot");
         std::ofstream log("bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
-        log << "MACRO Efficiency: " << eff << "%\n";
+        log << name << " Efficiency: " << eff << "%\n";
         auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
           log << p_name << " Path: ";
           for (const auto& op : path) log << op << " ";
