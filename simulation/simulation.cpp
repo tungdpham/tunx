@@ -61,7 +61,6 @@ std::map<std::string, int> get_out_deg(Graph& graph) {
 }
 
 std::vector<std::string> find_macro_candidate_execution_order(Graph& graph);
-std::vector<std::string> find_macro_candidate_execution_order_v2(Graph& graph);
 
 std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
   std::vector<std::string> op_ids;
@@ -110,7 +109,7 @@ std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
 
   // --- Seed best_peak with the greedy heuristic solution ---
   {
-    auto heuristic_order = find_macro_candidate_execution_order_v2(graph);
+    auto heuristic_order = find_macro_candidate_execution_order(graph);
     if (!heuristic_order.empty()) {
       size_t heuristic_peak = 0;
       allocator.subscribe("heuristic", [&](size_t new_mem) {
@@ -369,183 +368,6 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph) {
     std::string best_Y = "";
     std::string best_X = "";
 
-    for (auto& [Y_id, Y_node] : macros) {
-      if (macro_deps[Y_id].size() == 1) {
-        std::string X_id = *macro_deps[Y_id].begin();
-        auto& X_node = macros[X_id];
-
-        if (compare(Y_node, X_node)) {
-          if (best_Y == "" || compare(Y_node, macros[best_Y])) {
-            best_Y = Y_id;
-            best_X = X_id;
-          }
-        }
-      }
-    }
-    for (auto& [X_id, dependents_set] : macro_dependents) {
-      if (dependents_set.size() == 1) {
-        std::string Y_id = *dependents_set.begin();
-        if (compare(macros[Y_id], macros[X_id])) {
-          if (best_Y == "" || compare(macros[Y_id], macros[best_Y])) {
-            best_Y = Y_id;
-            best_X = X_id;
-          }
-        }
-      }
-    }
-
-    if (best_Y == "") break;
-
-    std::string XY_id = "macro_" + std::to_string(next_macro_id++);
-    MacroNode XY;
-    XY.id = XY_id;
-    XY.ops = macros[best_X].ops;
-    XY.ops.insert(XY.ops.end(), macros[best_Y].ops.begin(), macros[best_Y].ops.end());
-    XY.a = std::max(macros[best_X].a, macros[best_X].b + macros[best_Y].a);
-    XY.b = macros[best_X].b + macros[best_Y].b;
-
-    macros[XY_id] = XY;
-
-    macro_deps[XY_id] = macro_deps[best_X];
-    for (auto& dep : macro_deps[best_Y]) {
-      if (dep != best_X) macro_deps[XY_id].insert(dep);
-    }
-
-    macro_dependents[XY_id] = macro_dependents[best_X];
-    macro_dependents[XY_id].erase(best_Y);
-    for (auto& child : macro_dependents[best_Y]) {
-      macro_dependents[XY_id].insert(child);
-    }
-
-    for (auto& parent : macro_deps[XY_id]) {
-      macro_dependents[parent].erase(best_X);
-      macro_dependents[parent].erase(best_Y);
-      macro_dependents[parent].insert(XY_id);
-    }
-    for (auto& child : macro_dependents[XY_id]) {
-      macro_deps[child].erase(best_X);
-      macro_deps[child].erase(best_Y);
-      macro_deps[child].insert(XY_id);
-    }
-
-    macros.erase(best_X);
-    macros.erase(best_Y);
-    macro_deps.erase(best_X);
-    macro_deps.erase(best_Y);
-    macro_dependents.erase(best_X);
-    macro_dependents.erase(best_Y);
-  }
-
-  std::vector<std::string> final_order;
-  std::set<std::string> executed_macros;
-  std::vector<std::string> ready_macros;
-
-  for (auto& [id, deps_set] : macro_deps) {
-    if (deps_set.empty()) {
-      ready_macros.push_back(id);
-    }
-  }
-
-  while (final_order.size() < op_ids.size()) {
-    if (ready_macros.empty()) {
-      throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
-    }
-
-    std::string best_macro = ready_macros[0];
-    int best_idx = 0;
-    for (size_t i = 1; i < ready_macros.size(); ++i) {
-      if (compare(macros[ready_macros[i]], macros[best_macro])) {
-        best_macro = ready_macros[i];
-        best_idx = static_cast<int>(i);
-      }
-    }
-
-    executed_macros.insert(best_macro);
-    ready_macros.erase(ready_macros.begin() + best_idx);
-
-    for (auto& op : macros[best_macro].ops) {
-      final_order.push_back(op);
-    }
-
-    for (auto& child : macro_dependents[best_macro]) {
-      bool ready = true;
-      for (auto& parent : macro_deps[child]) {
-        if (!executed_macros.count(parent)) {
-          ready = false;
-          break;
-        }
-      }
-      if (ready) {
-        ready_macros.push_back(child);
-      }
-    }
-  }
-
-  return final_order;
-}
-
-std::vector<std::string> find_macro_candidate_execution_order_v2(Graph& graph) {
-  std::vector<std::string> op_ids;
-  for (auto* node : graph.op_nodes()) {
-    op_ids.push_back(node->uuid());
-  }
-
-  auto out_deg = get_out_deg(graph);
-  auto [deps, dependents] = get_dependencies(graph);
-
-  struct MacroNode {
-    std::string id;
-    std::vector<std::string> ops;
-    long long a;
-    long long b;
-  };
-
-  std::map<std::string, MacroNode> macros;
-  std::map<std::string, std::set<std::string>> macro_deps;
-  std::map<std::string, std::set<std::string>> macro_dependents;
-
-  for (auto& id : op_ids) {
-    auto& node = graph.get_op(id);
-    long long all_outputs = 0;
-    for (auto* t : node.outputs()) {
-      all_outputs += t->size();
-    }
-
-    long long workspace = node.workspace_req();
-    long long total_memory_for_execution = all_outputs + workspace;
-
-    long long memory_generate = all_outputs;
-    long long memory_consumes = 0;
-    for (auto* t : node.inputs()) {
-      if (out_deg[t->uuid()] == 1) {
-        memory_consumes += t->size();
-      }
-    }
-
-    MacroNode mn;
-    mn.id = id;
-    mn.ops = {id};
-    mn.a = total_memory_for_execution;
-    mn.b = memory_generate - memory_consumes;
-    macros[id] = mn;
-
-    macro_deps[id] = deps[id];
-    macro_dependents[id] = dependents[id];
-  }
-
-  auto compare = [](const MacroNode& i, const MacroNode& j) {
-    long long cost_ij = std::max(i.a, i.b + j.a);
-    long long cost_ji = std::max(j.a, j.b + i.a);
-    if (cost_ij != cost_ji) return cost_ij < cost_ji;
-    if (i.b != j.b) return i.b < j.b;
-    return i.a < j.a;
-  };
-
-  int next_macro_id = 0;
-  while (true) {
-    std::string best_Y = "";
-    std::string best_X = "";
-
     auto try_update_best = [&](const std::string& X_id, const std::string& Y_id) {
       if (!compare(macros[Y_id], macros[X_id])) return;
 
@@ -570,7 +392,7 @@ std::vector<std::string> find_macro_candidate_execution_order_v2(Graph& graph) {
 
     if (best_Y == "") break;
 
-    std::string XY_id = "macro_v2_" + std::to_string(next_macro_id++);
+    std::string XY_id = "macro_" + std::to_string(next_macro_id++);
     MacroNode XY;
     XY.id = XY_id;
     XY.ops = macros[best_X].ops;
@@ -736,6 +558,7 @@ int main() {
   while (trials--) {
     // You can switch the graph generator just like alloc_simulation
     Graph g = random_joining_graph(5);
+    // Graph g = random_branching_graph(3);
     // Graph g = random_m_sequences_graph(3, 10);
 
     // To prevent printing of DFS exploration steps to stdout from finding optimal execution
@@ -743,18 +566,16 @@ int main() {
     // since the user's find_minimum_memory_execution_order has couts, they will show up.
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
-    auto macro_v2_order = find_macro_candidate_execution_order_v2(g);
 
-    auto effs = rank_execution_orders(
-        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"MACRO_V2", macro_v2_order}});
+    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
 
     for (const auto& [name, eff] : effs) {
       all_efficiencies[name].push_back(eff);
-      if (name == "MACRO_V2" && !near(eff, 100.0)) {
+      if (name == "MACRO" && !near(eff, 100.0)) {
         save_graph_to_dot(g, "graph.dot");
-        std::ofstream log("bad_macro_v2.log", std::ios_base::app);
+        std::ofstream log("bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
-        log << "MACRO_V2 Efficiency: " << eff << "%\n";
+        log << "MACRO Efficiency: " << eff << "%\n";
         auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
           log << p_name << " Path: ";
           for (const auto& op : path) log << op << " ";
@@ -762,7 +583,6 @@ int main() {
         };
         print_path("BEST", best_order);
         print_path("MACRO", macro_order);
-        print_path("MACRO_V2", macro_v2_order);
         log << "\n";
       }
     }
