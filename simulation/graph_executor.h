@@ -20,17 +20,17 @@ private:
 public:
   GraphExecutor(Graph& graph)
       : graph(graph) {
-    for (ActivationNode* act_node : graph.act_nodes()) {
-      ref_count_[act_node] = 0;
-      data_[act_node] = nullptr;
+    for (auto& [uuid, act_node] : graph.act_nodes()) {
+      ref_count_[&act_node] = 0;
+      data_[&act_node] = nullptr;
     }
 
-    for (OperationNode* op_node : graph.op_nodes()) {
-      for (ActivationNode* dep : op_node->inputs()) {
-        act_dependents_[dep].push_back(op_node);
+    for (auto& [uuid, op_node] : graph.op_nodes()) {
+      for (ActivationNode* dep : op_node.inputs()) {
+        act_dependents_[dep].push_back(&op_node);
       }
-      for (ActivationNode* out : op_node->outputs()) {
-        act_deps_[out] = op_node;
+      for (ActivationNode* out : op_node.outputs()) {
+        act_deps_[out] = &op_node;
       }
     }
   }

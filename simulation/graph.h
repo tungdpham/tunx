@@ -84,19 +84,19 @@ public:
 
   const std::vector<ActivationNode*>& outputs() const { return outputs_; }
 
-  std::vector<OperationNode*> op_nodes() {
-    std::vector<OperationNode*> op_nodes;
-    for (auto& [uuid, op] : ops_) {
-      op_nodes.push_back(&op);
-    }
-    return op_nodes;
+  std::unordered_map<std::string, OperationNode>& op_nodes() {
+    return ops_;
   }
 
-  std::vector<ActivationNode*> act_nodes() {
-    std::vector<ActivationNode*> act_nodes;
-    for (auto& [uuid, act] : acts_) {
-      act_nodes.push_back(&act);
-    }
-    return act_nodes;
+  const std::unordered_map<std::string, OperationNode>& op_nodes() const {
+    return ops_;
+  }
+
+  std::unordered_map<std::string, ActivationNode>& act_nodes() {
+    return acts_;
+  }
+
+  const std::unordered_map<std::string, ActivationNode>& act_nodes() const {
+    return acts_;
   }
 };

@@ -11,9 +11,9 @@
 
 inline std::vector<std::string> topological_sort(Graph& graph, const std::vector<std::string>& ops) {
   std::unordered_map<std::string, std::string> tensor_producer;
-  for (auto* node : graph.op_nodes()) {
-    for (auto* t : node->outputs()) {
-      tensor_producer[t->uuid()] = node->uuid();
+  for (auto& [uuid, node] : graph.op_nodes()) {
+    for (auto* t : node.outputs()) {
+      tensor_producer[t->uuid()] = node.uuid();
     }
   }
 

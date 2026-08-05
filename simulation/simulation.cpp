@@ -22,18 +22,18 @@ std::pair<std::map<std::string, std::set<std::string>>,
           std::map<std::string, std::set<std::string>>>
 get_dependencies(Graph& graph) {
   std::map<std::string, std::string> tensor_producer;
-  for (auto* node : graph.op_nodes()) {
-    for (auto* t : node->outputs()) {
-      tensor_producer[t->uuid()] = node->uuid();
+  for (auto& [uuid, node] : graph.op_nodes()) {
+    for (auto* t : node.outputs()) {
+      tensor_producer[t->uuid()] = node.uuid();
     }
   }
 
   std::map<std::string, std::set<std::string>> deps;
   std::map<std::string, std::set<std::string>> dependents;
-  for (auto* node : graph.op_nodes()) {
-    std::string op_id = node->uuid();
+  for (auto& [uuid, node] : graph.op_nodes()) {
+    std::string op_id = node.uuid();
     deps[op_id] = {};
-    for (auto* t : node->inputs()) {
+    for (auto* t : node.inputs()) {
       auto it = tensor_producer.find(t->uuid());
       if (it != tensor_producer.end()) {
         deps[op_id].insert(it->second);
@@ -50,8 +50,8 @@ get_dependencies(Graph& graph) {
 
 std::map<std::string, int> get_out_deg(Graph& graph) {
   std::map<std::string, int> out_deg;
-  for (auto* node : graph.op_nodes()) {
-    for (auto* t : node->inputs()) {
+  for (auto& [uuid, node] : graph.op_nodes()) {
+    for (auto* t : node.inputs()) {
       out_deg[t->uuid()]++;
     }
   }
@@ -70,9 +70,9 @@ std::vector<std::string> find_macro_candidate_execution_order_v2(Graph& graph,
 std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
   std::vector<std::string> op_ids;
   std::map<std::string, int> op_index;
-  for (auto* node : graph.op_nodes()) {
-    op_index[node->uuid()] = static_cast<int>(op_ids.size());
-    op_ids.push_back(node->uuid());
+  for (auto& [uuid, node] : graph.op_nodes()) {
+    op_index[node.uuid()] = static_cast<int>(op_ids.size());
+    op_ids.push_back(node.uuid());
   }
   const int n = static_cast<int>(op_ids.size());
   if (n > 256) {
@@ -123,9 +123,9 @@ std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
       executor.init_boundaries(&allocator);
       for (const auto& op_id : heuristic_order) {
         OperationNode* op_node = nullptr;
-        for (auto* node : graph.op_nodes()) {
-          if (node->uuid() == op_id) {
-            op_node = node;
+        for (auto& [uuid, node] : graph.op_nodes()) {
+          if (node.uuid() == op_id) {
+            op_node = &node;
             break;
           }
         }
@@ -138,9 +138,9 @@ std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
 
       for (auto it = heuristic_order.rbegin(); it != heuristic_order.rend(); ++it) {
         OperationNode* op_node = nullptr;
-        for (auto* node : graph.op_nodes()) {
-          if (node->uuid() == *it) {
-            op_node = node;
+        for (auto& [uuid, node] : graph.op_nodes()) {
+          if (node.uuid() == *it) {
+            op_node = &node;
             break;
           }
         }
@@ -196,9 +196,9 @@ std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
 
     if (!frame.chosen_op.empty()) {
       OperationNode* op_node = nullptr;
-      for (auto* node : graph.op_nodes()) {
-        if (node->uuid() == frame.chosen_op) {
-          op_node = node;
+      for (auto& [uuid, node] : graph.op_nodes()) {
+        if (node.uuid() == frame.chosen_op) {
+          op_node = &node;
           break;
         }
       }
@@ -227,9 +227,9 @@ std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
 
       frame.chosen_op = id;
       OperationNode* op_node = nullptr;
-      for (auto* node : graph.op_nodes()) {
-        if (node->uuid() == id) {
-          op_node = node;
+      for (auto& [uuid, node] : graph.op_nodes()) {
+        if (node.uuid() == id) {
+          op_node = &node;
           break;
         }
       }
@@ -290,9 +290,9 @@ std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
                           frame.candidate_idx >= static_cast<int>(frame.candidates.size()) - 1)) {
       if (!frame.chosen_op.empty()) {
         OperationNode* op_node = nullptr;
-        for (auto* node : graph.op_nodes()) {
-          if (node->uuid() == frame.chosen_op) {
-            op_node = node;
+        for (auto& [uuid, node] : graph.op_nodes()) {
+          if (node.uuid() == frame.chosen_op) {
+            op_node = &node;
             break;
           }
         }
@@ -313,8 +313,8 @@ std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
 
 std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std::ostream* os) {
   std::vector<std::string> op_ids;
-  for (auto* node : graph.op_nodes()) {
-    op_ids.push_back(node->uuid());
+  for (auto& [uuid, node] : graph.op_nodes()) {
+    op_ids.push_back(node.uuid());
   }
 
   auto out_deg = get_out_deg(graph);
@@ -526,9 +526,9 @@ std::map<std::string, double> rank_execution_orders(
     executor.init_boundaries(&allocator);
     for (const auto& op_id : order) {
       OperationNode* op_node = nullptr;
-      for (auto* node : g.op_nodes()) {
-        if (node->uuid() == op_id) {
-          op_node = node;
+      for (auto& [uuid, node] : g.op_nodes()) {
+        if (node.uuid() == op_id) {
+          op_node = &node;
           break;
         }
       }
@@ -555,18 +555,18 @@ std::map<std::string, double> rank_execution_orders(
 void save_graph_to_dot(Graph& graph, const std::string& filename) {
   std::ofstream out(filename);
   out << "digraph G {\n";
-  for (auto* act : graph.act_nodes()) {
-    out << "  \"" << act->uuid() << "\" [shape=ellipse, label=\"" << act->uuid() << "\\n("
-        << act->size() << ")\"];\n";
+  for (auto& [uuid, act] : graph.act_nodes()) {
+    out << "  \"" << act.uuid() << "\" [shape=ellipse, label=\"" << act.uuid() << "\\n("
+        << act.size() << ")\"];\n";
   }
-  for (auto* op : graph.op_nodes()) {
-    out << "  \"" << op->uuid() << "\" [shape=box, label=\"" << op->uuid() << "\\n("
-        << op->workspace_req() << ")\"];\n";
-    for (auto* in : op->inputs()) {
-      out << "  \"" << in->uuid() << "\" -> \"" << op->uuid() << "\";\n";
+  for (auto& [uuid, op] : graph.op_nodes()) {
+    out << "  \"" << op.uuid() << "\" [shape=box, label=\"" << op.uuid() << "\\n("
+        << op.workspace_req() << ")\"];\n";
+    for (auto* in : op.inputs()) {
+      out << "  \"" << in->uuid() << "\" -> \"" << op.uuid() << "\";\n";
     }
-    for (auto* out_act : op->outputs()) {
-      out << "  \"" << op->uuid() << "\" -> \"" << out_act->uuid() << "\";\n";
+    for (auto* out_act : op.outputs()) {
+      out << "  \"" << op.uuid() << "\" -> \"" << out_act->uuid() << "\";\n";
     }
   }
   out << "}\n";
