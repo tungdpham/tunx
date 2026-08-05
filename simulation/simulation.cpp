@@ -61,7 +61,8 @@ std::map<std::string, int> get_out_deg(Graph& graph) {
   return out_deg;
 }
 
-std::vector<std::string> find_macro_candidate_execution_order(Graph& graph);
+std::vector<std::string> find_macro_candidate_execution_order(Graph& graph,
+                                                              bool print_macros = false);
 
 std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
   std::vector<std::string> op_ids;
@@ -307,7 +308,7 @@ std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
   return best_order;
 }
 
-std::vector<std::string> find_macro_candidate_execution_order(Graph& graph) {
+std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, bool print_macros) {
   std::vector<std::string> op_ids;
   for (auto* node : graph.op_nodes()) {
     op_ids.push_back(node->uuid());
@@ -433,6 +434,18 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph) {
     macro_dependents.erase(best_Y);
   }
 
+  if (print_macros) {
+    std::cout << "All macros generated" << std::endl;
+    for (auto& [id, macro] : macros) {
+      // std::cout << macro.id << " "  << macro.ops << macro.a << " " << macro.b << std::endl;
+      std::cout << id << ": ";
+      for (auto& op : macro.ops) {
+        std::cout << op << " ";
+      }
+      std::cout << " -> [ " << macro.a << " " << macro.b << " ]" << std::endl;
+    }
+  }
+
   std::vector<std::string> final_order;
   std::set<std::string> executed_macros;
 
@@ -552,7 +565,8 @@ int main() {
   int trials;
   std::cin >> trials;
   int original_trials = trials;
-  std::map<std::string, std::vector<double>> all_efficiencies;
+  std::map<std::string, std::vector<double>> all_branch_efficiencies;
+  std::map<std::string, std::vector<double>> all_join_efficiencies;
 
   while (trials--) {
     // You can switch the graph generator just like alloc_simulation
@@ -566,8 +580,9 @@ int main() {
     auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
 
     for (const auto& [name, eff] : effs) {
-      all_efficiencies[name].push_back(eff);
+      all_join_efficiencies[name].push_back(eff);
       if (name == "MACRO" && !near(eff, 100.0)) {
+        std::cout << "Found a bad macro execution order" << std::endl;
         save_graph_to_dot(g, "graph.dot");
         std::ofstream log("bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
@@ -579,13 +594,73 @@ int main() {
         };
         print_path("BEST", best_order);
         print_path("MACRO", macro_order);
+        find_macro_candidate_execution_order(g, true);
         log << "\n";
+        std::cout << std::endl;
       }
     }
   }
 
-  std::cout << "=== Efficiency Overview (" << original_trials << " trials) ===\n";
-  for (auto& [name, effs] : all_efficiencies) {
+  trials = original_trials;
+  while (trials--) {
+    // You can switch the graph generator just like alloc_simulation
+    // Graph g = random_joining_graph(4);
+    Graph g = random_branching_graph(3);
+    // Graph g = random_m_sequences_graph(3, 10);
+
+    auto best_order = find_minimum_memory_execution_order(g);
+    auto macro_order = find_macro_candidate_execution_order(g);
+
+    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
+
+    for (const auto& [name, eff] : effs) {
+      all_branch_efficiencies[name].push_back(eff);
+      if (name == "MACRO" && !near(eff, 100.0)) {
+        std::cout << "Found a bad macro execution order" << std::endl;
+        save_graph_to_dot(g, "graph.dot");
+        std::ofstream log("bad_macro.log", std::ios_base::app);
+        log << "--- Trial Failure ---\n";
+        log << name << " Efficiency: " << eff << "%\n";
+        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
+          log << p_name << " Path: ";
+          for (const auto& op : path) log << op << " ";
+          log << "\n";
+        };
+        print_path("BEST", best_order);
+        print_path("MACRO", macro_order);
+        find_macro_candidate_execution_order(g, true);
+        log << "\n";
+        std::cout << std::endl;
+      }
+    }
+  }
+
+  std::cout << "=== Join Efficiency Overview (" << original_trials << " trials) ===\n";
+  for (auto& [name, effs] : all_join_efficiencies) {
+    if (effs.empty()) continue;
+    std::sort(effs.begin(), effs.end());
+    double sum = 0;
+    for (double e : effs) sum += e;
+    double avg = sum / effs.size();
+    double worst = effs.front();
+    double best = effs.back();
+
+    // Percentiles (sorted ascending, so index 0 is worst)
+    double p10 = effs[effs.size() * 10 / 100];
+    double p50 = effs[effs.size() * 50 / 100];
+    double p90 = effs[effs.size() * 90 / 100];
+
+    std::cout << name << " Order:\n";
+    std::cout << "  Average: " << std::fixed << std::setprecision(2) << avg << "%\n";
+    std::cout << "  Worst:   " << std::fixed << std::setprecision(2) << worst << "%\n";
+    std::cout << "  p10:     " << std::fixed << std::setprecision(2) << p10 << "%\n";
+    std::cout << "  Median:  " << std::fixed << std::setprecision(2) << p50 << "%\n";
+    std::cout << "  p90:     " << std::fixed << std::setprecision(2) << p90 << "%\n";
+    std::cout << "  Best:    " << std::fixed << std::setprecision(2) << best << "%\n\n";
+  }
+
+  std::cout << "=== Branch Efficiency Overview (" << original_trials << " trials) ===\n";
+  for (auto& [name, effs] : all_branch_efficiencies) {
     if (effs.empty()) continue;
     std::sort(effs.begin(), effs.end());
     double sum = 0;
