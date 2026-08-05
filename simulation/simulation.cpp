@@ -62,7 +62,7 @@ std::map<std::string, int> get_out_deg(Graph& graph) {
 }
 
 std::vector<std::string> find_macro_candidate_execution_order(Graph& graph,
-                                                              bool print_macros = false);
+                                                              std::ostream* os = nullptr);
 
 std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
   std::vector<std::string> op_ids;
@@ -308,7 +308,7 @@ std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
   return best_order;
 }
 
-std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, bool print_macros) {
+std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std::ostream* os) {
   std::vector<std::string> op_ids;
   for (auto* node : graph.op_nodes()) {
     op_ids.push_back(node->uuid());
@@ -379,12 +379,6 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, bool
       }
     };
 
-    for (auto& [Y_id, Y_node] : macros) {
-      if (macro_deps[Y_id].size() == 1) {
-        std::string X_id = *macro_deps[Y_id].begin();
-        try_update_best(X_id, Y_id);
-      }
-    }
     for (auto& [X_id, dependents_set] : macro_dependents) {
       if (dependents_set.size() == 1) {
         std::string Y_id = *dependents_set.begin();
@@ -434,15 +428,14 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, bool
     macro_dependents.erase(best_Y);
   }
 
-  if (print_macros) {
-    std::cout << "All macros generated" << std::endl;
+  if (os) {
+    *os << "All macros generated" << std::endl;
     for (auto& [id, macro] : macros) {
-      // std::cout << macro.id << " "  << macro.ops << macro.a << " " << macro.b << std::endl;
-      std::cout << id << ": ";
+      *os << id << ": ";
       for (auto& op : macro.ops) {
-        std::cout << op << " ";
+        *os << op << " ";
       }
-      std::cout << " -> [ " << macro.a << " " << macro.b << " ]" << std::endl;
+      *os << " -> [ " << macro.a << " " << macro.b << " ]" << std::endl;
     }
   }
 
@@ -569,10 +562,7 @@ int main() {
   std::map<std::string, std::vector<double>> all_join_efficiencies;
 
   while (trials--) {
-    // You can switch the graph generator just like alloc_simulation
     Graph g = random_joining_graph(4);
-    // Graph g = random_branching_graph(3);
-    // Graph g = random_m_sequences_graph(3, 10);
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
@@ -582,7 +572,6 @@ int main() {
     for (const auto& [name, eff] : effs) {
       all_join_efficiencies[name].push_back(eff);
       if (name == "MACRO" && !near(eff, 100.0)) {
-        std::cout << "Found a bad macro execution order" << std::endl;
         save_graph_to_dot(g, "graph.dot");
         std::ofstream log("bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
@@ -594,19 +583,15 @@ int main() {
         };
         print_path("BEST", best_order);
         print_path("MACRO", macro_order);
-        find_macro_candidate_execution_order(g, true);
+        find_macro_candidate_execution_order(g, &log);
         log << "\n";
-        std::cout << std::endl;
       }
     }
   }
 
   trials = original_trials;
   while (trials--) {
-    // You can switch the graph generator just like alloc_simulation
-    // Graph g = random_joining_graph(4);
     Graph g = random_branching_graph(3);
-    // Graph g = random_m_sequences_graph(3, 10);
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
@@ -616,7 +601,6 @@ int main() {
     for (const auto& [name, eff] : effs) {
       all_branch_efficiencies[name].push_back(eff);
       if (name == "MACRO" && !near(eff, 100.0)) {
-        std::cout << "Found a bad macro execution order" << std::endl;
         save_graph_to_dot(g, "graph.dot");
         std::ofstream log("bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
@@ -628,9 +612,8 @@ int main() {
         };
         print_path("BEST", best_order);
         print_path("MACRO", macro_order);
-        find_macro_candidate_execution_order(g, true);
+        find_macro_candidate_execution_order(g, &log);
         log << "\n";
-        std::cout << std::endl;
       }
     }
   }
