@@ -64,6 +64,9 @@ std::map<std::string, int> get_out_deg(Graph& graph) {
 std::vector<std::string> find_macro_candidate_execution_order(Graph& graph,
                                                               std::ostream* os = nullptr);
 
+std::vector<std::string> find_macro_candidate_execution_order_v2(Graph& graph,
+                                                                 std::ostream* os = nullptr);
+
 std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
   std::vector<std::string> op_ids;
   std::map<std::string, int> op_index;
@@ -365,67 +368,84 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
     return i.a < j.a;
   };
 
+  std::vector<std::string> topo_order;
+  std::map<std::string, int> in_deg_topo;
+  for (auto& id : op_ids) in_deg_topo[id] = macro_deps[id].size();
+  std::queue<std::string> q;
+  for (auto& id : op_ids)
+    if (in_deg_topo[id] == 0) q.push(id);
+  while (!q.empty()) {
+    std::string u = q.front();
+    q.pop();
+    topo_order.push_back(u);
+    for (auto& v : macro_dependents[u]) {
+      if (--in_deg_topo[v] == 0) q.push(v);
+    }
+  }
+
   int next_macro_id = 0;
-  while (true) {
-    std::string best_Y = "";
+
+  std::deque<std::string> dq;
+  for (const auto& u : topo_order) {
+    dq.push_back(u);
+  }
+
+  while (!dq.empty()) {
+    std::string Y = dq.front();
+    dq.pop_front();
+
     std::string best_X = "";
-
-    auto try_update_best = [&](const std::string& X_id, const std::string& Y_id) {
-      if (!compare(macros[Y_id], macros[X_id])) return;
-
-      if (best_Y == "" || compare(macros[best_X], macros[X_id])) {
-        best_Y = Y_id;
-        best_X = X_id;
-      }
-    };
-
-    for (auto& [X_id, dependents_set] : macro_dependents) {
-      if (dependents_set.size() == 1) {
-        std::string Y_id = *dependents_set.begin();
-        try_update_best(X_id, Y_id);
+    for (auto& X : macro_deps[Y]) {
+      if (macro_dependents[X].size() == 1) {
+        if (compare(macros[Y], macros[X])) {
+          if (best_X == "" || compare(macros[best_X], macros[X])) {
+            best_X = X;
+          }
+        }
       }
     }
 
-    if (best_Y == "") break;
+    if (best_X != "") {
+      std::string XY_id = "macro_" + std::to_string(next_macro_id++);
+      MacroNode XY;
+      XY.id = XY_id;
+      XY.ops = macros[best_X].ops;
+      XY.ops.insert(XY.ops.end(), macros[Y].ops.begin(), macros[Y].ops.end());
+      XY.a = std::max(macros[best_X].a, macros[best_X].b + macros[Y].a);
+      XY.b = macros[best_X].b + macros[Y].b;
+      macros[XY_id] = XY;
 
-    std::string XY_id = "macro_" + std::to_string(next_macro_id++);
-    MacroNode XY;
-    XY.id = XY_id;
-    XY.ops = macros[best_X].ops;
-    XY.ops.insert(XY.ops.end(), macros[best_Y].ops.begin(), macros[best_Y].ops.end());
-    XY.a = std::max(macros[best_X].a, macros[best_X].b + macros[best_Y].a);
-    XY.b = macros[best_X].b + macros[best_Y].b;
+      macro_deps[XY_id] = macro_deps[best_X];
+      for (auto& dep : macro_deps[Y]) {
+        if (dep != best_X) macro_deps[XY_id].insert(dep);
+      }
 
-    macros[XY_id] = XY;
+      macro_dependents[XY_id] = macro_dependents[best_X];
+      macro_dependents[XY_id].erase(Y);
+      for (auto& child : macro_dependents[Y]) {
+        macro_dependents[XY_id].insert(child);
+      }
 
-    macro_deps[XY_id] = macro_deps[best_X];
-    for (auto& dep : macro_deps[best_Y]) {
-      if (dep != best_X) macro_deps[XY_id].insert(dep);
+      for (auto& p : macro_deps[XY_id]) {
+        macro_dependents[p].erase(best_X);
+        macro_dependents[p].erase(Y);
+        macro_dependents[p].insert(XY_id);
+      }
+      for (auto& child : macro_dependents[XY_id]) {
+        macro_deps[child].erase(best_X);
+        macro_deps[child].erase(Y);
+        macro_deps[child].insert(XY_id);
+      }
+
+      macros.erase(best_X);
+      macros.erase(Y);
+      macro_deps.erase(best_X);
+      macro_deps.erase(Y);
+      macro_dependents.erase(best_X);
+      macro_dependents.erase(Y);
+
+      dq.push_front(XY_id);
     }
-
-    macro_dependents[XY_id] = macro_dependents[best_X];
-    macro_dependents[XY_id].erase(best_Y);
-    for (auto& child : macro_dependents[best_Y]) {
-      macro_dependents[XY_id].insert(child);
-    }
-
-    for (auto& parent : macro_deps[XY_id]) {
-      macro_dependents[parent].erase(best_X);
-      macro_dependents[parent].erase(best_Y);
-      macro_dependents[parent].insert(XY_id);
-    }
-    for (auto& child : macro_dependents[XY_id]) {
-      macro_deps[child].erase(best_X);
-      macro_deps[child].erase(best_Y);
-      macro_deps[child].insert(XY_id);
-    }
-
-    macros.erase(best_X);
-    macros.erase(best_Y);
-    macro_deps.erase(best_X);
-    macro_deps.erase(best_Y);
-    macro_dependents.erase(best_X);
-    macro_dependents.erase(best_Y);
   }
 
   if (os) {
@@ -589,9 +609,35 @@ int main() {
     }
   }
 
+  auto print_stats = [](std::vector<double>& effs) {
+    if (effs.empty()) return;
+    std::sort(effs.begin(), effs.end());
+    double sum = 0;
+    for (double e : effs) sum += e;
+    double avg = sum / effs.size();
+    double worst = effs.front();
+    double best = effs.back();
+    double p10 = effs[effs.size() * 10 / 100];
+    double p50 = effs[effs.size() * 50 / 100];
+    double p90 = effs[effs.size() * 90 / 100];
+
+    std::cout << "  Average: " << std::fixed << std::setprecision(2) << avg << "%\n";
+    std::cout << "  Worst:   " << std::fixed << std::setprecision(2) << worst << "%\n";
+    std::cout << "  p10:     " << std::fixed << std::setprecision(2) << p10 << "%\n";
+    std::cout << "  Median:  " << std::fixed << std::setprecision(2) << p50 << "%\n";
+    std::cout << "  p90:     " << std::fixed << std::setprecision(2) << p90 << "%\n";
+    std::cout << "  Best:    " << std::fixed << std::setprecision(2) << best << "%\n\n";
+  };
+
+  std::cout << "=== Join Efficiency Overview (" << original_trials << " trials) ===\n";
+  for (auto name : {"BEST", "MACRO"}) {
+    std::cout << name << " Order:\n";
+    print_stats(all_join_efficiencies[name]);
+  }
+
   trials = original_trials;
   while (trials--) {
-    Graph g = random_branching_graph(3);
+    Graph g = random_branching_graph(2);
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
@@ -618,52 +664,10 @@ int main() {
     }
   }
 
-  std::cout << "=== Join Efficiency Overview (" << original_trials << " trials) ===\n";
-  for (auto& [name, effs] : all_join_efficiencies) {
-    if (effs.empty()) continue;
-    std::sort(effs.begin(), effs.end());
-    double sum = 0;
-    for (double e : effs) sum += e;
-    double avg = sum / effs.size();
-    double worst = effs.front();
-    double best = effs.back();
-
-    // Percentiles (sorted ascending, so index 0 is worst)
-    double p10 = effs[effs.size() * 10 / 100];
-    double p50 = effs[effs.size() * 50 / 100];
-    double p90 = effs[effs.size() * 90 / 100];
-
-    std::cout << name << " Order:\n";
-    std::cout << "  Average: " << std::fixed << std::setprecision(2) << avg << "%\n";
-    std::cout << "  Worst:   " << std::fixed << std::setprecision(2) << worst << "%\n";
-    std::cout << "  p10:     " << std::fixed << std::setprecision(2) << p10 << "%\n";
-    std::cout << "  Median:  " << std::fixed << std::setprecision(2) << p50 << "%\n";
-    std::cout << "  p90:     " << std::fixed << std::setprecision(2) << p90 << "%\n";
-    std::cout << "  Best:    " << std::fixed << std::setprecision(2) << best << "%\n\n";
-  }
-
   std::cout << "=== Branch Efficiency Overview (" << original_trials << " trials) ===\n";
-  for (auto& [name, effs] : all_branch_efficiencies) {
-    if (effs.empty()) continue;
-    std::sort(effs.begin(), effs.end());
-    double sum = 0;
-    for (double e : effs) sum += e;
-    double avg = sum / effs.size();
-    double worst = effs.front();
-    double best = effs.back();
-
-    // Percentiles (sorted ascending, so index 0 is worst)
-    double p10 = effs[effs.size() * 10 / 100];
-    double p50 = effs[effs.size() * 50 / 100];
-    double p90 = effs[effs.size() * 90 / 100];
-
+  for (auto name : {"BEST", "MACRO"}) {
     std::cout << name << " Order:\n";
-    std::cout << "  Average: " << std::fixed << std::setprecision(2) << avg << "%\n";
-    std::cout << "  Worst:   " << std::fixed << std::setprecision(2) << worst << "%\n";
-    std::cout << "  p10:     " << std::fixed << std::setprecision(2) << p10 << "%\n";
-    std::cout << "  Median:  " << std::fixed << std::setprecision(2) << p50 << "%\n";
-    std::cout << "  p90:     " << std::fixed << std::setprecision(2) << p90 << "%\n";
-    std::cout << "  Best:    " << std::fixed << std::setprecision(2) << best << "%\n\n";
+    print_stats(all_branch_efficiencies[name]);
   }
 
   return 0;

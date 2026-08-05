@@ -14,7 +14,7 @@ public:
       : uuid_(uuid),
         size_(size) {}
 
-  std::string uuid() const { return uuid_; }
+  const std::string& uuid() const { return uuid_; }
 
   size_t size() const { return size_; }
 };
@@ -37,7 +37,7 @@ public:
         outputs_(outputs),
         cache_(cache) {}
 
-  std::string uuid() const { return uuid_; }
+  const std::string& uuid() const { return uuid_; }
 
   size_t workspace_req() const { return workspace_req_; }
 
