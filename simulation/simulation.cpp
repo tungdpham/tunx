@@ -977,27 +977,53 @@ std::vector<std::string> find_macro_candidate_execution_order_v2(Graph& graph, s
   std::vector<std::string> final_order;
   std::set<std::string> executed_macros;
 
-  std::priority_queue<std::string, std::vector<std::string>, decltype(pq_compare)> ready_macros(
-      pq_compare);
+  std::set<std::string> ready_macros;
 
   for (auto& [id, deps_set] : macro_deps) {
     if (deps_set.empty()) {
-      ready_macros.push(id);
+      ready_macros.insert(id);
     }
   }
+
+  Allocator scheduler_allocator;
+  GraphExecutor scheduler_executor(graph);
+  scheduler_executor.init_boundaries(&scheduler_allocator);
 
   while (final_order.size() < op_ids.size()) {
     if (ready_macros.empty()) {
       throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
     }
 
-    std::string best_macro = ready_macros.top();
-    ready_macros.pop();
+    std::string best_macro;
+    size_t best_peak = std::numeric_limits<size_t>::max();
+    for (const auto& candidate : ready_macros) {
+      auto& candidate_macro = macros[candidate];
+      size_t candidate_peak = scheduler_allocator.allocated();
+      scheduler_allocator.subscribe("macro_v2_preview", [&](size_t new_mem) {
+        candidate_peak = std::max(candidate_peak, new_mem);
+      });
+      for (auto& op_id : candidate_macro.ops) {
+        scheduler_executor.run_op_node(&graph.get_op(op_id), &scheduler_allocator);
+      }
+      scheduler_allocator.unsubscribe("macro_v2_preview");
+      for (auto it = candidate_macro.ops.rbegin(); it != candidate_macro.ops.rend(); ++it) {
+        scheduler_executor.undo_run_op_node(&graph.get_op(*it), &scheduler_allocator);
+      }
+
+      if (candidate_peak < best_peak ||
+          (candidate_peak == best_peak &&
+           (best_macro.empty() || compare(macros[candidate], macros[best_macro])))) {
+        best_peak = candidate_peak;
+        best_macro = candidate;
+      }
+    }
+    ready_macros.erase(best_macro);
 
     executed_macros.insert(best_macro);
 
     for (auto& op : macros[best_macro].ops) {
       final_order.push_back(op);
+      scheduler_executor.run_op_node(&graph.get_op(op), &scheduler_allocator);
     }
 
     for (auto& child : macro_dependents[best_macro]) {
@@ -1009,7 +1035,7 @@ std::vector<std::string> find_macro_candidate_execution_order_v2(Graph& graph, s
         }
       }
       if (ready) {
-        ready_macros.push(child);
+        ready_macros.insert(child);
       }
     }
   }

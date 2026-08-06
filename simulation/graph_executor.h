@@ -10,7 +10,7 @@ class GraphExecutor {
 private:
   Graph& graph;
   std::unordered_map<ActivationNode*, Tensor> data_;
-  std::unordered_map<OperationNode*, Tensor> workspace_;
+  std::unordered_map<const OperationNode*, Tensor> workspace_;
   std::unordered_map<ActivationNode*, size_t> ref_count_;
   std::unordered_map<ActivationNode*, OperationNode*>
       act_deps_;  // which op node create this activation node
@@ -46,7 +46,7 @@ public:
     }
   }
 
-  void run_op_node(OperationNode* node, Allocator* allocator) {
+  void run_op_node(const OperationNode* node, Allocator* allocator) {
     // sanity check
     if (!node) {
       throw std::invalid_argument("GraphExecutor::run_op_node: Node is null.");
@@ -90,7 +90,7 @@ public:
     workspace_[node] = Tensor();
   }
 
-  void undo_run_op_node(OperationNode* node, Allocator* allocator) {
+  void undo_run_op_node(const OperationNode* node, Allocator* allocator) {
     // sanity check
     if (!node) {
       throw std::invalid_argument("GraphExecutor::undo_run_op_node: Node is null.");
