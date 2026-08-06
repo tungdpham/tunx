@@ -1082,8 +1082,10 @@ int main() {
   int original_trials = trials;
   std::map<std::string, std::vector<double>> all_sample_efficiencies;
   std::map<std::string, std::vector<double>> all_branch_efficiencies;
+  std::map<std::string, std::vector<double>> all_static_branch_efficiencies;
   std::map<std::string, std::vector<double>> all_join_efficiencies;
   std::map<std::string, std::vector<double>> all_diamond_efficiencies;
+  std::map<std::string, std::vector<double>> all_static_diamond_efficiencies;
 
   auto print_stats = [](std::vector<double>& effs) {
     if (effs.empty()) return;
@@ -1232,6 +1234,47 @@ int main() {
 
   trials = original_trials;
   while (trials--) {
+    Graph g = random_static_branching_graph(3);
+
+    auto best_order = find_minimum_memory_execution_order(g);
+    auto macro_order = find_macro_candidate_execution_order(g);
+    auto macro_v2_order = find_macro_candidate_execution_order_v2(g);
+
+    auto effs = rank_execution_orders(
+        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"MACRO_V2", macro_v2_order}});
+
+    for (const auto& [name, eff] : effs) {
+      all_static_branch_efficiencies[name].push_back(eff);
+      if ((name == "MACRO" || name == "MACRO_V2") && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "static_branch_graph.dot");
+        std::ofstream log("static_branch_bad_macro.log", std::ios_base::app);
+        log << "--- Trial Failure ---\n";
+        log << name << " Efficiency: " << eff << "%\n";
+        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
+          log << p_name << " Path: ";
+          for (const auto& op : path) log << op << " ";
+          log << "\n";
+        };
+        print_path("BEST", best_order);
+        print_path(name, name == "MACRO" ? macro_order : macro_v2_order);
+        if (name == "MACRO") {
+          find_macro_candidate_execution_order(g, &log);
+        } else {
+          find_macro_candidate_execution_order_v2(g, &log);
+        }
+        log << "\n";
+      }
+    }
+  }
+
+  std::cout << "=== Static Branch Efficiency Overview (" << original_trials << " trials) ===\n";
+  for (auto name : {"BEST", "MACRO", "MACRO_V2"}) {
+    std::cout << name << " Order:\n";
+    print_stats(all_static_branch_efficiencies[name]);
+  }
+
+  trials = original_trials;
+  while (trials--) {
     Graph g = random_diamond_graph(4);
 
     auto best_order = find_minimum_memory_execution_order(g);
@@ -1269,6 +1312,47 @@ int main() {
   for (auto name : {"BEST", "MACRO", "MACRO_V2"}) {
     std::cout << name << " Order:\n";
     print_stats(all_diamond_efficiencies[name]);
+  }
+
+  trials = original_trials;
+  while (trials--) {
+    Graph g = random_static_diamond_graph(4);
+
+    auto best_order = find_minimum_memory_execution_order(g);
+    auto macro_order = find_macro_candidate_execution_order(g);
+    auto macro_v2_order = find_macro_candidate_execution_order_v2(g);
+
+    auto effs = rank_execution_orders(
+        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"MACRO_V2", macro_v2_order}});
+
+    for (const auto& [name, eff] : effs) {
+      all_static_diamond_efficiencies[name].push_back(eff);
+      if ((name == "MACRO" || name == "MACRO_V2") && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "static_diamond_graph.dot");
+        std::ofstream log("static_diamond_bad_macro.log", std::ios_base::app);
+        log << "--- Trial Failure ---\n";
+        log << name << " Efficiency: " << eff << "%\n";
+        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
+          log << p_name << " Path: ";
+          for (const auto& op : path) log << op << " ";
+          log << "\n";
+        };
+        print_path("BEST", best_order);
+        print_path(name, name == "MACRO" ? macro_order : macro_v2_order);
+        if (name == "MACRO") {
+          find_macro_candidate_execution_order(g, &log);
+        } else {
+          find_macro_candidate_execution_order_v2(g, &log);
+        }
+        log << "\n";
+      }
+    }
+  }
+
+  std::cout << "=== Static Diamond Efficiency Overview (" << original_trials << " trials) ===\n";
+  for (auto name : {"BEST", "MACRO", "MACRO_V2"}) {
+    std::cout << name << " Order:\n";
+    print_stats(all_static_diamond_efficiencies[name]);
   }
 
   return 0;

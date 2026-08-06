@@ -72,6 +72,54 @@ inline Graph random_diamond_graph(int depth) {
   return g;
 }
 
+inline ActivationNode* build_random_static_diamond_dag(Graph& g, ActivationNode* input, int depth,
+                                                       int& node_counter) {
+  if (depth == 0) {
+    return input;
+  }
+
+  std::string prefix = "sd" + std::to_string(depth) + "_" + std::to_string(node_counter++);
+  int structure_type = rand() % 3;
+
+  if (structure_type == 0) {
+    auto act = g.add_act(prefix + "_seq", random_act_size());
+    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {act});
+    return build_random_static_diamond_dag(g, act, depth - 1, node_counter);
+  }
+
+  if (structure_type == 1) {
+    auto left_input = g.add_act(prefix + "_left_input", random_act_size());
+    auto right_input = g.add_act(prefix + "_right_input", random_act_size());
+    g.add_op(prefix + "_split", random_ws_size(), {input}, {left_input, right_input});
+
+    auto left_out = build_random_static_diamond_dag(g, left_input, depth - 1, node_counter);
+    auto right_out = build_random_static_diamond_dag(g, right_input, depth - 1, node_counter);
+
+    auto merge_act = g.add_act(prefix + "_merge", random_act_size());
+    g.add_op(prefix + "_add", random_ws_size(), {left_out, right_out}, {merge_act});
+    return merge_act;
+  }
+
+  auto main_input = g.add_act(prefix + "_main_input", random_act_size());
+  auto skip_input = g.add_act(prefix + "_skip_input", random_act_size());
+  g.add_op(prefix + "_split", random_ws_size(), {input}, {main_input, skip_input});
+
+  auto main_out = build_random_static_diamond_dag(g, main_input, depth - 1, node_counter);
+  auto merge_act = g.add_act(prefix + "_res_merge", random_act_size());
+  g.add_op(prefix + "_res_add", random_ws_size(), {main_out, skip_input}, {merge_act});
+  return merge_act;
+}
+
+inline Graph random_static_diamond_graph(int depth) {
+  Graph g;
+  int node_counter = 0;
+  auto input = g.add_act("input", random_act_size());
+  g.set_inputs({input});
+  auto output = build_random_static_diamond_dag(g, input, depth, node_counter);
+  g.set_outputs({output});
+  return g;
+}
+
 inline Graph random_m_sequences_graph(int m, int length) {
   Graph g;
   int node_counter = 0;
@@ -128,6 +176,46 @@ inline Graph random_branching_graph(int depth) {
   auto input = g.add_act("input", random_act_size());
   g.set_inputs({input});
   build_random_branching_dag(g, input, depth, node_counter);
+  return g;
+}
+
+inline void build_random_static_branching_dag(Graph& g, ActivationNode* input, int depth,
+                                              int& node_counter) {
+  if (depth == 0) {
+    auto outputs = g.outputs();
+    outputs.push_back(input);
+    g.set_outputs(outputs);
+    return;
+  }
+
+  std::string prefix = "sb" + std::to_string(depth) + "_" + std::to_string(node_counter++);
+  if (rand() % 3 > 0) {
+    auto next_act = g.add_act(prefix + "_seq", random_act_size());
+    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {next_act});
+    build_random_static_branching_dag(g, next_act, depth - 1, node_counter);
+    return;
+  }
+
+  const int num_branches = rand() % 2 + 2;
+  std::vector<ActivationNode*> branch_inputs;
+  branch_inputs.reserve(num_branches);
+  for (int i = 0; i < num_branches; ++i) {
+    branch_inputs.push_back(
+        g.add_act(prefix + "_branch_input" + std::to_string(i), random_act_size()));
+  }
+  g.add_op(prefix + "_split", random_ws_size(), {input}, branch_inputs);
+
+  for (auto* branch_input : branch_inputs) {
+    build_random_static_branching_dag(g, branch_input, depth - 1, node_counter);
+  }
+}
+
+inline Graph random_static_branching_graph(int depth) {
+  Graph g;
+  int node_counter = 0;
+  auto input = g.add_act("input", random_act_size());
+  g.set_inputs({input});
+  build_random_static_branching_dag(g, input, depth, node_counter);
   return g;
 }
 
