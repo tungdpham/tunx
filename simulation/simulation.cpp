@@ -532,6 +532,491 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
   return final_order;
 }
 
+std::vector<std::string> find_macro_candidate_execution_order_v2(Graph& graph, std::ostream* os) {
+  std::vector<std::string> op_ids;
+  for (auto& [uuid, node] : graph.op_nodes()) {
+    op_ids.push_back(node.uuid());
+  }
+
+  auto out_deg = get_out_deg(graph);
+  auto [deps, dependents] = get_dependencies(graph);
+
+  struct MacroNode {
+    std::string id;
+    std::vector<std::string> ops;
+    long long a;
+    long long b;
+  };
+
+  std::map<std::string, MacroNode> macros;
+  std::map<std::string, std::set<std::string>> macro_deps;
+  std::map<std::string, std::set<std::string>> macro_dependents;
+
+  for (auto& id : op_ids) {
+    auto& node = graph.get_op(id);
+    long long all_outputs = 0;
+    for (auto* t : node.outputs()) {
+      all_outputs += t->size();
+    }
+
+    long long workspace = node.workspace_req();
+    long long total_memory_for_execution = all_outputs + workspace;
+
+    long long memory_generate = all_outputs;
+    long long memory_consumes = 0;
+    for (auto* t : node.inputs()) {
+      if (out_deg[t->uuid()] == 1) {
+        memory_consumes += t->size();
+      }
+    }
+
+    MacroNode mn;
+    mn.id = id;
+    mn.ops = {id};
+    mn.a = total_memory_for_execution;
+    mn.b = memory_generate - memory_consumes;
+    macros[id] = mn;
+
+    macro_deps[id] = deps[id];
+    macro_dependents[id] = dependents[id];
+  }
+
+  auto compare = [](const MacroNode& i, const MacroNode& j) {
+    long long cost_ij = std::max(i.a, i.b + j.a);
+    long long cost_ji = std::max(j.a, j.b + i.a);
+    if (cost_ij != cost_ji) return cost_ij < cost_ji;
+    if (i.b != j.b) return i.b < j.b;
+    return i.a < j.a;
+  };
+
+  std::vector<std::string> topo_order;
+  std::map<std::string, int> in_deg_topo;
+  for (auto& id : op_ids) in_deg_topo[id] = macro_deps[id].size();
+  std::queue<std::string> q;
+  for (auto& id : op_ids)
+    if (in_deg_topo[id] == 0) q.push(id);
+  while (!q.empty()) {
+    std::string u = q.front();
+    q.pop();
+    topo_order.push_back(u);
+    for (auto& v : macro_dependents[u]) {
+      if (--in_deg_topo[v] == 0) q.push(v);
+    }
+  }
+
+  int next_macro_id = 0;
+
+  std::deque<std::string> dq;
+  for (const auto& u : topo_order) {
+    dq.push_back(u);
+  }
+
+  while (!dq.empty()) {
+    std::string Y = dq.front();
+    dq.pop_front();
+
+    std::string best_X = "";
+    for (auto& X : macro_deps[Y]) {
+      if (macro_dependents[X].size() == 1) {
+        bool has_peers = false;
+        for (const auto& op_id : macros[X].ops) {
+          const auto& op_node = graph.get_op(op_id);
+          for (auto* t : op_node.inputs()) {
+            if (out_deg[t->uuid()] > 1) {
+              int internal_consumers = 0;
+              for (const auto& inner_op_id : macros[X].ops) {
+                const auto& inner_op = graph.get_op(inner_op_id);
+                for (auto* inner_t : inner_op.inputs()) {
+                  if (inner_t->uuid() == t->uuid()) {
+                    internal_consumers++;
+                  }
+                }
+              }
+              if (internal_consumers < out_deg[t->uuid()]) {
+                has_peers = true;
+                break;
+              }
+            }
+          }
+          if (has_peers) break;
+        }
+        if (has_peers) {
+          best_X = "";
+          break;
+        }
+
+        if (compare(macros[Y], macros[X])) {
+          if (best_X == "" || compare(macros[best_X], macros[X])) {
+            best_X = X;
+          }
+        }
+      }
+    }
+
+    if (best_X != "") {
+      std::string XY_id = "macro_v2_" + std::to_string(next_macro_id++);
+      MacroNode XY;
+      XY.id = XY_id;
+      XY.ops = macros[best_X].ops;
+      XY.ops.insert(XY.ops.end(), macros[Y].ops.begin(), macros[Y].ops.end());
+      XY.a = std::max(macros[best_X].a, macros[best_X].b + macros[Y].a);
+      XY.b = macros[best_X].b + macros[Y].b;
+      macros[XY_id] = XY;
+
+      macro_deps[XY_id] = macro_deps[best_X];
+      for (auto& dep : macro_deps[Y]) {
+        if (dep != best_X) macro_deps[XY_id].insert(dep);
+      }
+
+      macro_dependents[XY_id] = macro_dependents[best_X];
+      macro_dependents[XY_id].erase(Y);
+      for (auto& child : macro_dependents[Y]) {
+        macro_dependents[XY_id].insert(child);
+      }
+
+      for (auto& p : macro_deps[XY_id]) {
+        macro_dependents[p].erase(best_X);
+        macro_dependents[p].erase(Y);
+        macro_dependents[p].insert(XY_id);
+      }
+      for (auto& child : macro_dependents[XY_id]) {
+        macro_deps[child].erase(best_X);
+        macro_deps[child].erase(Y);
+        macro_deps[child].insert(XY_id);
+      }
+
+      macros.erase(best_X);
+      macros.erase(Y);
+      macro_deps.erase(best_X);
+      macro_deps.erase(Y);
+      macro_dependents.erase(best_X);
+      macro_dependents.erase(Y);
+
+      dq.push_front(XY_id);
+    }
+  }
+
+  // Phase 2: Sibling Family Contraction
+  // Idea: The problem with macro_v1 is that it doesn't account for shared input activations since
+  // linear macro contraction was originally based on static cost assumption. However, for reference
+  // counted tensors, like in instances where C branch into A, B, D is a successor of A, E is
+  // successor of B, contracting A and D into a single macro would be a bad choice since the
+  // reference count of executing other nodes could change cost of A. To avoid bad contraction, we
+  // add a check if A is shares its inputs with any other macros/operators. And the idea for
+  // considering contracting A with either D or B or both is called family grouping. Say A have
+  // lower cost than B, we compare macro {A, B} with family interleaved macros like {A, some
+  // sequences after A but possibly empty..., B, some sequences after B but possibly empty...}. It
+  // is intuitive that executing B first is suboptimal but this remains my intuition for now. I will
+  // add a test case later to verify. But it is also possible that family macros are more expensive
+  // than {A, some sequences after A, some other nodes from other branches that totally not a
+  // successor of C} if freeing the input tensor created by C doesn't yield much prospect. The idea
+  // is that after the initial linear contraction, the sequences after A, B is monotonically
+  // increasing, so not much lookahead is needed. Also we have to do the family macro in reverse
+  // topological order.
+  std::vector<std::string> shared_tensors;
+  for (auto* t : graph.inputs()) {
+    if (out_deg[t->uuid()] > 1) shared_tensors.push_back(t->uuid());
+  }
+  for (const auto& op_id : topo_order) {
+    auto& node = graph.get_op(op_id);
+    for (auto* t : node.outputs()) {
+      if (out_deg[t->uuid()] > 1) shared_tensors.push_back(t->uuid());
+    }
+  }
+
+  std::reverse(shared_tensors.begin(), shared_tensors.end());
+
+  auto evaluate_full = [&](const std::vector<std::string>& ops) -> std::pair<long long, long long> {
+    long long current_b = 0;
+    long long peak_a = 0;
+    std::map<std::string, int> local_consumptions;
+    for (const auto& op_id : ops) {
+      auto& node = graph.get_op(op_id);
+      long long all_outputs = 0;
+      for (auto* t : node.outputs()) all_outputs += t->size();
+      long long workspace = node.workspace_req();
+
+      peak_a = std::max(peak_a, current_b + all_outputs + workspace);
+      current_b += all_outputs;
+
+      for (auto* t : node.inputs()) {
+        local_consumptions[t->uuid()]++;
+        if (local_consumptions[t->uuid()] == out_deg[t->uuid()]) {
+          current_b -= t->size();
+        }
+      }
+    }
+    return {peak_a, current_b};
+  };
+
+  auto evaluate_schedule = [&](const std::vector<std::string>& macro_seq) -> long long {
+    std::vector<std::string> ops;
+    for (const auto& m_id : macro_seq) {
+      for (const auto& op : macros[m_id].ops) ops.push_back(op);
+    }
+    return evaluate_full(ops).first;
+  };
+
+  auto pq_compare = [&macros, &compare](const std::string& a, const std::string& b) {
+    return compare(macros[b], macros[a]);
+  };
+
+  for (const auto& T_id : shared_tensors) {
+    std::set<std::string> F_set;
+    for (const auto& [m_id, macro] : macros) {
+      for (const auto& op_id : macro.ops) {
+        auto& node = graph.get_op(op_id);
+        bool consumes_T = false;
+        for (auto* t : node.inputs()) {
+          if (t->uuid() == T_id) consumes_T = true;
+        }
+        if (consumes_T) {
+          F_set.insert(m_id);
+          break;
+        }
+      }
+    }
+
+    if (F_set.size() <= 1) continue;
+
+    bool is_sibling = true;
+    for (const auto& start_m : F_set) {
+      std::queue<std::string> bfs_q;
+      std::set<std::string> visited;
+      bfs_q.push(start_m);
+      visited.insert(start_m);
+      while (!bfs_q.empty()) {
+        auto curr = bfs_q.front();
+        bfs_q.pop();
+        for (const auto& dep : macro_dependents[curr]) {
+          if (F_set.count(dep)) {
+            is_sibling = false;
+            break;
+          }
+          if (!visited.count(dep)) {
+            visited.insert(dep);
+            bfs_q.push(dep);
+          }
+        }
+        if (!is_sibling) break;
+      }
+      if (!is_sibling) break;
+    }
+    if (!is_sibling) continue;
+
+    std::set<std::string> succ_F_set;
+    for (const auto& m : F_set) {
+      for (const auto& dep : macro_dependents[m]) {
+        succ_F_set.insert(dep);
+      }
+    }
+
+    std::set<std::string> U = F_set;
+    for (const auto& s : succ_F_set) U.insert(s);
+
+    std::vector<std::string> sched1;
+    {
+      std::vector<std::string> F_vec(F_set.begin(), F_set.end());
+      auto sort_compare = [&macros, &compare](const std::string& a, const std::string& b) {
+        return compare(macros[a], macros[b]);
+      };
+      std::sort(F_vec.begin(), F_vec.end(), sort_compare);
+      sched1.insert(sched1.end(), F_vec.begin(), F_vec.end());
+
+      std::map<std::string, int> in_deg;
+      for (const auto& s : succ_F_set) in_deg[s] = 0;
+      for (const auto& s : succ_F_set) {
+        for (const auto& dep : macro_dependents[s]) {
+          if (succ_F_set.count(dep)) in_deg[dep]++;
+        }
+      }
+      std::priority_queue<std::string, std::vector<std::string>, decltype(pq_compare)> ready(
+          pq_compare);
+      for (const auto& s : succ_F_set) {
+        if (in_deg[s] == 0) ready.push(s);
+      }
+      while (!ready.empty()) {
+        auto curr = ready.top();
+        ready.pop();
+        sched1.push_back(curr);
+        for (const auto& dep : macro_dependents[curr]) {
+          if (succ_F_set.count(dep)) {
+            if (--in_deg[dep] == 0) ready.push(dep);
+          }
+        }
+      }
+    }
+
+    std::vector<std::string> sched2;
+    {
+      std::map<std::string, int> in_deg;
+      for (const auto& u : U) in_deg[u] = 0;
+      for (const auto& u : U) {
+        for (const auto& dep : macro_dependents[u]) {
+          if (U.count(dep)) in_deg[dep]++;
+        }
+      }
+      std::priority_queue<std::string, std::vector<std::string>, decltype(pq_compare)> ready(
+          pq_compare);
+      for (const auto& u : U) {
+        if (in_deg[u] == 0) ready.push(u);
+      }
+      while (!ready.empty()) {
+        auto curr = ready.top();
+        ready.pop();
+        sched2.push_back(curr);
+        for (const auto& dep : macro_dependents[curr]) {
+          if (U.count(dep)) {
+            if (--in_deg[dep] == 0) ready.push(dep);
+          }
+        }
+      }
+    }
+
+    long long peak1 = evaluate_schedule(sched1);
+    long long peak2 = evaluate_schedule(sched2);
+
+    auto creates_cycle = [&](const std::set<std::string>& C) {
+      std::map<std::string, std::set<std::string>> adj;
+      std::map<std::string, int> in_deg;
+      in_deg["C_NODE"] = 0;
+      for (const auto& [u, deps] : macro_dependents) {
+        if (!C.count(u)) in_deg[u] = 0;
+        for (const auto& v : deps) {
+          if (!C.count(v)) in_deg[v] = 0;
+        }
+      }
+      for (const auto& [u, deps] : macro_dependents) {
+        std::string src = C.count(u) ? "C_NODE" : u;
+        for (const auto& v : deps) {
+          std::string dst = C.count(v) ? "C_NODE" : v;
+          if (src != dst) {
+            if (adj[src].insert(dst).second) {
+              in_deg[dst]++;
+            }
+          }
+        }
+      }
+      std::queue<std::string> q;
+      for (const auto& [u, deg] : in_deg) {
+        if (deg == 0) q.push(u);
+      }
+      int count = 0;
+      while (!q.empty()) {
+        std::string u = q.front();
+        q.pop();
+        count++;
+        for (const auto& v : adj[u]) {
+          if (--in_deg[v] == 0) q.push(v);
+        }
+      }
+      return count < (int)in_deg.size();
+    };
+
+    std::vector<std::string> chosen_sched;
+    std::set<std::string> contracted_macros;
+    if (peak1 < peak2 || creates_cycle(U)) {
+      for (const auto& m : sched1) {
+        if (F_set.count(m)) chosen_sched.push_back(m);
+      }
+      contracted_macros = F_set;
+    } else {
+      chosen_sched = sched2;
+      contracted_macros = U;
+    }
+
+    std::string new_macro_id = "macro_v2_" + std::to_string(next_macro_id++);
+    MacroNode new_macro;
+    new_macro.id = new_macro_id;
+    for (const auto& m : chosen_sched) {
+      for (const auto& op : macros[m].ops) new_macro.ops.push_back(op);
+    }
+
+    auto [a_val, b_val] = evaluate_full(new_macro.ops);
+    new_macro.a = a_val;
+    new_macro.b = b_val;
+    macros[new_macro_id] = new_macro;
+
+    macro_deps[new_macro_id] = {};
+    macro_dependents[new_macro_id] = {};
+    for (const auto& m : contracted_macros) {
+      for (const auto& dep : macro_deps[m]) {
+        if (!contracted_macros.count(dep)) {
+          macro_deps[new_macro_id].insert(dep);
+          macro_dependents[dep].erase(m);
+          macro_dependents[dep].insert(new_macro_id);
+        }
+      }
+      for (const auto& dep : macro_dependents[m]) {
+        if (!contracted_macros.count(dep)) {
+          macro_dependents[new_macro_id].insert(dep);
+          macro_deps[dep].erase(m);
+          macro_deps[dep].insert(new_macro_id);
+        }
+      }
+    }
+
+    for (const auto& m : contracted_macros) {
+      macros.erase(m);
+      macro_deps.erase(m);
+      macro_dependents.erase(m);
+    }
+  }
+
+  if (os) {
+    *os << "All macros generated" << std::endl;
+    for (auto& [id, macro] : macros) {
+      *os << id << ": ";
+      for (auto& op : macro.ops) {
+        *os << op << " ";
+      }
+      *os << " -> [ " << macro.a << " " << macro.b << " ]" << std::endl;
+    }
+  }
+
+  std::vector<std::string> final_order;
+  std::set<std::string> executed_macros;
+
+  std::priority_queue<std::string, std::vector<std::string>, decltype(pq_compare)> ready_macros(
+      pq_compare);
+
+  for (auto& [id, deps_set] : macro_deps) {
+    if (deps_set.empty()) {
+      ready_macros.push(id);
+    }
+  }
+
+  while (final_order.size() < op_ids.size()) {
+    if (ready_macros.empty()) {
+      throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
+    }
+
+    std::string best_macro = ready_macros.top();
+    ready_macros.pop();
+
+    executed_macros.insert(best_macro);
+
+    for (auto& op : macros[best_macro].ops) {
+      final_order.push_back(op);
+    }
+
+    for (auto& child : macro_dependents[best_macro]) {
+      bool ready = true;
+      for (auto& parent : macro_deps[child]) {
+        if (!executed_macros.count(parent)) {
+          ready = false;
+          break;
+        }
+      }
+      if (ready) {
+        ready_macros.push(child);
+      }
+    }
+  }
+
+  return final_order;
+}
+
 inline bool near(double a, double b) { return std::abs(a - b) < 1e-15; }
 
 std::map<std::string, double> rank_execution_orders(
@@ -603,7 +1088,7 @@ Graph sample_branch_graph() {
   Graph g;
   ActivationNode* input = g.add_act("input", 10240);
 
-  size_t branch_length = 10;
+  size_t branch_length = 5;
   ActivationNode* prev = input;
   ActivationNode* b1_tail = nullptr;
   // branch 1
@@ -677,12 +1162,14 @@ int main() {
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
+    auto macro_v2_order = find_macro_candidate_execution_order_v2(g);
 
-    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
+    auto effs = rank_execution_orders(
+        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"MACRO_V2", macro_v2_order}});
 
     for (const auto& [name, eff] : effs) {
       all_sample_efficiencies[name].push_back(eff);
-      if (name == "MACRO" && !near(eff, 100.0)) {
+      if ((name == "MACRO" || name == "MACRO_V2") && !near(eff, 100.0)) {
         save_graph_to_dot(g, "sample_graph.dot");
         std::ofstream log("sample_bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
@@ -693,20 +1180,59 @@ int main() {
           log << "\n";
         };
         print_path("BEST", best_order);
-        print_path("MACRO", macro_order);
-        find_macro_candidate_execution_order(g, &log);
+        print_path(name, name == "MACRO" ? macro_order : macro_v2_order);
+        if (name == "MACRO") {
+          find_macro_candidate_execution_order(g, &log);
+        } else {
+          find_macro_candidate_execution_order_v2(g, &log);
+        }
         log << "\n";
       }
     }
   }
   std::cout << "=== Sample Efficiency Overview (" << original_trials << " trials) ===\n";
-  for (auto name : {"BEST", "MACRO"}) {
+  for (auto name : {"BEST", "MACRO", "MACRO_V2"}) {
     std::cout << name << " Order:\n";
     print_stats(all_sample_efficiencies[name]);
   }
 
+  trials = original_trials;
+  while (trials--) {
+    Graph g = random_joining_graph(4);
+
+    auto best_order = find_minimum_memory_execution_order(g);
+    auto macro_order = find_macro_candidate_execution_order(g);
+    auto macro_v2_order = find_macro_candidate_execution_order_v2(g);
+
+    auto effs = rank_execution_orders(
+        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"MACRO_V2", macro_v2_order}});
+
+    for (const auto& [name, eff] : effs) {
+      all_join_efficiencies[name].push_back(eff);
+      if ((name == "MACRO" || name == "MACRO_V2") && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "join_graph.dot");
+        std::ofstream log("join_bad_macro.log", std::ios_base::app);
+        log << "--- Trial Failure ---\n";
+        log << name << " Efficiency: " << eff << "%\n";
+        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
+          log << p_name << " Path: ";
+          for (const auto& op : path) log << op << " ";
+          log << "\n";
+        };
+        print_path("BEST", best_order);
+        print_path(name, name == "MACRO" ? macro_order : macro_v2_order);
+        if (name == "MACRO") {
+          find_macro_candidate_execution_order(g, &log);
+        } else {
+          find_macro_candidate_execution_order_v2(g, &log);
+        }
+        log << "\n";
+      }
+    }
+  }
+
   std::cout << "=== Join Efficiency Overview (" << original_trials << " trials) ===\n";
-  for (auto name : {"BEST", "MACRO"}) {
+  for (auto name : {"BEST", "MACRO", "MACRO_V2"}) {
     std::cout << name << " Order:\n";
     print_stats(all_join_efficiencies[name]);
   }
@@ -717,12 +1243,14 @@ int main() {
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
+    auto macro_v2_order = find_macro_candidate_execution_order_v2(g);
 
-    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
+    auto effs = rank_execution_orders(
+        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"MACRO_V2", macro_v2_order}});
 
     for (const auto& [name, eff] : effs) {
       all_branch_efficiencies[name].push_back(eff);
-      if (name == "MACRO" && !near(eff, 100.0)) {
+      if ((name == "MACRO" || name == "MACRO_V2") && !near(eff, 100.0)) {
         save_graph_to_dot(g, "graph.dot");
         std::ofstream log("branch_bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
@@ -733,15 +1261,19 @@ int main() {
           log << "\n";
         };
         print_path("BEST", best_order);
-        print_path("MACRO", macro_order);
-        find_macro_candidate_execution_order(g, &log);
+        print_path(name, name == "MACRO" ? macro_order : macro_v2_order);
+        if (name == "MACRO") {
+          find_macro_candidate_execution_order(g, &log);
+        } else {
+          find_macro_candidate_execution_order_v2(g, &log);
+        }
         log << "\n";
       }
     }
   }
 
   std::cout << "=== Branch Efficiency Overview (" << original_trials << " trials) ===\n";
-  for (auto name : {"BEST", "MACRO"}) {
+  for (auto name : {"BEST", "MACRO", "MACRO_V2"}) {
     std::cout << name << " Order:\n";
     print_stats(all_branch_efficiencies[name]);
   }
