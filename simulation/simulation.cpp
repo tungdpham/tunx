@@ -397,6 +397,33 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
     std::string best_X = "";
     for (auto& X : macro_deps[Y]) {
       if (macro_dependents[X].size() == 1) {
+        bool has_peers = false;
+        for (const auto& op_id : macros[X].ops) {
+          const auto& op_node = graph.get_op(op_id);
+          for (auto* t : op_node.inputs()) {
+            if (out_deg[t->uuid()] > 1) {
+              int internal_consumers = 0;
+              for (const auto& inner_op_id : macros[X].ops) {
+                const auto& inner_op = graph.get_op(inner_op_id);
+                for (auto* inner_t : inner_op.inputs()) {
+                  if (inner_t->uuid() == t->uuid()) {
+                    internal_consumers++;
+                  }
+                }
+              }
+              if (internal_consumers < out_deg[t->uuid()]) {
+                has_peers = true;
+                break;
+              }
+            }
+          }
+          if (has_peers) break;
+        }
+        if (has_peers) {
+          best_X = "";
+          break;
+        }
+
         if (compare(macros[Y], macros[X])) {
           if (best_X == "" || compare(macros[best_X], macros[X])) {
             best_X = X;
@@ -572,42 +599,57 @@ void save_graph_to_dot(Graph& graph, const std::string& filename) {
   out << "}\n";
 }
 
+Graph sample_branch_graph() {
+  Graph g;
+  ActivationNode* input = g.add_act("input", 10240);
+
+  size_t branch_length = 10;
+  ActivationNode* prev = input;
+  ActivationNode* b1_tail = nullptr;
+  // branch 1
+  for (size_t i = 0; i < branch_length; i++) {
+    b1_tail = g.add_act("b1_act" + std::to_string(i), random_act_size());
+    g.add_op("b1_op" + std::to_string(i), random_ws_size(), {prev}, {b1_tail});
+    prev = b1_tail;
+  }
+
+  prev = input;
+  ActivationNode* b2_tail = nullptr;
+  // branch 2
+  for (size_t i = 0; i < branch_length; i++) {
+    b2_tail = g.add_act("b2_act" + std::to_string(i), random_act_size());
+    g.add_op("b2_op" + std::to_string(i), random_ws_size(), {prev}, {b2_tail});
+    prev = b2_tail;
+  }
+
+  prev = input;
+  ActivationNode* b3_tail = nullptr;
+  // branch 3
+  for (size_t i = 0; i < branch_length; i++) {
+    b3_tail = g.add_act("b3_act" + std::to_string(i), random_act_size());
+    g.add_op("b3_op" + std::to_string(i), random_ws_size(), {prev}, {b3_tail});
+    prev = b3_tail;
+  }
+
+  // join
+  ActivationNode* output = g.add_act("output", 10240);
+  g.add_op("join_op", random_ws_size(), {b1_tail, b2_tail, b3_tail}, {output});
+
+  g.set_inputs({input});
+  g.set_outputs({output});
+
+  return g;
+}
+
 int main() {
   srand(static_cast<unsigned int>(time(nullptr)));
 
   int trials;
   std::cin >> trials;
   int original_trials = trials;
+  std::map<std::string, std::vector<double>> all_sample_efficiencies;
   std::map<std::string, std::vector<double>> all_branch_efficiencies;
   std::map<std::string, std::vector<double>> all_join_efficiencies;
-
-  while (trials--) {
-    Graph g = random_joining_graph(4);
-
-    auto best_order = find_minimum_memory_execution_order(g);
-    auto macro_order = find_macro_candidate_execution_order(g);
-
-    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
-
-    for (const auto& [name, eff] : effs) {
-      all_join_efficiencies[name].push_back(eff);
-      if (name == "MACRO" && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "graph.dot");
-        std::ofstream log("bad_macro.log", std::ios_base::app);
-        log << "--- Trial Failure ---\n";
-        log << name << " Efficiency: " << eff << "%\n";
-        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
-          log << p_name << " Path: ";
-          for (const auto& op : path) log << op << " ";
-          log << "\n";
-        };
-        print_path("BEST", best_order);
-        print_path("MACRO", macro_order);
-        find_macro_candidate_execution_order(g, &log);
-        log << "\n";
-      }
-    }
-  }
 
   auto print_stats = [](std::vector<double>& effs) {
     if (effs.empty()) return;
@@ -629,6 +671,40 @@ int main() {
     std::cout << "  Best:    " << std::fixed << std::setprecision(2) << best << "%\n\n";
   };
 
+  trials = original_trials;
+  while (trials--) {
+    Graph g = sample_branch_graph();
+
+    auto best_order = find_minimum_memory_execution_order(g);
+    auto macro_order = find_macro_candidate_execution_order(g);
+
+    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
+
+    for (const auto& [name, eff] : effs) {
+      all_sample_efficiencies[name].push_back(eff);
+      if (name == "MACRO" && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "sample_graph.dot");
+        std::ofstream log("sample_bad_macro.log", std::ios_base::app);
+        log << "--- Trial Failure ---\n";
+        log << name << " Efficiency: " << eff << "%\n";
+        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
+          log << p_name << " Path: ";
+          for (const auto& op : path) log << op << " ";
+          log << "\n";
+        };
+        print_path("BEST", best_order);
+        print_path("MACRO", macro_order);
+        find_macro_candidate_execution_order(g, &log);
+        log << "\n";
+      }
+    }
+  }
+  std::cout << "=== Sample Efficiency Overview (" << original_trials << " trials) ===\n";
+  for (auto name : {"BEST", "MACRO"}) {
+    std::cout << name << " Order:\n";
+    print_stats(all_sample_efficiencies[name]);
+  }
+
   std::cout << "=== Join Efficiency Overview (" << original_trials << " trials) ===\n";
   for (auto name : {"BEST", "MACRO"}) {
     std::cout << name << " Order:\n";
@@ -637,7 +713,7 @@ int main() {
 
   trials = original_trials;
   while (trials--) {
-    Graph g = random_branching_graph(2);
+    Graph g = random_branching_graph(3);
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
@@ -648,7 +724,7 @@ int main() {
       all_branch_efficiencies[name].push_back(eff);
       if (name == "MACRO" && !near(eff, 100.0)) {
         save_graph_to_dot(g, "graph.dot");
-        std::ofstream log("bad_macro.log", std::ios_base::app);
+        std::ofstream log("branch_bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
         log << name << " Efficiency: " << eff << "%\n";
         auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
