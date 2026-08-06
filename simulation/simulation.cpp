@@ -2,6 +2,7 @@
 #include <bitset>
 #include <cmath>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -18,297 +19,218 @@
 #include "graph_executor.h"
 #include "graph_generator.h"
 
-std::pair<std::map<std::string, std::set<std::string>>,
-          std::map<std::string, std::set<std::string>>>
-get_dependencies(Graph& graph) {
-  std::map<std::string, std::string> tensor_producer;
-  for (auto& [uuid, node] : graph.op_nodes()) {
-    for (auto* t : node.outputs()) {
-      tensor_producer[t->uuid()] = node.uuid();
-    }
-  }
-
-  std::map<std::string, std::set<std::string>> deps;
-  std::map<std::string, std::set<std::string>> dependents;
-  for (auto& [uuid, node] : graph.op_nodes()) {
-    std::string op_id = node.uuid();
-    deps[op_id] = {};
-    for (auto* t : node.inputs()) {
-      auto it = tensor_producer.find(t->uuid());
-      if (it != tensor_producer.end()) {
-        deps[op_id].insert(it->second);
-      }
-    }
-  }
-  for (auto& [op_id, dep_set] : deps) {
-    for (auto& dep : dep_set) {
-      dependents[dep].insert(op_id);
-    }
-  }
-  return {deps, dependents};
-}
-
-std::map<std::string, int> get_out_deg(Graph& graph) {
-  std::map<std::string, int> out_deg;
-  for (auto& [uuid, node] : graph.op_nodes()) {
-    for (auto* t : node.inputs()) {
-      out_deg[t->uuid()]++;
-    }
-  }
-  for (auto* t : graph.outputs()) {
-    out_deg[t->uuid()]++;
-  }
-  return out_deg;
-}
-
 std::vector<std::string> find_macro_candidate_execution_order(Graph& graph,
                                                               std::ostream* os = nullptr);
 
 std::vector<std::string> find_macro_candidate_execution_order_v2(Graph& graph,
                                                                  std::ostream* os = nullptr);
 
-std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
-  std::vector<std::string> op_ids;
-  std::map<std::string, int> op_index;
-  for (auto& [uuid, node] : graph.op_nodes()) {
-    op_index[node.uuid()] = static_cast<int>(op_ids.size());
-    op_ids.push_back(node.uuid());
-  }
-  const int n = static_cast<int>(op_ids.size());
-  if (n > 256) {
-    throw std::runtime_error("Too many ops for bitmask memoization (max 256).");
-  }
+std::vector<std::string> find_fork_join_optimal_execution_order(Graph& graph);
 
-  auto out_deg = get_out_deg(graph);
-  auto [deps, dependents] = get_dependencies(graph);
+std::vector<std::string> find_diamond_execution_order(Graph& graph, size_t max_states = 1000000);
 
-  std::map<std::string, int> in_degree;
-  for (auto& id : op_ids) {
-    in_degree[id] = static_cast<int>(deps[id].size());
+std::vector<std::string> find_fork_join_optimal_execution_order(Graph& graph) {
+  if (graph.inputs().size() != 1 || graph.outputs().size() != 1) return {};
+
+  std::map<std::string, std::vector<std::string>> consumers;
+  for (const auto& [op_id, op] : graph.op_nodes()) {
+    for (auto* input : op.inputs()) consumers[input->uuid()].push_back(op_id);
   }
 
-  auto get_score = [&](const std::string& id) -> long long {
-    auto& node = graph.get_op(id);
-    long long score = static_cast<long long>(node.workspace_req());
-    for (auto* t : node.inputs()) {
-      // Note: out_deg here is a static estimation to guide heuristic,
-      // not a dynamic tracking value, which is fine for scoring.
-      if (out_deg[t->uuid()] == 1) {
-        score -= static_cast<long long>(t->size());
+  const auto* shared_input = graph.inputs().front();
+  const auto& root_ops = consumers[shared_input->uuid()];
+  if (root_ops.size() < 2) return {};
+
+  std::vector<std::vector<std::string>> branches;
+  std::string join_op_id;
+  std::set<std::string> branch_ops;
+
+  for (const auto& root_op_id : root_ops) {
+    const auto* current_op = &graph.get_op(root_op_id);
+    if (current_op->inputs().size() != 1 || current_op->inputs().front() != shared_input ||
+        current_op->outputs().size() != 1) {
+      return {};
+    }
+
+    std::vector<std::string> branch;
+    while (true) {
+      if (!branch_ops.insert(current_op->uuid()).second) return {};
+      branch.push_back(current_op->uuid());
+
+      const auto& next_ops = consumers[current_op->outputs().front()->uuid()];
+      if (next_ops.size() != 1) return {};
+      const auto* next_op = &graph.get_op(next_ops.front());
+      if (next_op->inputs().size() > 1) {
+        if (join_op_id.empty()) join_op_id = next_op->uuid();
+        if (join_op_id != next_op->uuid()) return {};
+        break;
       }
+      if (next_op->inputs().size() != 1 || next_op->outputs().size() != 1) return {};
+      current_op = next_op;
     }
-    for (auto* t : node.outputs()) {
-      score += static_cast<long long>(t->size());
-    }
-    return score;
-  };
+    branches.push_back(std::move(branch));
+  }
 
-  std::unordered_map<std::bitset<256>, size_t> memo;
-  size_t best_peak = std::numeric_limits<size_t>::max();
-  std::vector<std::string> best_order;
-  [[maybe_unused]] int num_orderings = 0;
-  [[maybe_unused]] int num_pruned = 0;
+  if (join_op_id.empty()) return {};
+  const auto& join_op = graph.get_op(join_op_id);
+  if (join_op.outputs().size() != 1 || join_op.outputs().front() != graph.outputs().front() ||
+      join_op.inputs().size() != branches.size() ||
+      branch_ops.size() + 1 != graph.op_nodes().size()) {
+    return {};
+  }
+
+  std::set<std::string> branch_tails;
+  for (const auto& branch : branches) {
+    const auto& tail = graph.get_op(branch.back());
+    branch_tails.insert(tail.outputs().front()->uuid());
+  }
+  for (auto* input : join_op.inputs()) {
+    if (!branch_tails.erase(input->uuid())) return {};
+  }
+  if (!branch_tails.empty()) return {};
+
+  struct Schedule {
+    size_t peak;
+    std::vector<std::string> order;
+  };
 
   Allocator allocator;
   GraphExecutor executor(graph);
+  executor.init_boundaries(&allocator);
+  std::map<std::vector<size_t>, Schedule> memo;
 
-  // --- Seed best_peak with the greedy heuristic solution ---
-  {
-    auto heuristic_order = find_macro_candidate_execution_order(graph);
-    if (!heuristic_order.empty()) {
-      size_t heuristic_peak = 0;
-      allocator.subscribe("heuristic", [&](size_t new_mem) {
-        if (new_mem > heuristic_peak) heuristic_peak = new_mem;
-      });
-      executor.init_boundaries(&allocator);
-      for (const auto& op_id : heuristic_order) {
-        OperationNode* op_node = nullptr;
-        for (auto& [uuid, node] : graph.op_nodes()) {
-          if (node.uuid() == op_id) {
-            op_node = &node;
-            break;
-          }
-        }
-        executor.run_op_node(op_node, &allocator);
-      }
-      allocator.unsubscribe("heuristic");
-      best_peak = heuristic_peak;
-      best_order = heuristic_order;
-      num_orderings = 1;
+  std::function<Schedule(std::vector<size_t>&)> solve = [&](std::vector<size_t>& completed) {
+    if (const auto it = memo.find(completed); it != memo.end()) return it->second;
 
-      for (auto it = heuristic_order.rbegin(); it != heuristic_order.rend(); ++it) {
-        OperationNode* op_node = nullptr;
-        for (auto& [uuid, node] : graph.op_nodes()) {
-          if (node.uuid() == *it) {
-            op_node = &node;
-            break;
-          }
-        }
-        executor.undo_run_op_node(op_node, &allocator);
-      }
-      // we will re-init inside dfs
-    }
-  }
-
-  struct Frame {
-    std::vector<std::string> candidates;
-    int candidate_idx;
-    std::string chosen_op;
-    std::bitset<256> executed_mask;
-    size_t local_peak;
-  };
-
-  std::vector<std::string> current_order;
-  std::set<std::string> executed;
-  std::bitset<256> executed_mask;
-
-  // Allocate graph input tensors before starting the search.
-  Allocator dfs_allocator;
-  GraphExecutor dfs_executor(graph);
-  size_t initial_peak = 0;
-  dfs_allocator.subscribe("init", [&](size_t new_mem) {
-    if (new_mem > initial_peak) initial_peak = new_mem;
-  });
-  dfs_executor.init_boundaries(&dfs_allocator);
-  dfs_allocator.unsubscribe("init");
-
-  auto get_sorted_candidates = [&]() -> std::vector<std::string> {
-    std::vector<std::pair<long long, std::string>> scored;
-    for (auto& id : op_ids) {
-      if (executed.count(id)) continue;
-      if (in_degree[id] != 0) continue;
-      scored.push_back({get_score(id), id});
-    }
-    std::sort(scored.begin(), scored.end());
-    std::vector<std::string> result;
-    result.reserve(scored.size());
-    for (auto& [s, id] : scored) {
-      result.push_back(std::move(id));
-    }
-    return result;
-  };
-
-  std::vector<Frame> stack;
-  stack.push_back({get_sorted_candidates(), 0, "", std::bitset<256>(), initial_peak});
-
-  while (!stack.empty()) {
-    auto& frame = stack.back();
-
-    if (!frame.chosen_op.empty()) {
-      OperationNode* op_node = nullptr;
-      for (auto& [uuid, node] : graph.op_nodes()) {
-        if (node.uuid() == frame.chosen_op) {
-          op_node = &node;
-          break;
-        }
-      }
-      dfs_executor.undo_run_op_node(op_node, &dfs_allocator);
-
-      current_order.pop_back();
-      executed.erase(frame.chosen_op);
-      executed_mask.reset(op_index[frame.chosen_op]);
-      for (auto& dep : dependents[frame.chosen_op]) {
-        in_degree[dep]++;
-      }
-      frame.chosen_op.clear();
-      frame.candidate_idx++;
-    }
-
-    bool pushed_child = false;
-    while (frame.candidate_idx < static_cast<int>(frame.candidates.size())) {
-      const auto& id = frame.candidates[frame.candidate_idx];
-
-      executed.insert(id);
-      executed_mask.set(op_index[id]);
-      current_order.push_back(id);
-      for (auto& dep : dependents[id]) {
-        in_degree[dep]--;
-      }
-
-      frame.chosen_op = id;
-      OperationNode* op_node = nullptr;
-      for (auto& [uuid, node] : graph.op_nodes()) {
-        if (node.uuid() == id) {
-          op_node = &node;
-          break;
-        }
-      }
-      size_t op_peak = dfs_allocator.allocated();
-      dfs_allocator.subscribe("dfs", [&](size_t new_mem) {
-        if (new_mem > op_peak) op_peak = new_mem;
-      });
-      dfs_executor.run_op_node(op_node, &dfs_allocator);
-      dfs_allocator.unsubscribe("dfs");
-
-      size_t new_path_peak = std::max(frame.local_peak, op_peak);
-
-      if (new_path_peak > best_peak) {
-        num_pruned++;
-        dfs_executor.undo_run_op_node(op_node, &dfs_allocator);
-        current_order.pop_back();
-        executed.erase(id);
-        executed_mask.reset(op_index[id]);
-        for (auto& dep : dependents[id]) {
-          in_degree[dep]++;
-        }
-        frame.chosen_op.clear();
-        frame.candidate_idx++;
-        continue;
-      }
-
-      auto memo_it = memo.find(executed_mask);
-      if (memo_it != memo.end() && memo_it->second <= new_path_peak) {
-        num_pruned++;
-        dfs_executor.undo_run_op_node(op_node, &dfs_allocator);
-        current_order.pop_back();
-        executed.erase(id);
-        executed_mask.reset(op_index[id]);
-        for (auto& dep : dependents[id]) {
-          in_degree[dep]++;
-        }
-        frame.chosen_op.clear();
-        frame.candidate_idx++;
-        continue;
-      }
-      memo[executed_mask] = new_path_peak;
-
-      if (static_cast<int>(current_order.size()) == n) {
-        num_orderings++;
-        if (new_path_peak < best_peak) {
-          best_peak = new_path_peak;
-          best_order = current_order;
-        }
+    bool all_branches_complete = true;
+    for (size_t branch_index = 0; branch_index < branches.size(); ++branch_index) {
+      if (completed[branch_index] != branches[branch_index].size()) {
+        all_branches_complete = false;
         break;
       }
-
-      stack.push_back({get_sorted_candidates(), 0, "", executed_mask, new_path_peak});
-      pushed_child = true;
-      break;
     }
 
-    if (!pushed_child && (frame.chosen_op.empty() ||
-                          frame.candidate_idx >= static_cast<int>(frame.candidates.size()) - 1)) {
-      if (!frame.chosen_op.empty()) {
-        OperationNode* op_node = nullptr;
-        for (auto& [uuid, node] : graph.op_nodes()) {
-          if (node.uuid() == frame.chosen_op) {
-            op_node = &node;
-            break;
-          }
-        }
-        dfs_executor.undo_run_op_node(op_node, &dfs_allocator);
-        current_order.pop_back();
-        executed.erase(frame.chosen_op);
-        executed_mask.reset(op_index[frame.chosen_op]);
-        for (auto& dep : dependents[frame.chosen_op]) {
-          in_degree[dep]++;
-        }
+    if (all_branches_complete) {
+      size_t peak = allocator.allocated();
+      allocator.subscribe("fork_join_dp", [&](size_t memory) { peak = std::max(peak, memory); });
+      executor.run_op_node(&join_op, &allocator);
+      allocator.unsubscribe("fork_join_dp");
+      executor.undo_run_op_node(&join_op, &allocator);
+      return memo.emplace(completed, Schedule{peak, {join_op_id}}).first->second;
+    }
+
+    Schedule best{std::numeric_limits<size_t>::max(), {}};
+    for (size_t branch_index = 0; branch_index < branches.size(); ++branch_index) {
+      if (completed[branch_index] == branches[branch_index].size()) continue;
+
+      const auto& op_id = branches[branch_index][completed[branch_index]++];
+      const auto& op = graph.get_op(op_id);
+      size_t op_peak = allocator.allocated();
+      allocator.subscribe("fork_join_dp",
+                          [&](size_t memory) { op_peak = std::max(op_peak, memory); });
+      executor.run_op_node(&op, &allocator);
+      allocator.unsubscribe("fork_join_dp");
+
+      Schedule suffix = solve(completed);
+      const size_t candidate_peak = std::max(op_peak, suffix.peak);
+      if (candidate_peak < best.peak) {
+        best.peak = candidate_peak;
+        best.order = {op_id};
+        best.order.insert(best.order.end(), suffix.order.begin(), suffix.order.end());
       }
-      stack.pop_back();
+
+      executor.undo_run_op_node(&op, &allocator);
+      completed[branch_index]--;
     }
+    return memo.emplace(completed, std::move(best)).first->second;
+  };
+
+  std::vector<size_t> completed(branches.size(), 0);
+  return solve(completed).order;
+}
+
+std::vector<std::string> find_diamond_execution_order(Graph& graph, size_t max_states) {
+  std::vector<std::string> op_ids;
+  std::map<std::string, int> op_index;
+  for (const auto& [uuid, op] : graph.op_nodes()) {
+    if (op_ids.size() == 256) return find_macro_candidate_execution_order_v2(graph);
+    op_index[op.uuid()] = static_cast<int>(op_ids.size());
+    op_ids.push_back(op.uuid());
   }
 
-  return best_order;
+  auto [dependencies, dependents] = get_dependencies(graph);
+  struct Schedule {
+    size_t peak;
+    std::vector<std::string> order;
+  };
+
+  Allocator allocator;
+  GraphExecutor executor(graph);
+  size_t initial_peak = 0;
+  allocator.subscribe("diamond_dp_init",
+                      [&](size_t memory) { initial_peak = std::max(initial_peak, memory); });
+  executor.init_boundaries(&allocator);
+  allocator.unsubscribe("diamond_dp_init");
+
+  std::unordered_map<std::bitset<256>, Schedule> memo;
+  bool state_limit_reached = false;
+  std::function<Schedule(std::bitset<256>&)> solve = [&](std::bitset<256>& completed) {
+    if (const auto it = memo.find(completed); it != memo.end()) return it->second;
+    if (memo.size() >= max_states) {
+      state_limit_reached = true;
+      return Schedule{std::numeric_limits<size_t>::max(), {}};
+    }
+
+    if (completed.count() == op_ids.size()) {
+      return memo.emplace(completed, Schedule{allocator.allocated(), {}}).first->second;
+    }
+
+    Schedule best{std::numeric_limits<size_t>::max(), {}};
+    for (const auto& op_id : op_ids) {
+      const int index = op_index[op_id];
+      if (completed.test(index)) continue;
+
+      bool ready = true;
+      for (const auto& dependency : dependencies[op_id]) {
+        if (!completed.test(op_index[dependency])) {
+          ready = false;
+          break;
+        }
+      }
+      if (!ready) continue;
+
+      const auto& op = graph.get_op(op_id);
+      size_t op_peak = allocator.allocated();
+      allocator.subscribe("diamond_dp",
+                          [&](size_t memory) { op_peak = std::max(op_peak, memory); });
+      executor.run_op_node(&op, &allocator);
+      allocator.unsubscribe("diamond_dp");
+      completed.set(index);
+
+      Schedule suffix = solve(completed);
+      const size_t candidate_peak = std::max(op_peak, suffix.peak);
+      if (candidate_peak < best.peak) {
+        best.peak = candidate_peak;
+        best.order = {op_id};
+        best.order.insert(best.order.end(), suffix.order.begin(), suffix.order.end());
+      }
+
+      completed.reset(index);
+      executor.undo_run_op_node(&op, &allocator);
+    }
+    return memo.emplace(completed, std::move(best)).first->second;
+  };
+
+  std::bitset<256> completed;
+  Schedule result = solve(completed);
+  if (state_limit_reached || result.order.size() != op_ids.size()) {
+    return find_macro_candidate_execution_order_v2(graph);
+  }
+  return result.order;
+}
+
+std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
+  return find_diamond_execution_order(graph);
 }
 
 std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std::ostream* os) {
@@ -1191,8 +1113,11 @@ int main() {
     auto macro_order = find_macro_candidate_execution_order(g);
     auto macro_v2_order = find_macro_candidate_execution_order_v2(g);
 
-    auto effs = rank_execution_orders(
-        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"MACRO_V2", macro_v2_order}});
+    auto effs = rank_execution_orders(g, {
+                                             {"BEST", best_order},
+                                             {"MACRO", macro_order},
+                                             {"MACRO_V2", macro_v2_order},
+                                         });
 
     for (const auto& [name, eff] : effs) {
       all_sample_efficiencies[name].push_back(eff);
@@ -1314,7 +1239,7 @@ int main() {
     auto macro_v2_order = find_macro_candidate_execution_order_v2(g);
 
     auto effs = rank_execution_orders(
-        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"MACRO_V2", macro_v2_order}});
+        g, {{"MACRO", macro_order}, {"MACRO_V2", macro_v2_order}, {"BEST", best_order}});
 
     for (const auto& [name, eff] : effs) {
       all_diamond_efficiencies[name].push_back(eff);

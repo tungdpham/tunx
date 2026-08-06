@@ -1,5 +1,7 @@
 #pragma once
 
+#include <map>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -84,19 +86,54 @@ public:
 
   const std::vector<ActivationNode*>& outputs() const { return outputs_; }
 
-  std::unordered_map<std::string, OperationNode>& op_nodes() {
-    return ops_;
-  }
+  std::unordered_map<std::string, OperationNode>& op_nodes() { return ops_; }
 
-  const std::unordered_map<std::string, OperationNode>& op_nodes() const {
-    return ops_;
-  }
+  const std::unordered_map<std::string, OperationNode>& op_nodes() const { return ops_; }
 
-  std::unordered_map<std::string, ActivationNode>& act_nodes() {
-    return acts_;
-  }
+  std::unordered_map<std::string, ActivationNode>& act_nodes() { return acts_; }
 
-  const std::unordered_map<std::string, ActivationNode>& act_nodes() const {
-    return acts_;
-  }
+  const std::unordered_map<std::string, ActivationNode>& act_nodes() const { return acts_; }
 };
+
+inline std::pair<std::map<std::string, std::set<std::string>>,
+                 std::map<std::string, std::set<std::string>>>
+get_dependencies(Graph& graph) {
+  std::map<std::string, std::string> tensor_producer;
+  for (auto& [uuid, node] : graph.op_nodes()) {
+    for (auto* t : node.outputs()) {
+      tensor_producer[t->uuid()] = node.uuid();
+    }
+  }
+
+  std::map<std::string, std::set<std::string>> deps;
+  std::map<std::string, std::set<std::string>> dependents;
+  for (auto& [uuid, node] : graph.op_nodes()) {
+    std::string op_id = node.uuid();
+    deps[op_id] = {};
+    for (auto* t : node.inputs()) {
+      auto it = tensor_producer.find(t->uuid());
+      if (it != tensor_producer.end()) {
+        deps[op_id].insert(it->second);
+      }
+    }
+  }
+  for (auto& [op_id, dep_set] : deps) {
+    for (auto& dep : dep_set) {
+      dependents[dep].insert(op_id);
+    }
+  }
+  return {deps, dependents};
+}
+
+inline std::map<std::string, int> get_out_deg(Graph& graph) {
+  std::map<std::string, int> out_deg;
+  for (auto& [uuid, node] : graph.op_nodes()) {
+    for (auto* t : node.inputs()) {
+      out_deg[t->uuid()]++;
+    }
+  }
+  for (auto* t : graph.outputs()) {
+    out_deg[t->uuid()]++;
+  }
+  return out_deg;
+}
