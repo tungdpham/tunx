@@ -69,6 +69,9 @@ public:
       }
       ref_count_[output] += act_dependents_[output].size();
       data_[output] = Tensor(allocator, output->size());
+      if (ref_count_[output] == 0) {
+        data_[output] = nullptr;
+      }
     }
 
     // execute some stuffs in real code here but we will skip since this is simulation
@@ -95,8 +98,9 @@ public:
 
     // free outputs
     for (ActivationNode* output : node->outputs()) {
-      if (!data_[output]) {
-        throw std::runtime_error("GraphExecutor::undo_run_op_node: Output tensor is not allocated.");
+      if (!data_[output] && ref_count_[output] != 0) {
+        throw std::runtime_error(
+            "GraphExecutor::undo_run_op_node: Output tensor is not allocated.");
       }
       ref_count_[output] -= act_dependents_[output].size();
       data_[output] = nullptr;

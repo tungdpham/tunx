@@ -915,7 +915,7 @@ std::vector<std::string> find_macro_candidate_execution_order_v2(Graph& graph, s
 
     std::vector<std::string> chosen_sched;
     std::set<std::string> contracted_macros;
-    if (peak1 < peak2 || creates_cycle(U)) {
+    if (peak1 <= peak2 || creates_cycle(U)) {
       for (const auto& m : sched1) {
         if (F_set.count(m)) chosen_sched.push_back(m);
       }

@@ -20,7 +20,8 @@ inline size_t random_ws_size() {
   return 4096;
 }
 
-inline ActivationNode* build_random_diamond_dag(Graph& g, ActivationNode* input, int depth, int& node_counter) {
+inline ActivationNode* build_random_diamond_dag(Graph& g, ActivationNode* input, int depth,
+                                                int& node_counter) {
   if (depth == 0) {
     return input;
   }
@@ -82,7 +83,8 @@ inline Graph random_m_sequences_graph(int m, int length) {
 
     ActivationNode* curr = input;
     for (int j = 0; j < length; ++j) {
-      std::string prefix = "seq_" + std::to_string(i) + "_" + std::to_string(j) + "_" + std::to_string(node_counter++);
+      std::string prefix = "seq_" + std::to_string(i) + "_" + std::to_string(j) + "_" +
+                           std::to_string(node_counter++);
       auto next_act = g.add_act(prefix, random_act_size());
       g.add_op(prefix + "_op", random_ws_size(), {curr}, {next_act});
       curr = next_act;
@@ -94,9 +96,12 @@ inline Graph random_m_sequences_graph(int m, int length) {
   return g;
 }
 
-inline void build_random_branching_dag(Graph& g, ActivationNode* input, int depth, int& node_counter) {
+inline void build_random_branching_dag(Graph& g, ActivationNode* input, int depth,
+                                       int& node_counter) {
   if (depth == 0) {
-    g.set_outputs({input});
+    auto outputs = g.outputs();
+    outputs.push_back(input);
+    g.set_outputs(outputs);
     return;
   }
 
