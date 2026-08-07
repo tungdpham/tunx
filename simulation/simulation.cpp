@@ -251,11 +251,11 @@ std::pair<long, long> get_rank(const MacroNode& m) {
 bool compare_macros(const MacroNode& m1, const MacroNode& m2) {
   auto rank1 = get_rank(m1);
   auto rank2 = get_rank(m2);
-  if (rank1 != rank2) return rank1 < rank2;
-  return m1.a < m2.a;
+  if (rank1.first != rank2.first) return rank1.first < rank2.first;
+  return rank1.second <= rank2.second;
 }
 
-bool operator<(const MacroNode& m1, const MacroNode& m2) { return compare_macros(m1, m2); }
+bool operator<=(const MacroNode& m1, const MacroNode& m2) { return compare_macros(m1, m2); }
 
 std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std::ostream* os) {
   std::vector<std::string> op_ids;
@@ -315,7 +315,6 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
   }
 
   int next_macro_id = 0;
-
   std::deque<std::string> dq;
   for (const auto& u : topo_order) {
     dq.push_back(u);
@@ -324,71 +323,6 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
   while (!dq.empty()) {
     std::string Y = dq.front();
     dq.pop_front();
-
-    std::string best_Z = "";
-    for (auto& Z : macro_dependents[Y]) {
-      if (macro_deps[Z].size() != 1) continue;
-
-      if (macros[Z] < macros[Y]) {
-        if (best_Z == "" || macros[Z] < macros[best_Z]) {
-          best_Z = Z;
-        }
-      }
-    }
-
-    if (best_Z != "") {
-      if (os) {
-        *os << "Merging macro " << macros[Y].id << " [";
-        for (auto op : macros[Y].ops) {
-          *os << op << " ";
-        }
-        *os << "] with macro " << macros[best_Z].id << " [";
-        for (auto op : macros[best_Z].ops) {
-          *os << op << " ";
-        }
-        *os << "] into macro " << "macro_" + std::to_string(next_macro_id) << std::endl;
-      }
-      std::string YZ_id = "macro_" + std::to_string(next_macro_id++);
-      MacroNode YZ;
-      YZ.id = YZ_id;
-      YZ.ops = macros[Y].ops;
-      YZ.ops.insert(YZ.ops.end(), macros[best_Z].ops.begin(), macros[best_Z].ops.end());
-      YZ.a = std::max(macros[Y].a, macros[Y].b + macros[best_Z].a);
-      YZ.b = macros[Y].b + macros[best_Z].b;
-      macros[YZ_id] = YZ;
-
-      macro_deps[YZ_id] = macro_deps[Y];
-      for (auto& dep : macro_deps[best_Z]) {
-        if (dep != Y) macro_deps[YZ_id].insert(dep);
-      }
-
-      macro_dependents[YZ_id] = macro_dependents[Y];
-      macro_dependents[YZ_id].erase(best_Z);
-      for (auto& child : macro_dependents[best_Z]) {
-        macro_dependents[YZ_id].insert(child);
-      }
-
-      for (auto& p : macro_deps[YZ_id]) {
-        macro_dependents[p].erase(Y);
-        macro_dependents[p].erase(best_Z);
-        macro_dependents[p].insert(YZ_id);
-      }
-      for (auto& child : macro_dependents[YZ_id]) {
-        macro_deps[child].erase(Y);
-        macro_deps[child].erase(best_Z);
-        macro_deps[child].insert(YZ_id);
-      }
-
-      macros.erase(Y);
-      macros.erase(best_Z);
-      macro_deps.erase(Y);
-      macro_deps.erase(best_Z);
-      macro_dependents.erase(Y);
-      macro_dependents.erase(best_Z);
-
-      dq.push_front(YZ_id);
-      continue;
-    }
 
     std::string best_X = "";
     for (auto& X : macro_deps[Y]) {
@@ -422,8 +356,8 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
         break;
       }
 
-      if (macros[Y] < macros[X]) {
-        if (best_X == "" || macros[best_X] < macros[X]) {
+      if (macros[Y] <= macros[X]) {
+        if (best_X == "" || macros[best_X] <= macros[X]) {
           best_X = X;
         }
       }
@@ -431,15 +365,17 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
 
     if (best_X != "") {
       if (os) {
-        *os << "Merging macro " << macros[best_X].id << " [";
+        *os << "Merging forward macro " << macros[best_X].id << " [";
         for (auto op : macros[best_X].ops) {
           *os << op << " ";
         }
-        *os << "] with macro " << macros[Y].id << " [";
+        *os << ", a:" << macros[best_X].a << ", b:" << macros[best_X].b << " ] with macro "
+            << macros[Y].id << " [";
         for (auto op : macros[Y].ops) {
           *os << op << " ";
         }
-        *os << "] into macro " << "macro_" + std::to_string(next_macro_id) << std::endl;
+        *os << ", a:" << macros[Y].a << ", b:" << macros[Y].b << " ] into macro "
+            << "macro_" + std::to_string(next_macro_id) << std::endl;
       }
       std::string XY_id = "macro_" + std::to_string(next_macro_id++);
       MacroNode XY;
@@ -483,6 +419,104 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
     }
   }
 
+  // sort new contracted graph in reverse topological order
+  std::map<std::string, int> in_deg;
+  for (const auto& [m_id, _] : macros) {
+    in_deg[m_id] = macro_deps[m_id].size();
+  }
+
+  std::queue<std::string> top_q;
+  for (const auto& [m_id, deg] : in_deg) {
+    if (deg == 0) top_q.push(m_id);
+  }
+
+  std::vector<std::string> reverse_topo;
+  while (!top_q.empty()) {
+    std::string u = top_q.front();
+    top_q.pop();
+    reverse_topo.push_back(u);
+    for (const auto& v : macro_dependents[u]) {
+      if (--in_deg[v] == 0) top_q.push(v);
+    }
+  }
+  std::reverse(reverse_topo.begin(), reverse_topo.end());
+
+  for (auto& macro_id : reverse_topo) {
+    dq.push_back(macro_id);
+  }
+
+  while (!dq.empty()) {
+    std::string Y = dq.front();
+    dq.pop_front();
+
+    std::string best_Z = "";
+    for (auto& Z : macro_dependents[Y]) {
+      if (macro_deps[Z].size() != 1) continue;
+
+      if (macros[Z] <= macros[Y]) {
+        if (best_Z == "" || macros[Z] <= macros[best_Z]) {
+          best_Z = Z;
+        }
+      }
+    }
+
+    if (best_Z != "") {
+      if (os) {
+        *os << "Merging backward macro " << macros[Y].id << " [";
+        for (auto op : macros[Y].ops) {
+          *os << op << " ";
+        }
+        *os << ", a: " << macros[Y].a << ", b: " << macros[Y].b << "] with macro "
+            << macros[best_Z].id << " [";
+        for (auto op : macros[best_Z].ops) {
+          *os << op << " ";
+        }
+        *os << ", a: " << macros[best_Z].a << ", b: " << macros[best_Z].b << "] into macro "
+            << "macro_" + std::to_string(next_macro_id) << std::endl;
+      }
+      std::string YZ_id = "macro_" + std::to_string(next_macro_id++);
+      MacroNode YZ;
+      YZ.id = YZ_id;
+      YZ.ops = macros[Y].ops;
+      YZ.ops.insert(YZ.ops.end(), macros[best_Z].ops.begin(), macros[best_Z].ops.end());
+      YZ.a = std::max(macros[Y].a, macros[Y].b + macros[best_Z].a);
+      YZ.b = macros[Y].b + macros[best_Z].b;
+      macros[YZ_id] = YZ;
+
+      macro_deps[YZ_id] = macro_deps[Y];
+      for (auto& dep : macro_deps[best_Z]) {
+        if (dep != Y) macro_deps[YZ_id].insert(dep);
+      }
+
+      macro_dependents[YZ_id] = macro_dependents[Y];
+      macro_dependents[YZ_id].erase(best_Z);
+      for (auto& child : macro_dependents[best_Z]) {
+        macro_dependents[YZ_id].insert(child);
+      }
+
+      for (auto& p : macro_deps[YZ_id]) {
+        macro_dependents[p].erase(Y);
+        macro_dependents[p].erase(best_Z);
+        macro_dependents[p].insert(YZ_id);
+      }
+      for (auto& child : macro_dependents[YZ_id]) {
+        macro_deps[child].erase(Y);
+        macro_deps[child].erase(best_Z);
+        macro_deps[child].insert(YZ_id);
+      }
+
+      macros.erase(Y);
+      macros.erase(best_Z);
+      macro_deps.erase(Y);
+      macro_deps.erase(best_Z);
+      macro_dependents.erase(Y);
+      macro_dependents.erase(best_Z);
+
+      dq.push_front(YZ_id);
+      continue;
+    }
+  }
+
   if (os) {
     *os << "All macros generated" << std::endl;
     for (auto& [id, macro] : macros) {
@@ -498,7 +532,7 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
   std::set<std::string> executed_macros;
 
   auto pq_compare = [&macros](const std::string& a, const std::string& b) {
-    return macros[b] < macros[a];
+    return macros[b] <= macros[a];
   };
 
   std::priority_queue<std::string, std::vector<std::string>, decltype(pq_compare)> ready_macros(
@@ -1199,7 +1233,7 @@ int main() {
     std::cout << "  Best:    " << std::fixed << std::setprecision(2) << best << "%\n\n";
   };
 
-  std::vector<std::string> to_checks = {"MACRO", "MACRO_V2"};
+  std::vector<std::string> to_checks = {"MACRO"};
 
   trials = original_trials;
   while (trials--) {
