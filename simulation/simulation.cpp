@@ -233,6 +233,30 @@ std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
   return find_diamond_execution_order(graph);
 }
 
+struct MacroNode {
+  std::string id;
+  std::vector<std::string> ops;
+  long long a;
+  long long b;
+};
+
+std::pair<long, long> get_rank(const MacroNode& m) {
+  if (m.b < 0) {
+    return {0, m.a};
+  } else {
+    return {1, m.b - m.a};
+  }
+}
+
+bool compare_macros(const MacroNode& m1, const MacroNode& m2) {
+  auto rank1 = get_rank(m1);
+  auto rank2 = get_rank(m2);
+  if (rank1 != rank2) return rank1 < rank2;
+  return m1.a < m2.a;
+}
+
+bool operator<(const MacroNode& m1, const MacroNode& m2) { return compare_macros(m1, m2); }
+
 std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std::ostream* os) {
   std::vector<std::string> op_ids;
   for (auto& [uuid, node] : graph.op_nodes()) {
@@ -241,13 +265,6 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
 
   auto out_deg = get_out_deg(graph);
   auto [deps, dependents] = get_dependencies(graph);
-
-  struct MacroNode {
-    std::string id;
-    std::vector<std::string> ops;
-    long long a;
-    long long b;
-  };
 
   std::map<std::string, MacroNode> macros;
   std::map<std::string, std::set<std::string>> macro_deps;
@@ -282,14 +299,6 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
     macro_dependents[id] = dependents[id];
   }
 
-  auto compare = [](const MacroNode& i, const MacroNode& j) {
-    long long cost_ij = std::max(i.a, i.b + j.a);
-    long long cost_ji = std::max(j.a, j.b + i.a);
-    if (cost_ij != cost_ji) return cost_ij < cost_ji;
-    if (i.b != j.b) return i.b < j.b;
-    return i.a < j.a;
-  };
-
   std::vector<std::string> topo_order;
   std::map<std::string, int> in_deg_topo;
   for (auto& id : op_ids) in_deg_topo[id] = macro_deps[id].size();
@@ -316,45 +325,122 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
     std::string Y = dq.front();
     dq.pop_front();
 
+    std::string best_Z = "";
+    for (auto& Z : macro_dependents[Y]) {
+      if (macro_deps[Z].size() != 1) continue;
+
+      if (macros[Z] < macros[Y]) {
+        if (best_Z == "" || macros[Z] < macros[best_Z]) {
+          best_Z = Z;
+        }
+      }
+    }
+
+    if (best_Z != "") {
+      if (os) {
+        *os << "Merging macro " << macros[Y].id << " [";
+        for (auto op : macros[Y].ops) {
+          *os << op << " ";
+        }
+        *os << "] with macro " << macros[best_Z].id << " [";
+        for (auto op : macros[best_Z].ops) {
+          *os << op << " ";
+        }
+        *os << "] into macro " << "macro_" + std::to_string(next_macro_id) << std::endl;
+      }
+      std::string YZ_id = "macro_" + std::to_string(next_macro_id++);
+      MacroNode YZ;
+      YZ.id = YZ_id;
+      YZ.ops = macros[Y].ops;
+      YZ.ops.insert(YZ.ops.end(), macros[best_Z].ops.begin(), macros[best_Z].ops.end());
+      YZ.a = std::max(macros[Y].a, macros[Y].b + macros[best_Z].a);
+      YZ.b = macros[Y].b + macros[best_Z].b;
+      macros[YZ_id] = YZ;
+
+      macro_deps[YZ_id] = macro_deps[Y];
+      for (auto& dep : macro_deps[best_Z]) {
+        if (dep != Y) macro_deps[YZ_id].insert(dep);
+      }
+
+      macro_dependents[YZ_id] = macro_dependents[Y];
+      macro_dependents[YZ_id].erase(best_Z);
+      for (auto& child : macro_dependents[best_Z]) {
+        macro_dependents[YZ_id].insert(child);
+      }
+
+      for (auto& p : macro_deps[YZ_id]) {
+        macro_dependents[p].erase(Y);
+        macro_dependents[p].erase(best_Z);
+        macro_dependents[p].insert(YZ_id);
+      }
+      for (auto& child : macro_dependents[YZ_id]) {
+        macro_deps[child].erase(Y);
+        macro_deps[child].erase(best_Z);
+        macro_deps[child].insert(YZ_id);
+      }
+
+      macros.erase(Y);
+      macros.erase(best_Z);
+      macro_deps.erase(Y);
+      macro_deps.erase(best_Z);
+      macro_dependents.erase(Y);
+      macro_dependents.erase(best_Z);
+
+      dq.push_front(YZ_id);
+      continue;
+    }
+
     std::string best_X = "";
     for (auto& X : macro_deps[Y]) {
-      if (macro_dependents[X].size() == 1) {
-        bool has_peers = false;
-        for (const auto& op_id : macros[X].ops) {
-          const auto& op_node = graph.get_op(op_id);
-          for (auto* t : op_node.inputs()) {
-            if (out_deg[t->uuid()] > 1) {
-              int internal_consumers = 0;
-              for (const auto& inner_op_id : macros[X].ops) {
-                const auto& inner_op = graph.get_op(inner_op_id);
-                for (auto* inner_t : inner_op.inputs()) {
-                  if (inner_t->uuid() == t->uuid()) {
-                    internal_consumers++;
-                  }
+      if (macro_dependents[X].size() != 1) continue;
+
+      // drop if share input tensor with any peers
+      bool has_peers = false;
+      for (const auto& op_id : macros[X].ops) {
+        const auto& op_node = graph.get_op(op_id);
+        for (auto* t : op_node.inputs()) {
+          if (out_deg[t->uuid()] > 1) {
+            int internal_consumers = 0;
+            for (const auto& inner_op_id : macros[X].ops) {
+              const auto& inner_op = graph.get_op(inner_op_id);
+              for (auto* inner_t : inner_op.inputs()) {
+                if (inner_t->uuid() == t->uuid()) {
+                  internal_consumers++;
                 }
               }
-              if (internal_consumers < out_deg[t->uuid()]) {
-                has_peers = true;
-                break;
-              }
+            }
+            if (internal_consumers < out_deg[t->uuid()]) {
+              has_peers = true;
+              break;
             }
           }
-          if (has_peers) break;
         }
-        if (has_peers) {
-          best_X = "";
-          break;
-        }
+        if (has_peers) break;
+      }
+      if (has_peers) {
+        best_X = "";
+        break;
+      }
 
-        if (compare(macros[Y], macros[X])) {
-          if (best_X == "" || compare(macros[best_X], macros[X])) {
-            best_X = X;
-          }
+      if (macros[Y] < macros[X]) {
+        if (best_X == "" || macros[best_X] < macros[X]) {
+          best_X = X;
         }
       }
     }
 
     if (best_X != "") {
+      if (os) {
+        *os << "Merging macro " << macros[best_X].id << " [";
+        for (auto op : macros[best_X].ops) {
+          *os << op << " ";
+        }
+        *os << "] with macro " << macros[Y].id << " [";
+        for (auto op : macros[Y].ops) {
+          *os << op << " ";
+        }
+        *os << "] into macro " << "macro_" + std::to_string(next_macro_id) << std::endl;
+      }
       std::string XY_id = "macro_" + std::to_string(next_macro_id++);
       MacroNode XY;
       XY.id = XY_id;
@@ -411,9 +497,10 @@ std::vector<std::string> find_macro_candidate_execution_order(Graph& graph, std:
   std::vector<std::string> final_order;
   std::set<std::string> executed_macros;
 
-  auto pq_compare = [&macros, &compare](const std::string& a, const std::string& b) {
-    return compare(macros[b], macros[a]);
+  auto pq_compare = [&macros](const std::string& a, const std::string& b) {
+    return macros[b] < macros[a];
   };
+
   std::priority_queue<std::string, std::vector<std::string>, decltype(pq_compare)> ready_macros(
       pq_compare);
 
@@ -1074,6 +1161,11 @@ Graph sample_branch_graph() {
   return g;
 }
 
+template <typename T>
+bool contains(const std::vector<T>& vec, const T& val) {
+  return std::find(vec.begin(), vec.end(), val) != vec.end();
+}
+
 int main() {
   srand(static_cast<unsigned int>(time(nullptr)));
 
@@ -1107,6 +1199,8 @@ int main() {
     std::cout << "  Best:    " << std::fixed << std::setprecision(2) << best << "%\n\n";
   };
 
+  std::vector<std::string> to_checks = {"MACRO", "MACRO_V2"};
+
   trials = original_trials;
   while (trials--) {
     Graph g = sample_branch_graph();
@@ -1123,9 +1217,9 @@ int main() {
 
     for (const auto& [name, eff] : effs) {
       all_sample_efficiencies[name].push_back(eff);
-      if ((name == "MACRO" || name == "MACRO_V2") && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "sample_graph.dot");
-        std::ofstream log("sample_bad_macro.log", std::ios_base::app);
+      if (contains(to_checks, name) && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "./logs/sample_graph.dot");
+        std::ofstream log("./logs/sample_bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
         log << name << " Efficiency: " << eff << "%\n";
         auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
@@ -1163,9 +1257,9 @@ int main() {
 
     for (const auto& [name, eff] : effs) {
       all_join_efficiencies[name].push_back(eff);
-      if ((name == "MACRO" || name == "MACRO_V2") && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "join_graph.dot");
-        std::ofstream log("join_bad_macro.log", std::ios_base::app);
+      if (contains(to_checks, name) && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "./logs/join_graph.dot");
+        std::ofstream log("./logs/join_bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
         log << name << " Efficiency: " << eff << "%\n";
         auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
@@ -1204,9 +1298,9 @@ int main() {
 
     for (const auto& [name, eff] : effs) {
       all_branch_efficiencies[name].push_back(eff);
-      if ((name == "MACRO" || name == "MACRO_V2") && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "graph.dot");
-        std::ofstream log("branch_bad_macro.log", std::ios_base::app);
+      if (contains(to_checks, name) && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "./logs/graph.dot");
+        std::ofstream log("./logs/branch_bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
         log << name << " Efficiency: " << eff << "%\n";
         auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
@@ -1245,9 +1339,9 @@ int main() {
 
     for (const auto& [name, eff] : effs) {
       all_static_branch_efficiencies[name].push_back(eff);
-      if ((name == "MACRO" || name == "MACRO_V2") && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "static_branch_graph.dot");
-        std::ofstream log("static_branch_bad_macro.log", std::ios_base::app);
+      if (contains(to_checks, name) && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "./logs/static_branch_graph.dot");
+        std::ofstream log("./logs/static_branch_bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
         log << name << " Efficiency: " << eff << "%\n";
         auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
@@ -1286,9 +1380,9 @@ int main() {
 
     for (const auto& [name, eff] : effs) {
       all_diamond_efficiencies[name].push_back(eff);
-      if ((name == "MACRO" || name == "MACRO_V2") && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "diamond_graph.dot");
-        std::ofstream log("diamond_bad_macro.log", std::ios_base::app);
+      if (contains(to_checks, name) && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "./logs/diamond_graph.dot");
+        std::ofstream log("./logs/diamond_bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
         log << name << " Efficiency: " << eff << "%\n";
         auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
@@ -1327,9 +1421,9 @@ int main() {
 
     for (const auto& [name, eff] : effs) {
       all_static_diamond_efficiencies[name].push_back(eff);
-      if ((name == "MACRO" || name == "MACRO_V2") && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "static_diamond_graph.dot");
-        std::ofstream log("static_diamond_bad_macro.log", std::ios_base::app);
+      if (contains(to_checks, name) && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "./logs/static_diamond_graph.dot");
+        std::ofstream log("./logs/static_diamond_bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
         log << name << " Efficiency: " << eff << "%\n";
         auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
