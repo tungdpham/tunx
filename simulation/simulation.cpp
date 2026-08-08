@@ -20,8 +20,8 @@
 
 std::vector<std::string> find_macro_candidate_execution_order(Graph& graph,
                                                               std::ostream* os = nullptr) {
-  MacroSolver solver;
-  return solver.find_order(graph, os);
+  MacroSolver solver(graph, os);
+  return solver.find_order();
 }
 
 std::vector<std::string> find_fork_join_optimal_execution_order(Graph& graph);

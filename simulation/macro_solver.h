@@ -34,22 +34,32 @@ inline bool compare_macros(const MacroNode& m1, const MacroNode& m2) {
 inline bool operator<(const MacroNode& m1, const MacroNode& m2) { return compare_macros(m1, m2); }
 
 class MacroSolver {
+private:
+  // core
+  Graph& graph_;
+  std::ostream* os_;
+
+  // generated
+  std::map<std::string, MacroNode> macros_;
+  std::map<std::string, std::set<std::string>> macro_deps_;
+  std::map<std::string, std::set<std::string>> macro_dependents_;
+
 public:
-  std::vector<std::string> find_order(Graph& graph, std::ostream* os = nullptr) {
+  MacroSolver(Graph& graph, std::ostream* os = nullptr)
+      : graph_(graph),
+        os_(os) {}
+
+  std::vector<std::string> find_order() {
     std::vector<std::string> op_ids;
-    for (auto& [uuid, node] : graph.op_nodes()) {
+    for (auto& [uuid, node] : graph_.op_nodes()) {
       op_ids.push_back(node.uuid());
     }
 
-    auto out_deg = get_out_deg(graph);
-    auto [deps, dependents] = get_dependencies(graph);
-
-    std::map<std::string, MacroNode> macros;
-    std::map<std::string, std::set<std::string>> macro_deps;
-    std::map<std::string, std::set<std::string>> macro_dependents;
+    auto out_deg = get_out_deg(graph_);
+    auto [deps, dependents] = get_dependencies(graph_);
 
     for (auto& id : op_ids) {
-      auto& node = graph.get_op(id);
+      auto& node = graph_.get_op(id);
       long long all_outputs = 0;
       for (auto* t : node.outputs()) {
         all_outputs += t->size();
@@ -71,15 +81,15 @@ public:
       mn.ops = {id};
       mn.a = total_memory_for_execution;
       mn.b = memory_generate - memory_consumes;
-      macros[id] = mn;
+      macros_[id] = mn;
 
-      macro_deps[id] = deps[id];
-      macro_dependents[id] = dependents[id];
+      macro_deps_[id] = deps[id];
+      macro_dependents_[id] = dependents[id];
     }
 
     std::vector<std::string> topo_order;
     std::map<std::string, int> in_deg_topo;
-    for (auto& id : op_ids) in_deg_topo[id] = macro_deps[id].size();
+    for (auto& id : op_ids) in_deg_topo[id] = macro_deps_[id].size();
     std::queue<std::string> q;
     for (auto& id : op_ids)
       if (in_deg_topo[id] == 0) q.push(id);
@@ -87,7 +97,7 @@ public:
       std::string u = q.front();
       q.pop();
       topo_order.push_back(u);
-      for (auto& v : macro_dependents[u]) {
+      for (auto& v : macro_dependents_[u]) {
         if (--in_deg_topo[v] == 0) q.push(v);
       }
     }
@@ -104,18 +114,18 @@ public:
       dq.pop_front();
 
       std::string best_X = "";
-      for (auto& X : macro_deps[Y]) {
-        if (macro_dependents[X].size() != 1) continue;
+      for (auto& X : macro_deps_[Y]) {
+        if (macro_dependents_[X].size() != 1) continue;
 
         // drop if share input tensor with any peers
         bool has_peers = false;
-        for (const auto& op_id : macros[X].ops) {
-          const auto& op_node = graph.get_op(op_id);
+        for (const auto& op_id : macros_[X].ops) {
+          const auto& op_node = graph_.get_op(op_id);
           for (auto* t : op_node.inputs()) {
             if (out_deg[t->uuid()] > 1) {
               int internal_consumers = 0;
-              for (const auto& inner_op_id : macros[X].ops) {
-                const auto& inner_op = graph.get_op(inner_op_id);
+              for (const auto& inner_op_id : macros_[X].ops) {
+                const auto& inner_op = graph_.get_op(inner_op_id);
                 for (auto* inner_t : inner_op.inputs()) {
                   if (inner_t->uuid() == t->uuid()) {
                     internal_consumers++;
@@ -134,64 +144,64 @@ public:
           continue;
         }
 
-        if (macros[Y] < macros[X]) {
-          if (best_X == "" || macros[best_X] < macros[X]) {
+        if (macros_[Y] < macros_[X]) {
+          if (best_X == "" || macros_[best_X] < macros_[X]) {
             best_X = X;
           }
         }
       }
 
       if (best_X != "") {
-        if (os) {
-          *os << "Merging forward macro " << macros[best_X].id << " [";
-          for (auto op : macros[best_X].ops) {
-            *os << op << " ";
+        if (os_) {
+          *os_ << "Merging forward macro " << macros_[best_X].id << " [";
+          for (auto op : macros_[best_X].ops) {
+            *os_ << op << " ";
           }
-          *os << ", a:" << macros[best_X].a << ", b:" << macros[best_X].b << " ] with macro "
-              << macros[Y].id << " [";
-          for (auto op : macros[Y].ops) {
-            *os << op << " ";
+          *os_ << ", a:" << macros_[best_X].a << ", b:" << macros_[best_X].b << " ] with macro "
+               << macros_[Y].id << " [";
+          for (auto op : macros_[Y].ops) {
+            *os_ << op << " ";
           }
-          *os << ", a:" << macros[Y].a << ", b:" << macros[Y].b << " ] into macro "
-              << "macro_" + std::to_string(next_macro_id) << std::endl;
+          *os_ << ", a:" << macros_[Y].a << ", b:" << macros_[Y].b << " ] into macro "
+               << "macro_" + std::to_string(next_macro_id) << std::endl;
         }
         std::string XY_id = "macro_" + std::to_string(next_macro_id++);
         MacroNode XY;
         XY.id = XY_id;
-        XY.ops = macros[best_X].ops;
-        XY.ops.insert(XY.ops.end(), macros[Y].ops.begin(), macros[Y].ops.end());
-        XY.a = std::max(macros[best_X].a, macros[best_X].b + macros[Y].a);
-        XY.b = macros[best_X].b + macros[Y].b;
-        macros[XY_id] = XY;
+        XY.ops = macros_[best_X].ops;
+        XY.ops.insert(XY.ops.end(), macros_[Y].ops.begin(), macros_[Y].ops.end());
+        XY.a = std::max(macros_[best_X].a, macros_[best_X].b + macros_[Y].a);
+        XY.b = macros_[best_X].b + macros_[Y].b;
+        macros_[XY_id] = XY;
 
-        macro_deps[XY_id] = macro_deps[best_X];
-        for (auto& dep : macro_deps[Y]) {
-          if (dep != best_X) macro_deps[XY_id].insert(dep);
+        macro_deps_[XY_id] = macro_deps_[best_X];
+        for (auto& dep : macro_deps_[Y]) {
+          if (dep != best_X) macro_deps_[XY_id].insert(dep);
         }
 
-        macro_dependents[XY_id] = macro_dependents[best_X];
-        macro_dependents[XY_id].erase(Y);
-        for (auto& child : macro_dependents[Y]) {
-          macro_dependents[XY_id].insert(child);
+        macro_dependents_[XY_id] = macro_dependents_[best_X];
+        macro_dependents_[XY_id].erase(Y);
+        for (auto& child : macro_dependents_[Y]) {
+          macro_dependents_[XY_id].insert(child);
         }
 
-        for (auto& p : macro_deps[XY_id]) {
-          macro_dependents[p].erase(best_X);
-          macro_dependents[p].erase(Y);
-          macro_dependents[p].insert(XY_id);
+        for (auto& p : macro_deps_[XY_id]) {
+          macro_dependents_[p].erase(best_X);
+          macro_dependents_[p].erase(Y);
+          macro_dependents_[p].insert(XY_id);
         }
-        for (auto& child : macro_dependents[XY_id]) {
-          macro_deps[child].erase(best_X);
-          macro_deps[child].erase(Y);
-          macro_deps[child].insert(XY_id);
+        for (auto& child : macro_dependents_[XY_id]) {
+          macro_deps_[child].erase(best_X);
+          macro_deps_[child].erase(Y);
+          macro_deps_[child].insert(XY_id);
         }
 
-        macros.erase(best_X);
-        macros.erase(Y);
-        macro_deps.erase(best_X);
-        macro_deps.erase(Y);
-        macro_dependents.erase(best_X);
-        macro_dependents.erase(Y);
+        macros_.erase(best_X);
+        macros_.erase(Y);
+        macro_deps_.erase(best_X);
+        macro_deps_.erase(Y);
+        macro_dependents_.erase(best_X);
+        macro_dependents_.erase(Y);
 
         dq.push_front(XY_id);
       }
@@ -199,8 +209,8 @@ public:
 
     // sort new contracted graph in reverse topological order
     std::map<std::string, int> in_deg;
-    for (const auto& [m_id, _] : macros) {
-      in_deg[m_id] = macro_deps[m_id].size();
+    for (const auto& [m_id, _] : macros_) {
+      in_deg[m_id] = macro_deps_[m_id].size();
     }
 
     std::queue<std::string> top_q;
@@ -213,7 +223,7 @@ public:
       std::string u = top_q.front();
       top_q.pop();
       reverse_topo.push_back(u);
-      for (const auto& v : macro_dependents[u]) {
+      for (const auto& v : macro_dependents_[u]) {
         if (--in_deg[v] == 0) top_q.push(v);
       }
     }
@@ -229,95 +239,95 @@ public:
       dq.pop_front();
 
       std::string best_Z = "";
-      for (auto& Z : macro_dependents[Y]) {
-        if (macro_deps[Z].size() != 1) continue;
+      for (auto& Z : macro_dependents_[Y]) {
+        if (macro_deps_[Z].size() != 1) continue;
 
-        if (macros[Z] < macros[Y]) {
-          if (best_Z == "" || macros[Z] < macros[best_Z]) {
+        if (macros_[Z] < macros_[Y]) {
+          if (best_Z == "" || macros_[Z] < macros_[best_Z]) {
             best_Z = Z;
           }
         }
       }
 
       if (best_Z != "") {
-        if (os) {
-          *os << "Merging backward macro " << macros[Y].id << " [";
-          for (auto op : macros[Y].ops) {
-            *os << op << " ";
+        if (os_) {
+          *os_ << "Merging backward macro " << macros_[Y].id << " [";
+          for (auto op : macros_[Y].ops) {
+            *os_ << op << " ";
           }
-          *os << ", a: " << macros[Y].a << ", b: " << macros[Y].b << "] with macro "
-              << macros[best_Z].id << " [";
-          for (auto op : macros[best_Z].ops) {
-            *os << op << " ";
+          *os_ << ", a: " << macros_[Y].a << ", b: " << macros_[Y].b << "] with macro "
+               << macros_[best_Z].id << " [";
+          for (auto op : macros_[best_Z].ops) {
+            *os_ << op << " ";
           }
-          *os << ", a: " << macros[best_Z].a << ", b: " << macros[best_Z].b << "] into macro "
-              << "macro_" + std::to_string(next_macro_id) << std::endl;
+          *os_ << ", a: " << macros_[best_Z].a << ", b: " << macros_[best_Z].b << "] into macro "
+               << "macro_" + std::to_string(next_macro_id) << std::endl;
         }
         std::string YZ_id = "macro_" + std::to_string(next_macro_id++);
         MacroNode YZ;
         YZ.id = YZ_id;
-        YZ.ops = macros[Y].ops;
-        YZ.ops.insert(YZ.ops.end(), macros[best_Z].ops.begin(), macros[best_Z].ops.end());
-        YZ.a = std::max(macros[Y].a, macros[Y].b + macros[best_Z].a);
-        YZ.b = macros[Y].b + macros[best_Z].b;
-        macros[YZ_id] = YZ;
+        YZ.ops = macros_[Y].ops;
+        YZ.ops.insert(YZ.ops.end(), macros_[best_Z].ops.begin(), macros_[best_Z].ops.end());
+        YZ.a = std::max(macros_[Y].a, macros_[Y].b + macros_[best_Z].a);
+        YZ.b = macros_[Y].b + macros_[best_Z].b;
+        macros_[YZ_id] = YZ;
 
-        macro_deps[YZ_id] = macro_deps[Y];
-        for (auto& dep : macro_deps[best_Z]) {
-          if (dep != Y) macro_deps[YZ_id].insert(dep);
+        macro_deps_[YZ_id] = macro_deps_[Y];
+        for (auto& dep : macro_deps_[best_Z]) {
+          if (dep != Y) macro_deps_[YZ_id].insert(dep);
         }
 
-        macro_dependents[YZ_id] = macro_dependents[Y];
-        macro_dependents[YZ_id].erase(best_Z);
-        for (auto& child : macro_dependents[best_Z]) {
-          macro_dependents[YZ_id].insert(child);
+        macro_dependents_[YZ_id] = macro_dependents_[Y];
+        macro_dependents_[YZ_id].erase(best_Z);
+        for (auto& child : macro_dependents_[best_Z]) {
+          macro_dependents_[YZ_id].insert(child);
         }
 
-        for (auto& p : macro_deps[YZ_id]) {
-          macro_dependents[p].erase(Y);
-          macro_dependents[p].erase(best_Z);
-          macro_dependents[p].insert(YZ_id);
+        for (auto& p : macro_deps_[YZ_id]) {
+          macro_dependents_[p].erase(Y);
+          macro_dependents_[p].erase(best_Z);
+          macro_dependents_[p].insert(YZ_id);
         }
-        for (auto& child : macro_dependents[YZ_id]) {
-          macro_deps[child].erase(Y);
-          macro_deps[child].erase(best_Z);
-          macro_deps[child].insert(YZ_id);
+        for (auto& child : macro_dependents_[YZ_id]) {
+          macro_deps_[child].erase(Y);
+          macro_deps_[child].erase(best_Z);
+          macro_deps_[child].insert(YZ_id);
         }
 
-        macros.erase(Y);
-        macros.erase(best_Z);
-        macro_deps.erase(Y);
-        macro_deps.erase(best_Z);
-        macro_dependents.erase(Y);
-        macro_dependents.erase(best_Z);
+        macros_.erase(Y);
+        macros_.erase(best_Z);
+        macro_deps_.erase(Y);
+        macro_deps_.erase(best_Z);
+        macro_dependents_.erase(Y);
+        macro_dependents_.erase(best_Z);
 
         dq.push_front(YZ_id);
         continue;
       }
     }
 
-    if (os) {
-      *os << "All macros generated" << std::endl;
-      for (auto& [id, macro] : macros) {
-        *os << id << ": ";
+    if (os_) {
+      *os_ << "All macros generated" << std::endl;
+      for (auto& [id, macro] : macros_) {
+        *os_ << id << ": ";
         for (auto& op : macro.ops) {
-          *os << op << " ";
+          *os_ << op << " ";
         }
-        *os << " -> [ " << macro.a << " " << macro.b << " ]" << std::endl;
+        *os_ << " -> [ " << macro.a << " " << macro.b << " ]" << std::endl;
       }
     }
 
     std::vector<std::string> final_order;
     std::set<std::string> executed_macros;
 
-    auto pq_compare = [&macros](const std::string& a, const std::string& b) {
-      return macros[b] < macros[a];
+    auto pq_compare = [this](const std::string& a, const std::string& b) {
+      return macros_[b] < macros_[a];
     };
 
     std::priority_queue<std::string, std::vector<std::string>, decltype(pq_compare)> ready_macros(
         pq_compare);
 
-    for (auto& [id, deps_set] : macro_deps) {
+    for (auto& [id, deps_set] : macro_deps_) {
       if (deps_set.empty()) {
         ready_macros.push(id);
       }
@@ -333,13 +343,13 @@ public:
 
       executed_macros.insert(best_macro);
 
-      for (auto& op : macros[best_macro].ops) {
+      for (auto& op : macros_[best_macro].ops) {
         final_order.push_back(op);
       }
 
-      for (auto& child : macro_dependents[best_macro]) {
+      for (auto& child : macro_dependents_[best_macro]) {
         bool ready = true;
-        for (auto& parent : macro_deps[child]) {
+        for (auto& parent : macro_deps_[child]) {
           if (!executed_macros.count(parent)) {
             ready = false;
             break;
