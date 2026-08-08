@@ -1,5 +1,6 @@
 #pragma once
 
+#include <fstream>
 #include <map>
 #include <set>
 #include <string>
@@ -136,4 +137,24 @@ inline std::map<std::string, int> get_out_deg(Graph& graph) {
     out_deg[t->uuid()]++;
   }
   return out_deg;
+}
+
+inline void save_graph_to_dot(Graph& graph, const std::string& filename) {
+  std::ofstream out(filename);
+  out << "digraph G {\n";
+  for (auto& [uuid, act] : graph.act_nodes()) {
+    out << "  \"" << act.uuid() << "\" [shape=ellipse, label=\"" << act.uuid() << "\\n("
+        << act.size() << ")\"];\n";
+  }
+  for (auto& [uuid, op] : graph.op_nodes()) {
+    out << "  \"" << op.uuid() << "\" [shape=box, label=\"" << op.uuid() << "\\n("
+        << op.workspace_req() << ")\"];\n";
+    for (auto* in : op.inputs()) {
+      out << "  \"" << in->uuid() << "\" -> \"" << op.uuid() << "\";\n";
+    }
+    for (auto* out_act : op.outputs()) {
+      out << "  \"" << op.uuid() << "\" -> \"" << out_act->uuid() << "\";\n";
+    }
+  }
+  out << "}\n";
 }

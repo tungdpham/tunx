@@ -256,3 +256,45 @@ inline Graph random_joining_graph(int depth) {
   g.set_outputs({output});
   return g;
 }
+
+inline Graph sample_branch_graph() {
+  Graph g;
+  ActivationNode* input = g.add_act("input", 10240);
+
+  size_t branch_length = 5;
+  ActivationNode* prev = input;
+  ActivationNode* b1_tail = nullptr;
+  // branch 1
+  for (size_t i = 0; i < branch_length; i++) {
+    b1_tail = g.add_act("b1_act" + std::to_string(i), random_act_size());
+    g.add_op("b1_op" + std::to_string(i), random_ws_size(), {prev}, {b1_tail});
+    prev = b1_tail;
+  }
+
+  prev = input;
+  ActivationNode* b2_tail = nullptr;
+  // branch 2
+  for (size_t i = 0; i < branch_length; i++) {
+    b2_tail = g.add_act("b2_act" + std::to_string(i), random_act_size());
+    g.add_op("b2_op" + std::to_string(i), random_ws_size(), {prev}, {b2_tail});
+    prev = b2_tail;
+  }
+
+  prev = input;
+  ActivationNode* b3_tail = nullptr;
+  // branch 3
+  for (size_t i = 0; i < branch_length; i++) {
+    b3_tail = g.add_act("b3_act" + std::to_string(i), random_act_size());
+    g.add_op("b3_op" + std::to_string(i), random_ws_size(), {prev}, {b3_tail});
+    prev = b3_tail;
+  }
+
+  // join
+  ActivationNode* output = g.add_act("output", 10240);
+  g.add_op("join_op", random_ws_size(), {b1_tail, b2_tail, b3_tail}, {output});
+
+  g.set_inputs({input});
+  g.set_outputs({output});
+
+  return g;
+}
