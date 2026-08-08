@@ -2,9 +2,14 @@
 
 #include <algorithm>
 #include <deque>
+#include <limits>
+#include <map>
 #include <ostream>
 #include <queue>
+#include <set>
+#include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "graph.h"
@@ -43,6 +48,190 @@ private:
   std::map<std::string, MacroNode> macros_;
   std::map<std::string, std::set<std::string>> macro_deps_;
   std::map<std::string, std::set<std::string>> macro_dependents_;
+
+  bool has_peers(const std::string& macro_id, const std::map<std::string, int>& out_deg) const {
+    for (const auto& op_id : macros_.at(macro_id).ops) {
+      const auto& op_node = graph_.get_op(op_id);
+      for (auto* tensor : op_node.inputs()) {
+        if (out_deg.at(tensor->uuid()) <= 1) continue;
+
+        int internal_consumers = 0;
+        for (const auto& inner_op_id : macros_.at(macro_id).ops) {
+          const auto& inner_op = graph_.get_op(inner_op_id);
+          for (auto* inner_tensor : inner_op.inputs()) {
+            if (inner_tensor->uuid() == tensor->uuid()) ++internal_consumers;
+          }
+        }
+        if (internal_consumers < out_deg.at(tensor->uuid())) return true;
+      }
+    }
+    return false;
+  }
+
+  std::string merge_macros(const std::string& parent, const std::string& child, int& next_macro_id,
+                           const char* reason) {
+    const std::string merged_id = "macro_" + std::to_string(next_macro_id++);
+    MacroNode merged;
+    merged.id = merged_id;
+    merged.ops = macros_.at(parent).ops;
+    merged.ops.insert(merged.ops.end(), macros_.at(child).ops.begin(), macros_.at(child).ops.end());
+    merged.a = std::max(macros_.at(parent).a, macros_.at(parent).b + macros_.at(child).a);
+    merged.b = macros_.at(parent).b + macros_.at(child).b;
+
+    if (os_) {
+      auto print_macro = [this](const MacroNode& macro) {
+        *os_ << macro.id << " [";
+        for (const auto& op : macro.ops) *os_ << op << " ";
+        *os_ << ", a: " << macro.a << ", b: " << macro.b << "]";
+      };
+      *os_ << "Merging " << reason << " ";
+      print_macro(macros_.at(parent));
+      *os_ << " with ";
+      print_macro(macros_.at(child));
+      *os_ << " into ";
+      print_macro(merged);
+      *os_ << std::endl;
+    }
+
+    std::set<std::string> merged_deps = macro_deps_.at(parent);
+    for (const auto& dependency : macro_deps_.at(child)) {
+      if (dependency != parent) merged_deps.insert(dependency);
+    }
+
+    std::set<std::string> merged_dependents = macro_dependents_.at(parent);
+    merged_dependents.erase(child);
+    merged_dependents.insert(macro_dependents_.at(child).begin(),
+                             macro_dependents_.at(child).end());
+
+    macros_[merged_id] = std::move(merged);
+    macro_deps_[merged_id] = std::move(merged_deps);
+    macro_dependents_[merged_id] = std::move(merged_dependents);
+
+    for (const auto& dependency : macro_deps_.at(merged_id)) {
+      macro_dependents_.at(dependency).erase(parent);
+      macro_dependents_.at(dependency).erase(child);
+      macro_dependents_.at(dependency).insert(merged_id);
+    }
+    for (const auto& dependent : macro_dependents_.at(merged_id)) {
+      macro_deps_.at(dependent).erase(parent);
+      macro_deps_.at(dependent).erase(child);
+      macro_deps_.at(dependent).insert(merged_id);
+    }
+
+    macros_.erase(parent);
+    macros_.erase(child);
+    macro_deps_.erase(parent);
+    macro_deps_.erase(child);
+    macro_dependents_.erase(parent);
+    macro_dependents_.erase(child);
+    return merged_id;
+  }
+
+  std::map<std::string, int> ancestor_distances(const std::string& macro_id) const {
+    std::map<std::string, int> distances;
+    std::queue<std::string> pending;
+    pending.push(macro_id);
+    distances[macro_id] = 0;
+    while (!pending.empty()) {
+      const std::string current = pending.front();
+      pending.pop();
+      for (const auto& parent : macro_deps_.at(current)) {
+        if (distances.insert({parent, distances.at(current) + 1}).second) pending.push(parent);
+      }
+    }
+    return distances;
+  }
+
+  std::string nearest_common_branching_ancestor(const std::string& first,
+                                                const std::string& second) const {
+    const auto first_distances = ancestor_distances(first);
+    const auto second_distances = ancestor_distances(second);
+    std::string nearest;
+    std::pair<int, int> best_distance;
+    for (const auto& [ancestor, first_distance] : first_distances) {
+      const auto second_it = second_distances.find(ancestor);
+      if (second_it == second_distances.end() || macro_dependents_.at(ancestor).size() < 2)
+        continue;
+
+      const std::pair<int, int> distance = {std::max(first_distance, second_it->second),
+                                            first_distance + second_it->second};
+      if (nearest.empty() || distance < best_distance) {
+        nearest = ancestor;
+        best_distance = distance;
+      }
+    }
+    return nearest;
+  }
+
+  std::string merge_upward_recursively(std::string macro_id, int& next_macro_id) {
+    while (macro_deps_.at(macro_id).size() == 1) {
+      const std::string parent = *macro_deps_.at(macro_id).begin();
+      if (macro_dependents_.at(parent).size() != 1 ||
+          !(macros_.at(macro_id) < macros_.at(parent))) {
+        break;
+      }
+      macro_id = merge_macros(parent, macro_id, next_macro_id, "upward");
+    }
+    return macro_id;
+  }
+
+  std::string merge_branch_recursively(std::string ancestor, int& next_macro_id) {
+    bool merged_branch = false;
+    while (true) {
+      std::string best_child;
+      for (const auto& child : macro_dependents_.at(ancestor)) {
+        if (macro_deps_.at(child).size() != 1 || !(macros_.at(child) < macros_.at(ancestor)))
+          continue;
+        if (best_child.empty() || macros_.at(child) < macros_.at(best_child)) best_child = child;
+      }
+      if (best_child.empty()) {
+        return merged_branch ? merge_upward_recursively(ancestor, next_macro_id) : ancestor;
+      }
+      ancestor = merge_macros(ancestor, best_child, next_macro_id, "branch");
+      merged_branch = true;
+    }
+  }
+
+  std::string prepare_join_branches(const std::string& join, int& next_macro_id) {
+    const std::vector<std::string> parents(macro_deps_.at(join).begin(),
+                                           macro_deps_.at(join).end());
+    std::set<std::string> ancestors;
+    for (size_t first = 0; first < parents.size(); ++first) {
+      for (size_t second = first + 1; second < parents.size(); ++second) {
+        const std::string ancestor =
+            nearest_common_branching_ancestor(parents[first], parents[second]);
+        if (!ancestor.empty()) ancestors.insert(ancestor);
+      }
+    }
+
+    const auto distances_from_join = ancestor_distances(join);
+    std::vector<std::string> ordered_ancestors(ancestors.begin(), ancestors.end());
+    std::sort(ordered_ancestors.begin(), ordered_ancestors.end(),
+              [&distances_from_join](const auto& left, const auto& right) {
+                return distances_from_join.at(left) < distances_from_join.at(right);
+              });
+    for (const auto& ancestor : ordered_ancestors) {
+      if (!macros_.contains(ancestor)) continue;
+      const std::string merged_ancestor = merge_branch_recursively(ancestor, next_macro_id);
+      if (!macros_.contains(join)) return merged_ancestor;
+    }
+    return join;
+  }
+
+  std::string merge_join_parent(const std::string& join, const std::map<std::string, int>& out_deg,
+                                int& next_macro_id) {
+    std::string worst_parent;
+    for (const auto& parent : macro_deps_.at(join)) {
+      if (macro_dependents_.at(parent).size() != 1 || has_peers(parent, out_deg) ||
+          !(macros_.at(join) < macros_.at(parent))) {
+        continue;
+      }
+      if (worst_parent.empty() || macros_.at(worst_parent) < macros_.at(parent)) {
+        worst_parent = parent;
+      }
+    }
+    return worst_parent.empty() ? join : merge_macros(worst_parent, join, next_macro_id, "join");
+  }
 
 public:
   MacroSolver(Graph& graph, std::ostream* os = nullptr)
@@ -102,208 +291,54 @@ public:
       }
     }
 
-    int next_macro_id = 0;
-    std::deque<std::string> dq;
-    for (const auto& u : topo_order) {
-      dq.push_back(u);
+    const std::string virtual_join_id = "__virtual_join__";
+    std::vector<std::string> terminal_macros;
+    for (const auto& [macro_id, macro] : macros_) {
+      if (macro_dependents_.at(macro_id).empty()) terminal_macros.push_back(macro_id);
+    }
+    if (terminal_macros.size() > 1) {
+      macros_[virtual_join_id] = {virtual_join_id, {}, 0, std::numeric_limits<long long>::max()};
+      macro_deps_[virtual_join_id] = {};
+      macro_dependents_[virtual_join_id] = {};
+      for (const auto& terminal : terminal_macros) {
+        macro_deps_[virtual_join_id].insert(terminal);
+        macro_dependents_[terminal].insert(virtual_join_id);
+      }
     }
 
-    // topo order, join contraction (looks backward at each macro)
-    while (!dq.empty()) {
-      std::string Y = dq.front();
-      dq.pop_front();
+    int next_macro_id = 0;
+    std::deque<std::string> pending(topo_order.begin(), topo_order.end());
+    while (!pending.empty()) {
+      const std::string current = pending.front();
+      pending.pop_front();
+      if (!macros_.contains(current)) continue;
 
-      std::string best_X = "";
-      for (auto& X : macro_deps_[Y]) {
-        if (macro_dependents_[X].size() != 1) continue;
-
-        // drop if share input tensor with any peers
-        bool has_peers = false;
-        for (const auto& op_id : macros_[X].ops) {
-          const auto& op_node = graph_.get_op(op_id);
-          for (auto* t : op_node.inputs()) {
-            if (out_deg[t->uuid()] > 1) {
-              int internal_consumers = 0;
-              for (const auto& inner_op_id : macros_[X].ops) {
-                const auto& inner_op = graph_.get_op(inner_op_id);
-                for (auto* inner_t : inner_op.inputs()) {
-                  if (inner_t->uuid() == t->uuid()) {
-                    internal_consumers++;
-                  }
-                }
-              }
-              if (internal_consumers < out_deg[t->uuid()]) {
-                has_peers = true;
-                break;
-              }
-            }
-          }
-          if (has_peers) break;
-        }
-        if (has_peers) {
+      if (macro_deps_.at(current).size() == 1) {
+        const std::string parent = *macro_deps_.at(current).begin();
+        if (macro_dependents_.at(parent).size() == 1 && macros_.at(current) < macros_.at(parent)) {
+          pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
           continue;
         }
-
-        if (macros_[Y] < macros_[X]) {
-          if (best_X == "" || macros_[best_X] < macros_[X]) {
-            best_X = X;
-          }
-        }
       }
 
-      if (best_X != "") {
-        if (os_) {
-          *os_ << "Merging forward macro " << macros_[best_X].id << " [";
-          for (auto op : macros_[best_X].ops) {
-            *os_ << op << " ";
-          }
-          *os_ << ", a:" << macros_[best_X].a << ", b:" << macros_[best_X].b << " ] with macro "
-               << macros_[Y].id << " [";
-          for (auto op : macros_[Y].ops) {
-            *os_ << op << " ";
-          }
-          *os_ << ", a:" << macros_[Y].a << ", b:" << macros_[Y].b << " ] into macro "
-               << "macro_" + std::to_string(next_macro_id) << std::endl;
+      if (macro_deps_.at(current).size() > 1) {
+        const std::string prepared = prepare_join_branches(current, next_macro_id);
+        if (prepared != current) {
+          pending.push_front(prepared);
+          continue;
         }
-        std::string XY_id = "macro_" + std::to_string(next_macro_id++);
-        MacroNode XY;
-        XY.id = XY_id;
-        XY.ops = macros_[best_X].ops;
-        XY.ops.insert(XY.ops.end(), macros_[Y].ops.begin(), macros_[Y].ops.end());
-        XY.a = std::max(macros_[best_X].a, macros_[best_X].b + macros_[Y].a);
-        XY.b = macros_[best_X].b + macros_[Y].b;
-        macros_[XY_id] = XY;
-
-        macro_deps_[XY_id] = macro_deps_[best_X];
-        for (auto& dep : macro_deps_[Y]) {
-          if (dep != best_X) macro_deps_[XY_id].insert(dep);
-        }
-
-        macro_dependents_[XY_id] = macro_dependents_[best_X];
-        macro_dependents_[XY_id].erase(Y);
-        for (auto& child : macro_dependents_[Y]) {
-          macro_dependents_[XY_id].insert(child);
-        }
-
-        for (auto& p : macro_deps_[XY_id]) {
-          macro_dependents_[p].erase(best_X);
-          macro_dependents_[p].erase(Y);
-          macro_dependents_[p].insert(XY_id);
-        }
-        for (auto& child : macro_dependents_[XY_id]) {
-          macro_deps_[child].erase(best_X);
-          macro_deps_[child].erase(Y);
-          macro_deps_[child].insert(XY_id);
-        }
-
-        macros_.erase(best_X);
-        macros_.erase(Y);
-        macro_deps_.erase(best_X);
-        macro_deps_.erase(Y);
-        macro_dependents_.erase(best_X);
-        macro_dependents_.erase(Y);
-
-        dq.push_front(XY_id);
+        const std::string merged = merge_join_parent(prepared, out_deg, next_macro_id);
+        if (merged != prepared) pending.push_front(merged);
       }
     }
-
-    // sort new contracted graph in reverse topological order
-    std::map<std::string, int> in_deg;
-    for (const auto& [m_id, _] : macros_) {
-      in_deg[m_id] = macro_deps_[m_id].size();
-    }
-
-    std::queue<std::string> top_q;
-    for (const auto& [m_id, deg] : in_deg) {
-      if (deg == 0) top_q.push(m_id);
-    }
-
-    std::vector<std::string> reverse_topo;
-    while (!top_q.empty()) {
-      std::string u = top_q.front();
-      top_q.pop();
-      reverse_topo.push_back(u);
-      for (const auto& v : macro_dependents_[u]) {
-        if (--in_deg[v] == 0) top_q.push(v);
+    if (macros_.contains(virtual_join_id)) {
+      prepare_join_branches(virtual_join_id, next_macro_id);
+      for (const auto& terminal : macro_deps_.at(virtual_join_id)) {
+        macro_dependents_.at(terminal).erase(virtual_join_id);
       }
-    }
-    std::reverse(reverse_topo.begin(), reverse_topo.end());
-
-    for (auto& macro_id : reverse_topo) {
-      dq.push_back(macro_id);
-    }
-
-    // reverse topo order, fork/branch contraction (looks forward at each macro)
-    while (!dq.empty()) {
-      std::string Y = dq.front();
-      dq.pop_front();
-
-      std::string best_Z = "";
-      for (auto& Z : macro_dependents_[Y]) {
-        if (macro_deps_[Z].size() != 1) continue;
-
-        if (macros_[Z] < macros_[Y]) {
-          if (best_Z == "" || macros_[Z] < macros_[best_Z]) {
-            best_Z = Z;
-          }
-        }
-      }
-
-      if (best_Z != "") {
-        if (os_) {
-          *os_ << "Merging backward macro " << macros_[Y].id << " [";
-          for (auto op : macros_[Y].ops) {
-            *os_ << op << " ";
-          }
-          *os_ << ", a: " << macros_[Y].a << ", b: " << macros_[Y].b << "] with macro "
-               << macros_[best_Z].id << " [";
-          for (auto op : macros_[best_Z].ops) {
-            *os_ << op << " ";
-          }
-          *os_ << ", a: " << macros_[best_Z].a << ", b: " << macros_[best_Z].b << "] into macro "
-               << "macro_" + std::to_string(next_macro_id) << std::endl;
-        }
-        std::string YZ_id = "macro_" + std::to_string(next_macro_id++);
-        MacroNode YZ;
-        YZ.id = YZ_id;
-        YZ.ops = macros_[Y].ops;
-        YZ.ops.insert(YZ.ops.end(), macros_[best_Z].ops.begin(), macros_[best_Z].ops.end());
-        YZ.a = std::max(macros_[Y].a, macros_[Y].b + macros_[best_Z].a);
-        YZ.b = macros_[Y].b + macros_[best_Z].b;
-        macros_[YZ_id] = YZ;
-
-        macro_deps_[YZ_id] = macro_deps_[Y];
-        for (auto& dep : macro_deps_[best_Z]) {
-          if (dep != Y) macro_deps_[YZ_id].insert(dep);
-        }
-
-        macro_dependents_[YZ_id] = macro_dependents_[Y];
-        macro_dependents_[YZ_id].erase(best_Z);
-        for (auto& child : macro_dependents_[best_Z]) {
-          macro_dependents_[YZ_id].insert(child);
-        }
-
-        for (auto& p : macro_deps_[YZ_id]) {
-          macro_dependents_[p].erase(Y);
-          macro_dependents_[p].erase(best_Z);
-          macro_dependents_[p].insert(YZ_id);
-        }
-        for (auto& child : macro_dependents_[YZ_id]) {
-          macro_deps_[child].erase(Y);
-          macro_deps_[child].erase(best_Z);
-          macro_deps_[child].insert(YZ_id);
-        }
-
-        macros_.erase(Y);
-        macros_.erase(best_Z);
-        macro_deps_.erase(Y);
-        macro_deps_.erase(best_Z);
-        macro_dependents_.erase(Y);
-        macro_dependents_.erase(best_Z);
-
-        dq.push_front(YZ_id);
-        continue;
-      }
+      macros_.erase(virtual_join_id);
+      macro_deps_.erase(virtual_join_id);
+      macro_dependents_.erase(virtual_join_id);
     }
 
     if (os_) {
