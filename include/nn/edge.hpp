@@ -22,32 +22,10 @@ public:
   const Vec<Node> &consumers() const { return consumers_; }
   std::shared_ptr<LayerImpl> layer() const { return layer_; }
 
-  Residuals &residuals(size_t pid) {
-    auto it = residuals_cache_.find(pid);
-    if (it != residuals_cache_.end()) {
-      return it->second;
-    }
-    throw std::runtime_error("Residuals not found for the given minibatch ID");
-  }
-  void set_residuals(size_t pid, Residuals residuals) {
-    residuals_cache_[pid] = std::move(residuals);
-  }
-
-  void clear_residuals(size_t pid) { residuals_cache_.erase(pid); }
-
-  size_t residuals_memory_bytes() const {
-    size_t total = 0;
-    for (const auto &[pid, res] : residuals_cache_) {
-      total += res.num_bytes();
-    }
-    return total;
-  }
-
 private:
   std::shared_ptr<LayerImpl> layer_;
   Vec<Node> producers_;
   Vec<Node> consumers_;
-  std::unordered_map<size_t, Residuals> residuals_cache_;  // pid -> residuals
 };
 
 using Edge = std::shared_ptr<EdgeImpl>;

@@ -8,6 +8,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/csv_logger.hpp"
@@ -16,6 +17,7 @@
 #include "device/stream.hpp"
 #include "nn/edge.hpp"
 #include "nn/engines/engine_handle.hpp"
+#include "nn/graph_executor.hpp"
 #include "nn/node.hpp"
 #include "nn/param.hpp"
 #include "nn/tensor_bundle.hpp"
@@ -69,6 +71,11 @@ struct GraphOpts {
 class Graph {
 public:
   Graph() = default;
+  Graph(const Graph &) = delete;
+  Graph &operator=(const Graph &) = delete;
+  Graph(Graph &&other) noexcept;
+  Graph &operator=(Graph &&other) noexcept = delete;
+  ~Graph();
 
   void save_state(std::ostream &stream) const;
   static Graph load_state(std::istream &stream, IAllocator &allocator);
@@ -141,23 +148,9 @@ public:
     memory_profile_logger_ = logger;
   }
 
-  size_t max_temp_workspace() const { return max_temp_workspace_; }
-  size_t residuals_memory_bytes() const {
-    size_t total = 0;
-    for (const auto &edge : edges_) {
-      total += edge->residuals_memory_bytes();
-    }
-    return total;
-  }
-  size_t gradients_memory_bytes() {
-    size_t total = 0;
-    for (auto &p : params()) {
-      total += p.grad().num_bytes();
-    }
-    return total;
-  }
-
 private:
+  friend class GraphExecutor;
+
   // backend
   IAllocator *param_allocator_;
   std::shared_ptr<DELAllocatorV2> workspace_allocator_;
@@ -174,25 +167,20 @@ private:
   std::set<Node> output_nodes_;
   std::map<std::string, double> timing_map_;  // layer name -> total time taken.
   std::vector<std::string> timing_order_;
-  std::map<std::weak_ptr<NodeImpl>, int, std::owner_less<std::weak_ptr<NodeImpl>>> in_degree_;
-  std::map<std::weak_ptr<NodeImpl>, int, std::owner_less<std::weak_ptr<NodeImpl>>> out_degree_;
   ExecutionMode mode_ = ExecutionMode::TRAIN;
   size_t node_count_ = 0;
   std::set<std::string> used_uids_;
+  std::map<size_t, std::unique_ptr<GraphExecutor>> executors_;
   bool enable_memory_profiling_ = false;
   CsvLogger *memory_profile_logger_ = nullptr;
-  size_t max_temp_workspace_ = 0;
 
-  int node_in_degree(const Node &node) const;
-  int node_out_degree(const Node &node) const;
   std::string generate_uid();
 
   Vec<Node> inputs();
   Vec<Node> outputs();
 
-  void on_add_edge(const Edge &edge);
-  void forward_edge(Edge &edge, size_t pid = 0);
-  void backward_edge(Edge &edge, size_t pid = 0);
+  GraphExecutor &executor(size_t pid);
+  void clear_executors();
 };
 
 }  // namespace tunx
