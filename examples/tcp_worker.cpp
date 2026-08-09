@@ -52,7 +52,7 @@ bool parse_arguments(int argc, char *argv[], Config &cfg) {
   while ((c = getopt_long(argc, argv, "h", long_options, nullptr)) != -1) {
     switch (c) {
       case 'g':
-        cfg.device = "GPU:" + std::string(optarg);
+        cfg.device = "CUDA:" + std::string(optarg);
         break;
       case 'i':
         try {
