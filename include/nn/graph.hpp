@@ -48,6 +48,13 @@ struct GraphRegionSummary {
 struct EdgeExecutionProfile {
   size_t peak_bytes = 0;
   size_t retained_bytes = 0;
+  size_t output_bytes = 0;
+  Vec<size_t> output_tensor_bytes;
+};
+
+struct ForwardMemoryEstimate {
+  size_t topological_peak_bytes = 0;
+  size_t macro_peak_bytes = 0;
 };
 
 struct ForwardPlanCacheEntry {
@@ -106,9 +113,15 @@ public:
                 std::initializer_list<Node> consumers);
 
   void sort();
+  void save_dot(const std::string &filename) const;
 
   TensorBundle forward(TensorBundle &input_map, size_t pid = 0);
   TensorBundle backward(TensorBundle &output_grad_map, size_t pid = 0);
+  std::vector<std::string> last_forward_execution_order() const;
+  bool last_forward_used_macro_plan() const { return last_forward_used_macro_plan_; }
+  ForwardMemoryEstimate last_forward_memory_estimate() const {
+    return last_forward_memory_estimate_;
+  }
 
   Node make_node(std::string uid = "");
 
@@ -150,6 +163,7 @@ public:
 
 private:
   friend class GraphExecutor;
+  friend class MacroSolver;
 
   // backend
   IAllocator *param_allocator_;
@@ -171,6 +185,10 @@ private:
   size_t node_count_ = 0;
   std::set<std::string> used_uids_;
   std::map<size_t, std::unique_ptr<GraphExecutor>> executors_;
+  std::vector<ForwardPlanCacheEntry> forward_plan_cache_;
+  std::vector<size_t> last_forward_execution_order_;
+  bool last_forward_used_macro_plan_ = false;
+  ForwardMemoryEstimate last_forward_memory_estimate_;
   bool enable_memory_profiling_ = false;
   CsvLogger *memory_profile_logger_ = nullptr;
 
@@ -181,6 +199,7 @@ private:
 
   GraphExecutor &executor(size_t pid);
   void clear_executors();
+  ForwardPlanCacheEntry &forward_plan_cache(TensorBundle &input_map);
 };
 
 }  // namespace tunx

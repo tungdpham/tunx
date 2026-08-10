@@ -114,3 +114,6 @@ private/
 
 # agents
 /.agents/
+
+# github
+/.github/

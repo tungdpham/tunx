@@ -11,6 +11,7 @@
 
 #include <array>
 #include <cstdint>
+#include <fstream>
 #include <istream>
 #include <ostream>
 #include <queue>
@@ -49,6 +50,7 @@ static Engine get_default_engine(Device &device) {
 
 void Graph::compile(IAllocator &allocator, GraphOpts opts) {
   clear_executors();
+  forward_plan_cache_.clear();
   sort();
   std::set<LayerImpl *> unique_layers;
   for (const auto &edge : edges_) {
@@ -115,6 +117,7 @@ Vec<std::string> Graph::output_uids() const {
 void Graph::add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producers,
                      const Vec<Node> &consumers) {
   clear_executors();
+  forward_plan_cache_.clear();
   Edge edge = std::make_shared<EdgeImpl>(layer, producers, consumers);
   edges_.push_back(edge);
 }
@@ -122,6 +125,7 @@ void Graph::add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producer
 void Graph::add_edge(std::shared_ptr<LayerImpl> layer, std::initializer_list<Node> producers,
                      std::initializer_list<Node> consumers) {
   clear_executors();
+  forward_plan_cache_.clear();
   Edge edge = std::make_shared<EdgeImpl>(layer, producers, consumers);
   edges_.push_back(edge);
 }
@@ -205,6 +209,39 @@ void Graph::sort() {
 
   nodes_ = std::move(sorted_nodes);
 }
+
+void Graph::save_dot(const std::string &filename) const {
+  std::ofstream output(filename);
+  if (!output) throw std::runtime_error("Failed to open DOT file: " + filename);
+
+  output << "digraph Graph {\n  rankdir=LR;\n";
+  for (const Node &node : nodes_) {
+    output << "  \"node_" << node->uid() << "\" [shape=ellipse, label=\"" << node->uid()
+           << "\"];\n";
+  }
+  for (size_t index = 0; index < edges_.size(); ++index) {
+    const Edge &edge = edges_[index];
+    output << "  \"edge_" << index << "\" [shape=box, label=\"" << index << ": "
+           << edge->layer()->name() << "\"];\n";
+    for (const Node &producer : edge->producers()) {
+      output << "  \"node_" << producer->uid() << "\" -> \"edge_" << index << "\";\n";
+    }
+    for (const Node &consumer : edge->consumers()) {
+      output << "  \"edge_" << index << "\" -> \"node_" << consumer->uid() << "\";\n";
+    }
+  }
+  output << "}\n";
+}
+
+std::vector<std::string> Graph::last_forward_execution_order() const {
+  std::vector<std::string> order;
+  order.reserve(last_forward_execution_order_.size());
+  for (size_t edge_index : last_forward_execution_order_) {
+    order.push_back(std::to_string(edge_index) + ": " + edges_.at(edge_index)->layer()->name());
+  }
+  return order;
+}
+
 TensorBundle Graph::forward(TensorBundle &input_map, size_t pid) {
   return executor(pid).forward(input_map);
 }
@@ -227,6 +264,7 @@ Node Graph::make_node(std::string uid) {
 }
 
 void Graph::set_mode(ExecutionMode mode) {
+  if (mode_ != mode) forward_plan_cache_.clear();
   mode_ = mode;
   for (const auto &edge : edges_) {
     edge->layer()->set_training(mode == ExecutionMode::TRAIN);
@@ -238,6 +276,7 @@ void Graph::set_input(Node node) {
     throw std::runtime_error("Input node does not belong to graph");
   }
   clear_executors();
+  forward_plan_cache_.clear();
   input_nodes_.insert(node);
 }
 
@@ -246,6 +285,7 @@ void Graph::set_output(Node node) {
     throw std::runtime_error("Output node does not belong to graph");
   }
   clear_executors();
+  forward_plan_cache_.clear();
   output_nodes_.insert(node);
 }
 
@@ -281,6 +321,7 @@ Graph::Graph(Graph &&other) noexcept
       mode_(other.mode_),
       node_count_(other.node_count_),
       used_uids_(std::move(other.used_uids_)),
+      forward_plan_cache_(std::move(other.forward_plan_cache_)),
       enable_memory_profiling_(other.enable_memory_profiling_),
       memory_profile_logger_(other.memory_profile_logger_) {
   other.executors_.clear();
@@ -320,6 +361,18 @@ GraphExecutor &Graph::executor(size_t pid) {
 }
 
 void Graph::clear_executors() { executors_.clear(); }
+
+ForwardPlanCacheEntry &Graph::forward_plan_cache(TensorBundle &input_map) {
+  std::map<std::string, Vec<size_t>> input_shapes;
+  for (const auto &[uid, tensor] : input_map) {
+    input_shapes[uid] = tensor.shape();
+  }
+  for (auto &entry : forward_plan_cache_) {
+    if (entry.mode == mode_ && entry.input_shapes == input_shapes) return entry;
+  }
+  forward_plan_cache_.push_back({.mode = mode_, .input_shapes = std::move(input_shapes)});
+  return forward_plan_cache_.back();
+}
 
 namespace {
 

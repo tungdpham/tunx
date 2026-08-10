@@ -23,8 +23,8 @@
 #include "data_loading/batch_prefetcher.hpp"
 #include "device/pool_allocator.hpp"
 #include "device/stream.hpp"
-#include "nn/metrics_logger.hpp"
 #include "nn/metrics_computer.hpp"
+#include "nn/metrics_logger.hpp"
 #include "threading/thread_wrapper.hpp"
 #include "type/type.hpp"
 
@@ -56,7 +56,8 @@ void print_timing_table(const std::vector<std::pair<std::string, double>> &timin
 static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
                           unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
                           unique_ptr<Scheduler> &scheduler, const TrainingConfig &config,
-                          MetricsLogger &logger, int epoch, std::unique_ptr<CsvLogger> &mem_logger) {
+                          MetricsLogger &logger, int epoch,
+                          std::unique_ptr<CsvLogger> &mem_logger) {
   auto train_start = chrono::high_resolution_clock::now();
   Tensor batch_data, batch_labels;
   Device &model_device = graph.device();
@@ -72,6 +73,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
   size_t total_class_num = 0;
   int num_batches = 0;
   int grad_accum_counter = 0;
+  bool execution_order_logged = false;
 
   std::unique_ptr<BatchPrefetcher> prefetcher;
   if (config.prefetch_data) {
@@ -105,6 +107,18 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     }
 
     TensorBundle outputs = graph.forward(inputs);
+
+    if (!execution_order_logged && graph.last_forward_used_macro_plan()) {
+      cout << "Macro forward execution order: ";
+      for (const string &edge : graph.last_forward_execution_order()) cout << "[" << edge << "] ";
+      cout << endl;
+      const ForwardMemoryEstimate estimate = graph.last_forward_memory_estimate();
+      cout << "Estimated forward peak memory - topological: " << fixed << setprecision(2)
+           << static_cast<double>(estimate.topological_peak_bytes) / 1024 / 1024
+           << " MiB, macro plan: " << static_cast<double>(estimate.macro_peak_bytes) / 1024 / 1024
+           << " MiB" << endl;
+      execution_order_logged = true;
+    }
 
     if (config.print_layer_memory_usage && epoch == 1 && num_batches == 1) {
       graph.enable_memory_profiling(false);
@@ -210,8 +224,9 @@ static void train_val(Graph &graph, unique_ptr<Dataset> &train_dataset,
       cout << "Epoch " << epoch + 1 << "/" << config.epochs << endl;
 
       // train phrase
-      auto [avg_train_loss, avg_train_accuracy] = train_epoch(
-          graph, train_dataset, optimizer, criterion, scheduler, config, logger, epoch + 1, mem_logger);
+      auto [avg_train_loss, avg_train_accuracy] =
+          train_epoch(graph, train_dataset, optimizer, criterion, scheduler, config, logger,
+                      epoch + 1, mem_logger);
 
       // validation phrase
       auto [avg_val_loss, avg_val_accuracy] =
@@ -279,6 +294,7 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
   auto &mem_pool = PoolAllocator::instance(model_device, nullptr);
 
   int grad_accum_counter = 0;
+  bool execution_order_logged = false;
   const std::string artifact_name = training_artifact_name(config);
   MetricsLogger logger("tunx_" + artifact_name, config.log_dir, config.log_mode);
 
@@ -331,6 +347,18 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
       }
 
       TensorBundle outputs = graph.forward(inputs);
+
+      if (!execution_order_logged && graph.last_forward_used_macro_plan()) {
+        cout << "Macro forward execution order: ";
+        for (const string &edge : graph.last_forward_execution_order()) cout << "[" << edge << "] ";
+        cout << endl;
+        const ForwardMemoryEstimate estimate = graph.last_forward_memory_estimate();
+        cout << "Estimated forward peak memory - default: " << fixed << setprecision(2)
+             << static_cast<double>(estimate.topological_peak_bytes) / 1024 / 1024
+             << " MiB, macro plan: " << static_cast<double>(estimate.macro_peak_bytes) / 1024 / 1024
+             << " MiB" << endl;
+        execution_order_logged = true;
+      }
 
       if (config.print_layer_memory_usage && steps == 0) {
         graph.enable_memory_profiling(false);
@@ -427,7 +455,8 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
   std::unique_ptr<CsvLogger> mem_logger;
   if (config.print_layer_memory_usage) {
     std::string artifact_name = training_artifact_name(config);
-    std::vector<std::string> headers = {"layer", "peak_usage_bytes", "retained_bytes", "unused_bytes", "reserved_bytes"};
+    std::vector<std::string> headers = {"layer", "peak_usage_bytes", "retained_bytes",
+                                        "unused_bytes", "reserved_bytes"};
     std::string mem_csv_path = "tunx_" + artifact_name + "_" + csv_timestamp() + "_memory.csv";
     if (!config.log_dir.empty()) {
       mem_csv_path = config.log_dir + "/" + mem_csv_path;
@@ -436,7 +465,8 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
   }
 
   if (is_val) {
-    train_val(graph, train_dataset, val_dataset, optimizer, criterion, scheduler, config, mem_logger);
+    train_val(graph, train_dataset, val_dataset, optimizer, criterion, scheduler, config,
+              mem_logger);
   } else {
     train_step(graph, train_dataset, optimizer, criterion, scheduler, config, mem_logger);
   }
@@ -466,7 +496,7 @@ static Result validate_model_impl(Graph &graph, unique_ptr<Dataset> &val_dataset
     float loss;
     criterion->compute_loss(predictions, device_labels, loss);
     val_loss += loss;
-    
+
     MetricsComputer metrics_comp(config.log_mode);
     ComputedMetrics computed_metrics = metrics_comp.compute(predictions, device_labels, loss);
     int batch_corrects = computed_metrics.corrects;

@@ -7,6 +7,7 @@
 
 namespace tunx {
 class Graph;
+struct ForwardPlanCacheEntry;
 
 class GraphExecutor {
 public:
@@ -23,6 +24,7 @@ private:
   };
 
   Graph &graph_;
+  ForwardPlanCacheEntry *active_plan_ = nullptr;
   std::map<Node, Entry> data_;
   std::map<Node, Entry> grads_;
   std::map<Edge, Residuals> residuals_;
@@ -36,7 +38,7 @@ private:
   void set_grad(const Node &node, const Tensor &tensor, int ref_count);
   void accumulate_grad(const Node &node, const Tensor &tensor, int ref_count);
   void release_grad(const Node &node);
-  void forward_edge(Edge &edge);
+  void forward_edge(Edge &edge, size_t edge_index);
   void backward_edge(Edge &edge);
   void cleanup_released(std::map<Node, Entry> &entries);
 };

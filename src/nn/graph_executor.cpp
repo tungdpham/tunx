@@ -13,6 +13,7 @@
 #include <unordered_map>
 
 #include "nn/graph.hpp"
+#include "nn/macro_solver.hpp"
 #include "tensor/ops.hpp"
 
 namespace tunx {
@@ -92,10 +93,17 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
   }
 
+  MacroSolver planner(graph_);
+  const std::vector<size_t> execution_order = planner.find_order(input_map);
+  active_plan_ = &graph_.forward_plan_cache(input_map);
+  graph_.last_forward_execution_order_ = execution_order;
+  graph_.last_forward_used_macro_plan_ = active_plan_->profiled;
+
   TensorBundle output_map;
-  for (auto &edge : graph_.edges_) {
+  for (size_t edge_index : execution_order) {
+    Edge &edge = graph_.edges_.at(edge_index);
     const auto start = std::chrono::high_resolution_clock::now();
-    forward_edge(edge);
+    forward_edge(edge, edge_index);
     const auto end = std::chrono::high_resolution_clock::now();
     const double duration = std::chrono::duration<double, std::milli>(end - start).count();
     const std::string timing_key = edge->layer()->name() + " forward";
@@ -111,6 +119,9 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
     }
   }
 
+  active_plan_->profiled = active_plan_->edge_profiles.size() == graph_.edges_.size();
+  ++active_plan_->execution_count;
+  active_plan_ = nullptr;
   cleanup_released(data_);
   return output_map;
 }
@@ -158,7 +169,7 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
 
 void GraphExecutor::clear_grads() { grads_.clear(); }
 
-void GraphExecutor::forward_edge(Edge &edge) {
+void GraphExecutor::forward_edge(Edge &edge, size_t edge_index) {
   Vec<Tensor> input_data;
   for (const auto &producer : edge->producers()) {
     if (!data(producer)) {
@@ -170,7 +181,8 @@ void GraphExecutor::forward_edge(Edge &edge) {
 
   Residuals residuals;
   Vec<Tensor> output_data;
-  if (graph_.enable_memory_profiling_ && graph_.workspace_allocator_) {
+  size_t workspace_bytes = 0;
+  if (graph_.workspace_allocator_) {
     const size_t usage_before = graph_.workspace_allocator_->allocated();
     size_t peak_usage = usage_before;
     const size_t hook_id = graph_.workspace_allocator_->add_allocation_hook(
@@ -181,8 +193,9 @@ void GraphExecutor::forward_edge(Edge &edge) {
 
     const size_t peak_edge_usage = peak_usage - usage_before;
     const size_t retained = usage_after - usage_before;
+    workspace_bytes = peak_usage > usage_after ? peak_usage - usage_after : 0;
 
-    if (graph_.memory_profile_logger_) {
+    if (graph_.enable_memory_profiling_ && graph_.memory_profile_logger_) {
       std::unordered_map<std::string, std::string> row;
       row["layer"] = edge->layer()->name();
       row["peak_usage_bytes"] = std::to_string(peak_edge_usage);
@@ -190,7 +203,7 @@ void GraphExecutor::forward_edge(Edge &edge) {
       row["unused_bytes"] = std::to_string(graph_.workspace_allocator_->unused());
       row["reserved_bytes"] = std::to_string(graph_.workspace_allocator_->reserved());
       graph_.memory_profile_logger_->log(row);
-    } else {
+    } else if (graph_.enable_memory_profiling_) {
       fmt::print(
           "Layer {} peak usage: {:.2f} MB, retained: {:.2f} MB, unused: {:.2f} MB, reserved: "
           "{:.2f} MB\n",
@@ -203,6 +216,21 @@ void GraphExecutor::forward_edge(Edge &edge) {
     output_data = edge->layer()->forward(input_data, residuals);
   }
 
+  size_t output_bytes = 0;
+  Vec<size_t> output_tensor_bytes;
+  output_tensor_bytes.reserve(output_data.size());
+  for (const Tensor &output : output_data) {
+    output_tensor_bytes.push_back(output.num_bytes());
+    output_bytes += output.num_bytes();
+  }
+  if (active_plan_) {
+    active_plan_->edge_profiles[edge_index] = {
+        .peak_bytes = workspace_bytes,
+        .retained_bytes = residuals.num_bytes(),
+        .output_bytes = output_bytes,
+        .output_tensor_bytes = std::move(output_tensor_bytes),
+    };
+  }
   residuals_[edge] = std::move(residuals);
   for (size_t index = 0; index < edge->consumers().size(); ++index) {
     const Node &consumer = edge->consumers()[index];
