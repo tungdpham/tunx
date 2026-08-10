@@ -79,7 +79,7 @@ DatasetPair DatasetFactory::create(const std::string &dataset_type, const std::s
     if (val->load_data(dataset_path + "/test.bin")) {
       pair.val = std::move(val);
     }
-  } else if (dataset_type == "tiny_imagenet") {
+  } else if (dataset_type == "tiny-imagenet") {
     auto train = std::make_unique<TinyImageNet>(io_dtype_);
     auto val = std::make_unique<TinyImageNet>(io_dtype_);
 

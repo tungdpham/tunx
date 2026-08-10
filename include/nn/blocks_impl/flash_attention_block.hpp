@@ -27,8 +27,8 @@ struct FlashAttentionBlockOp {
   static Tensor forward(OpContext &ctx, const Tensor &input, Layer q_proj, Layer k_proj,
                         Layer v_proj, Layer out_proj, const Config &config);
 
-  static Vec<Tensor> backward(OpContext &ctx, const Tensor &grad_output, Layer q_proj, Layer k_proj,
-                              Layer v_proj, Layer out_proj, const Config &config);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, Layer q_proj, Layer k_proj,
+                         Layer v_proj, Layer out_proj, const Config &config);
 
   static LayerConfig get_config(const Config &config, const std::string &name);
   static Config parse_config(const LayerConfig &config);

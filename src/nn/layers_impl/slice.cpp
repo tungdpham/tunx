@@ -26,7 +26,7 @@ Vec<Vec<size_t>> SliceOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
 
 Tensor SliceOp::forward(OpContext &ctx, const Tensor &input, const Config &config) {
   if (ctx.is_training) {
-    Tensor shape_tensor = ctx.make_tensor({input.shape().size()}, DType_t::SIZE_T);
+    Tensor shape_tensor({input.shape().size()}, DType_t::SIZE_T);  // on host
     std::copy(input.shape().begin(), input.shape().end(), shape_tensor.data_as<size_t>());
     ctx.residuals["original_shape"] = shape_tensor;
   }
