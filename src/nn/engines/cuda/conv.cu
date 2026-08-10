@@ -1,4 +1,4 @@
-
+#include "device/cuda_device.hpp"
 #include "nn/engines/engine_handle.hpp"
 #ifdef TUNX_USE_CUDA
 #include <cublas_v2.h>
@@ -14,6 +14,34 @@ namespace tunx {
 
 #define BLOCK_SIZE 256
 #define WARP_SIZE 32
+
+__device__ __forceinline__ float warp_reduce_sum(float sum) {
+  for (int offset = 16; offset > 0; offset /= 2) {
+    sum += __shfl_down_sync(0xffffffff, sum, offset);
+  }
+  return sum;
+}
+
+template <typename T>
+__global__ void bgrad_reduce_accumulate_kernel(const T* __restrict__ dy, T* __restrict__ db,
+                                               int batch_size, int out_features) {
+  int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+  int lane_id = threadIdx.x % 32;
+
+  if (warp_id >= out_features) return;
+
+  float sum = 0.0f;
+  for (int b = lane_id; b < batch_size; b += 32) {
+    int idx = b * out_features + warp_id;
+    sum += (float)dy[idx];
+  }
+
+  sum = warp_reduce_sum(sum);
+
+  if (lane_id == 0) {
+    db[warp_id] = (T)(sum + (float)db[warp_id]);
+  }
+}
 
 template <typename T>
 __global__ void conv2d_add_bias_kernel(T* output, const T* bias, size_t batch_size, size_t output_h,
@@ -94,7 +122,28 @@ void CUDAEngine::conv2d_wgrad(engine_handle backend_handle, const Conv2DStats& s
 void CUDAEngine::conv2d_bgrad(engine_handle backend_handle, const Conv2DStats& stats,
                               const void* grad_output, void* grad_bias_prev, void* workspace,
                               DTypeDesc type_desc) {
-  throw std::runtime_error("conv2d_bgrad not implemented");
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
+
+  size_t out_channels = stats.out_channels;
+  const int64_t output_h = (stats.input_h + stats.pad_h * 2 - stats.kernel_h) / stats.stride_h + 1;
+  const int64_t output_w = (stats.input_w + stats.pad_w * 2 - stats.kernel_w) / stats.stride_w + 1;
+  size_t num_elements_to_reduce = stats.batch_size * output_h * output_w;
+
+  int threads_per_block = 128;
+  int warps_per_block = threads_per_block / 32;
+  int num_blocks = (out_channels + warps_per_block - 1) / warps_per_block;
+
+  DISPATCH_DTYPE(type_desc.io_dtype, T, {
+    bgrad_reduce_accumulate_kernel<<<num_blocks, threads_per_block, 0, stream>>>(
+        static_cast<const T*>(grad_output), static_cast<T*>(grad_bias_prev),
+        static_cast<int>(num_elements_to_reduce), static_cast<int>(out_channels));
+  });
+
+  cudaError_t err = cudaGetLastError();
+  if (err != cudaSuccess) {
+    throw std::runtime_error(std::string("Failed to launch conv_bgrad custom kernel: ") +
+                             cudaGetErrorString(err));
+  }
 }
 
 }  // namespace tunx

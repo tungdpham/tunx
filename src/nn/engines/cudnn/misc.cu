@@ -161,46 +161,9 @@ struct sdpa_bwd_graph {
   }
 };
 
-template <typename T>
-__global__ void dropout_fwd_kernel(const T* __restrict__ input, T* __restrict__ output,
-                                   bool* __restrict__ mask, float dropout_rate, float scale,
-                                   unsigned long long seed, size_t total_elements) {
-  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= total_elements) return;
-
-  unsigned int state = (unsigned int)(seed ^ idx ^ 0x12345678);
-  state ^= state << 13;
-  state ^= state >> 17;
-  state ^= state << 5;
-  float rand_val = (state % 100000) / 100000.0f;
-
-  bool keep = rand_val > dropout_rate;
-  mask[idx] = keep;
-
-  if (keep) {
-    output[idx] = (T)((float)input[idx] * scale);
-  } else {
-    output[idx] = (T)0.0f;
-  }
-}
-
-template <typename T>
-__global__ void dropout_bwd_kernel(const T* __restrict__ grad_output, T* __restrict__ grad_input,
-                                   const bool* __restrict__ mask, float scale,
-                                   size_t total_elements) {
-  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= total_elements) return;
-
-  if (mask[idx]) {
-    grad_input[idx] = (T)((float)grad_output[idx] * scale);
-  } else {
-    grad_input[idx] = (T)0.0f;
-  }
-}
-
 WorkspaceReq CuDNNEngine::query_dropout_graph(engine_handle backend_handle,
                                               const DropoutStats& stats, DTypeDesc type_desc) {
-  return {0, 0, 0};
+  return cuda_engine_.query_dropout_graph(backend_handle, stats, type_desc);
 }
 
 WorkspaceReq CuDNNEngine::query_sdpa_graph(engine_handle backend_handle,
@@ -309,121 +272,23 @@ void CuDNNEngine::sdpa_bwd(engine_handle backend_handle, const AttentionStats& s
 void CuDNNEngine::dropout_fwd(engine_handle backend_handle, const DropoutStats& stats,
                               const void* input, void* output, bool* mask, void* workspace,
                               DTypeDesc type_desc) {
-  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
-  cudaStream_t stream;
-  cudnnGetStream(handle, &stream);
-
-  size_t total_elements = stats.batch_size * stats.channels * stats.spatial_size;
-  int threads = 256;
-  int blocks = (total_elements + threads - 1) / threads;
-
-  float scale = 1.0f / (1.0f - static_cast<float>(stats.dropout_rate));
-
-  DISPATCH_DTYPE(type_desc.io_dtype, T, {
-    dropout_fwd_kernel<T><<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(input), static_cast<T*>(output), mask,
-        static_cast<float>(stats.dropout_rate), scale, 0x12345678ULL, total_elements);
-  });
+  cuda_engine_.dropout_fwd(backend_handle, stats, input, output, mask, workspace, type_desc);
 }
 
 void CuDNNEngine::dropout_bwd(engine_handle backend_handle, const DropoutStats& stats,
                               const void* grad_output, void* grad_input, const bool* mask,
                               double scale, void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
-  cudaStream_t stream;
-  cudnnGetStream(handle, &stream);
-
-  size_t total_elements = stats.batch_size * stats.channels * stats.spatial_size;
-  int threads = 256;
-  int blocks = (total_elements + threads - 1) / threads;
-
-  DISPATCH_DTYPE(type_desc.io_dtype, T, {
-    dropout_bwd_kernel<T><<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(grad_output), static_cast<T*>(grad_input), mask,
-        static_cast<float>(scale), total_elements);
-  });
+  cuda_engine_.dropout_bwd(backend_handle, stats, grad_output, grad_input, mask, scale, workspace, type_desc);
 }
 
 WorkspaceReq CuDNNEngine::query_transpose_graph(engine_handle backend_handle,
                                                 const TransposeStats& stats, DTypeDesc type_desc) {
-  return WorkspaceReq{0, 0, 0};
+  return cuda_engine_.query_transpose_graph(backend_handle, stats, type_desc);
 }
-
-namespace {
-
-struct CuDNNTransposeParams {
-  size_t ndim;
-  size_t dim0;
-  size_t dim1;
-  size_t shape[8];
-  size_t strides[8];
-  size_t out_strides[8];
-};
-
-template <typename T>
-__global__ void cudnn_transpose_kernel(const T* input, T* output, CuDNNTransposeParams p,
-                                       size_t total_elements) {
-  size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= total_elements) return;
-
-  size_t in_idx = idx;
-  size_t out_idx = 0;
-  size_t coords[8];
-
-  for (size_t i = 0; i < p.ndim; ++i) {
-    coords[i] = in_idx / p.strides[i];
-    in_idx %= p.strides[i];
-  }
-
-  size_t temp = coords[p.dim0];
-  coords[p.dim0] = coords[p.dim1];
-  coords[p.dim1] = temp;
-
-  for (size_t i = 0; i < p.ndim; ++i) {
-    out_idx += coords[i] * p.out_strides[i];
-  }
-
-  output[out_idx] = input[idx];
-}
-}  // namespace
 
 void CuDNNEngine::transpose(engine_handle backend_handle, const TransposeStats& stats,
                             const void* input, void* output, void* workspace, DTypeDesc type_desc) {
-  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
-  cudaStream_t stream;
-  cudnnGetStream(handle, &stream);
-
-  CuDNNTransposeParams p;
-  p.ndim = stats.ndim;
-  p.dim0 = stats.dim0;
-  p.dim1 = stats.dim1;
-
-  size_t total_elements = 1;
-  for (int i = static_cast<int>(p.ndim) - 1; i >= 0; --i) {
-    p.shape[i] = stats.shape[i];
-    p.strides[i] = total_elements;
-    total_elements *= p.shape[i];
-  }
-
-  size_t out_shape[8] = {0};
-  for (size_t i = 0; i < p.ndim; ++i) out_shape[i] = p.shape[i];
-  std::swap(out_shape[p.dim0], out_shape[p.dim1]);
-
-  size_t out_total = 1;
-  for (int i = static_cast<int>(p.ndim) - 1; i >= 0; --i) {
-    p.out_strides[i] = out_total;
-    out_total *= out_shape[i];
-  }
-
-  if (total_elements == 0) return;
-
-  size_t threads = 256;
-  size_t blocks = (total_elements + threads - 1) / threads;
-
-  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
-    cudnn_transpose_kernel<T><<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(input), static_cast<T*>(output), p, total_elements);
-  });
+  cuda_engine_.transpose(backend_handle, stats, input, output, workspace, type_desc);
 }
 
 }  // namespace tunx

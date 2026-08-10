@@ -10,6 +10,7 @@
 #include "device/stream.hpp"
 #include "nn/engines/engine_handle.hpp"
 #include "nn/engines/iengine.hpp"
+#include "nn/engines/cuda_engine.hpp"
 #include "nn/stats/stats.hpp"
 
 namespace tunx {
@@ -720,6 +721,7 @@ public:
   // --- Legacy APIs ---
 private:
   std::unordered_map<GraphCacheKey, std::any> graph_cache_;
+  CUDAEngine cuda_engine_;
 };
 
 }  // namespace tunx

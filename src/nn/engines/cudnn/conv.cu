@@ -225,26 +225,7 @@ struct conv2d_wgrad_graph {
   }
 };
 
-template <typename T>
-__global__ void bgrad_reduce_accumulate_kernel(const T* __restrict__ dy, T* __restrict__ db,
-                                               int batch_size, int out_features) {
-  int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
-  int lane_id = threadIdx.x % 32;
-
-  if (warp_id >= out_features) return;
-
-  float sum = 0.0f;
-  for (int b = lane_id; b < batch_size; b += 32) {
-    int idx = b * out_features + warp_id;
-    sum += (float)dy[idx];
-  }
-
-  sum = warp_reduce_sum(sum);
-
-  if (lane_id == 0) {
-    db[warp_id] = (T)(sum + (float)db[warp_id]);
-  }
-}
+// bgrad_reduce_accumulate_kernel delegated to cuda_engine_
 
 WorkspaceReq CuDNNEngine::query_conv2d_graph(engine_handle backend_handle, const Conv2DStats& stats,
                                              DTypeDesc type_desc) {
@@ -430,30 +411,7 @@ void CuDNNEngine::conv2d_wgrad(engine_handle backend_handle, const Conv2DStats& 
 void CuDNNEngine::conv2d_bgrad(engine_handle backend_handle, const Conv2DStats& stats,
                                const void* grad_output, void* grad_bias, void* workspace,
                                DTypeDesc type_desc) {
-  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
-  cudaStream_t stream = nullptr;
-  cudnnGetStream(handle, &stream);
-
-  size_t out_channels = stats.out_channels;
-  const int64 output_h = (stats.input_h + stats.pad_h * 2 - stats.kernel_h) / stats.stride_h + 1;
-  const int64 output_w = (stats.input_w + stats.pad_w * 2 - stats.kernel_w) / stats.stride_w + 1;
-  size_t num_elements_to_reduce = stats.batch_size * output_h * output_w;
-
-  int threads_per_block = 128;
-  int warps_per_block = threads_per_block / 32;
-  int num_blocks = (out_channels + warps_per_block - 1) / warps_per_block;
-
-  DISPATCH_DTYPE(type_desc.io_dtype, T, {
-    bgrad_reduce_accumulate_kernel<<<num_blocks, threads_per_block, 0, stream>>>(
-        static_cast<const T*>(grad_output), static_cast<T*>(grad_bias),
-        static_cast<int>(num_elements_to_reduce), static_cast<int>(out_channels));
-  });
-
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    throw std::runtime_error(std::string("Failed to launch conv_bgrad custom kernel: ") +
-                             cudaGetErrorString(err));
-  }
+  cuda_engine_.conv2d_bgrad(backend_handle, stats, grad_output, grad_bias, workspace, type_desc);
 }
 
 }  // namespace tunx
