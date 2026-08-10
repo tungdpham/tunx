@@ -153,22 +153,20 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     TensorBundle output_grads{{"output", loss_gradient}};
     graph.backward(output_grads);
 
-    auto batch_end = chrono::high_resolution_clock::now();
-    auto batch_duration = chrono::duration_cast<chrono::milliseconds>(batch_end - batch_start);
-
     if (++grad_accum_counter == config.gradient_accumulation_steps) {
       grad_accum_counter = 0;
 
       optimizer->update();
-      model_device.default_stream().sync();
 
       optimizer->zero_grads();
-      model_device.default_stream().sync();
 
       if (scheduler) {
         scheduler->step();
       }
     }
+    model_device.default_stream().sync();
+    auto batch_end = chrono::high_resolution_clock::now();
+    auto batch_duration = chrono::duration_cast<chrono::milliseconds>(batch_end - batch_start);
 
     // Log batch metrics
     computed_metrics.time_ms = batch_duration.count();
@@ -188,6 +186,9 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
         cout << ", PPL: " << setprecision(2) << *computed_metrics.perplexity;
       }
       cout << ", Batch Time: " << batch_duration.count() << "ms" << endl;
+      if (config.print_layer_profiling) {
+        print_timing_table(graph.profiling_details());
+      }
       /*
       print_timing_table(graph.profiling_details());
       cout << "Forward time: " << forward_duration << ", Backward time: " << grad_backward_duration
