@@ -126,11 +126,11 @@ DatasetPair DatasetFactory::create(const std::string &dataset_type, const std::s
     auto train = std::make_unique<OpenWebText>(1024, io_dtype_);
     auto val = std::make_unique<OpenWebText>(1024, io_dtype_);
 
-    if (train->load_data(dataset_path + "/train.bin")) {
+    if (train->load_data(dataset_path)) {
       pair.train = std::move(train);
     }
 
-    if (val->load_data(dataset_path + "/val.bin")) {
+    if (val->load_data(dataset_path)) {
       pair.val = std::move(val);
     }
   } else {

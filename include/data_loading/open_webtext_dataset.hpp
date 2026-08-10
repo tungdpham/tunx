@@ -46,8 +46,7 @@ private:
   }
 
 public:
-  OpenWebText(size_t context_length, DType_t dtype = DType_t::FP32,
-                        int padding_token_id = -1)
+  OpenWebText(size_t context_length, DType_t dtype = DType_t::FP32, int padding_token_id = -1)
       : allocator_(PoolAllocator::instance(getHost(), nullptr)),
         dtype_(dtype),
         context_length_(context_length),
@@ -63,7 +62,7 @@ public:
   }
 
   bool load_data(const std::string &source) override {
-    fd_ = open((source + "train.bin").c_str(), O_RDONLY);
+    fd_ = open((source + "/train.bin").c_str(), O_RDONLY);
     if (fd_ == -1) {
       perror("Error opening file");
       return false;

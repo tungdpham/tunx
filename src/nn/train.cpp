@@ -291,7 +291,7 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
   train_dataset->reset();
 
   Device &model_device = graph.device();
-  auto &mem_pool = PoolAllocator::instance(model_device, nullptr);
+  auto &mem_pool = PoolAllocator::instance(model_device, model_device.default_stream());
 
   int grad_accum_counter = 0;
   bool execution_order_logged = false;
