@@ -4,6 +4,7 @@
  * This software is licensed under the MIT License. See the LICENSE file in the
  * project root for the full license text.
  */
+#ifdef TUNX_USE_CUDA
 
 #include <gtest/gtest.h>
 
@@ -15,8 +16,6 @@
 #include "tensor_test_utils.hpp"
 
 using namespace tunx;
-
-#ifdef TUNX_USE_CUDA
 
 class CUDAEngineTest : public ::testing::Test {
 protected:
@@ -39,7 +38,8 @@ protected:
     }
 
     engine_ = std::make_unique<CUDAEngine>();
-    handle_ = engine_->create_handle(getGPU().default_stream());
+    stream_ = getGPU().default_stream();
+    handle_ = engine_->create_handle(stream_);
   }
 
   static void TearDownTestSuite() { engine_.reset(); }
@@ -52,6 +52,7 @@ protected:
 
 bool CUDAEngineTest::has_gpu_ = false;
 std::unique_ptr<CUDAEngine> CUDAEngineTest::engine_;
+stream CUDAEngineTest::stream_ = nullptr;
 engine_handle CUDAEngineTest::handle_;
 
 TEST_F(CUDAEngineTest, DenseFwdReturnsCorrectResults) {
@@ -233,6 +234,45 @@ TEST_F(CUDAEngineTest, DenseBgradReturnsCorrectResults) {
                    out_features);
 
   compare_tensor(to_host(grad_bias), expected_grad_bias);
+}
+
+TEST_F(CUDAEngineTest, TransposeReturnsCorrectResults) {
+  size_t batch_size = 2;
+  size_t num_heads = 4;
+  size_t seq_len = 8;
+  size_t head_dim = 16;
+
+  TransposeStats stats{
+      .shape = {batch_size, num_heads, seq_len, head_dim, 0, 0, 0, 0},
+      .ndim = 4,
+      .dim0 = 1,
+      .dim1 = 2,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::FP32,
+      .param_dtype = DType_t::FP32,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor input({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getGPU());
+  fill_normal(input, 0.0, 1.0, 12345ULL);
+  Tensor output({batch_size, seq_len, num_heads, head_dim}, DType_t::FP32, getGPU());
+
+  WorkspaceReq req = engine_->query_transpose_graph(handle_, stats, type_desc);
+  size_t ws_size = req.fwd_workspace > 0 ? req.fwd_workspace : 1;
+  Tensor workspace({ws_size}, DType_t::BYTE, getGPU());
+
+  engine_->transpose(handle_, stats, input.data_as<void>(), output.data_as<void>(),
+                     workspace.data_as<void>(), type_desc);
+  cudaDeviceSynchronize();
+
+  Tensor expected_output({batch_size, seq_len, num_heads, head_dim}, DType_t::FP32, getHost());
+  Tensor host_input = to_host(input);
+  math_transpose(host_input.data_as<float>(), expected_output.data_as<float>(), stats.shape,
+                 stats.ndim, stats.dim0, stats.dim1);
+
+  compare_tensor(to_host(output), expected_output);
 }
 
 #endif  // TUNX_USE_CUDA
