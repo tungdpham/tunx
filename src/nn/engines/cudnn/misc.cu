@@ -291,6 +291,22 @@ void CuDNNEngine::transpose(engine_handle backend_handle, const TransposeStats& 
   cuda_engine_.transpose(backend_handle, stats, input, output, workspace, type_desc);
 }
 
+WorkspaceReq CuDNNEngine::query_slice_graph(engine_handle backend_handle,
+                                            const SliceStats& stats, DTypeDesc type_desc) {
+  return cuda_engine_.query_slice_graph(backend_handle, stats, type_desc);
+}
+
+void CuDNNEngine::slice_fwd(engine_handle backend_handle, const SliceStats& stats,
+                            const void* input, void* output, void* workspace, DTypeDesc type_desc) {
+  cuda_engine_.slice_fwd(backend_handle, stats, input, output, workspace, type_desc);
+}
+
+void CuDNNEngine::slice_bwd(engine_handle backend_handle, const SliceStats& stats,
+                            const void* grad_output, void* grad_input, void* workspace,
+                            DTypeDesc type_desc) {
+  cuda_engine_.slice_bwd(backend_handle, stats, grad_output, grad_input, workspace, type_desc);
+}
+
 }  // namespace tunx
 
 #endif

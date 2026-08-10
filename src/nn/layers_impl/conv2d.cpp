@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "cuda/error_handler.cuh"
 #include "nn/engines/iengine.hpp"
 #include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
@@ -97,6 +98,7 @@ Tensor Conv2DOp::forward(OpContext &ctx, const Tensor &input, const Param &weigh
   ctx.engine->conv2d_fwd(ctx.handle, stats, input.data_as<void>(), weight.data_as<void>(),
                          config.use_bias ? bias.data_as<void>() : nullptr, output.data_as<void>(),
                          ws.data_as<void>(), type_desc);
+  cuda::checkCudaError(cudaGetLastError(), __func__, __FILE__, __LINE__);
 
   return output;
 }

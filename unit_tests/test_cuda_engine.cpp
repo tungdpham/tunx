@@ -275,4 +275,78 @@ TEST_F(CUDAEngineTest, TransposeReturnsCorrectResults) {
   compare_tensor(to_host(output), expected_output);
 }
 
+TEST_F(CUDAEngineTest, SliceFwdReturnsCorrectResults) {
+  SliceStats stats{
+      .outer_size = 2,
+      .inner_size = 8,
+      .axis_size = 10,
+      .start = 2,
+      .length = 4,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::FP32,
+      .param_dtype = DType_t::FP32,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor input({stats.outer_size, stats.axis_size, stats.inner_size}, DType_t::FP32, getGPU());
+  fill_normal(input, 0.0, 1.0, 12345ULL);
+  Tensor output({stats.outer_size, stats.length, stats.inner_size}, DType_t::FP32, getGPU());
+
+  WorkspaceReq req = engine_->query_slice_graph(handle_, stats, type_desc);
+  size_t ws_size = req.fwd_workspace > 0 ? req.fwd_workspace : 1;
+  Tensor workspace({ws_size}, DType_t::BYTE, getGPU());
+
+  engine_->slice_fwd(handle_, stats, input.data_as<void>(), output.data_as<void>(),
+                     workspace.data_as<void>(), type_desc);
+  cudaDeviceSynchronize();
+
+  Tensor expected_output({stats.outer_size, stats.length, stats.inner_size}, DType_t::FP32, getHost());
+  Tensor input_host = to_host(input);
+  math_slice_fwd(input_host.data_as<float>(), expected_output.data_as<float>(), stats.outer_size,
+                 stats.inner_size, stats.axis_size, stats.start, stats.length);
+
+  compare_tensor(to_host(output), expected_output);
+}
+
+TEST_F(CUDAEngineTest, SliceBwdReturnsCorrectResults) {
+  SliceStats stats{
+      .outer_size = 2,
+      .inner_size = 8,
+      .axis_size = 10,
+      .start = 2,
+      .length = 4,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::FP32,
+      .param_dtype = DType_t::FP32,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor grad_output({stats.outer_size, stats.length, stats.inner_size}, DType_t::FP32, getGPU());
+  fill_normal(grad_output, 0.0, 1.0, 12345ULL);
+  
+  Tensor grad_input({stats.outer_size, stats.axis_size, stats.inner_size}, DType_t::FP32, getGPU());
+  fill(grad_input, 0.0f); // Initialize to 0
+
+  WorkspaceReq req = engine_->query_slice_graph(handle_, stats, type_desc);
+  size_t ws_size = req.bwd_workspace > 0 ? req.bwd_workspace : 1;
+  Tensor workspace({ws_size}, DType_t::BYTE, getGPU());
+
+  engine_->slice_bwd(handle_, stats, grad_output.data_as<void>(), grad_input.data_as<void>(),
+                     workspace.data_as<void>(), type_desc);
+  cudaDeviceSynchronize();
+
+  Tensor expected_grad_input({stats.outer_size, stats.axis_size, stats.inner_size}, DType_t::FP32, getHost());
+  fill(expected_grad_input, 0.0f);
+  
+  Tensor grad_output_host = to_host(grad_output);
+  math_slice_bwd(grad_output_host.data_as<float>(), expected_grad_input.data_as<float>(), stats.outer_size,
+                 stats.inner_size, stats.axis_size, stats.start, stats.length);
+
+  compare_tensor(to_host(grad_input), expected_grad_input);
+}
+
 #endif  // TUNX_USE_CUDA

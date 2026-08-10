@@ -26,7 +26,7 @@ Vec<Vec<size_t>> SliceOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
 
 Tensor SliceOp::forward(OpContext &ctx, const Tensor &input, const Config &config) {
   if (ctx.is_training) {
-    Tensor shape_tensor({input.shape().size()}, DType_t::SIZE_T);  // on host
+    Tensor shape_tensor({input.shape().size()}, DType_t::SIZE_T, getHost());
     std::copy(input.shape().begin(), input.shape().end(), shape_tensor.data_as<size_t>());
     ctx.residuals["original_shape"] = shape_tensor;
   }
@@ -34,7 +34,32 @@ Tensor SliceOp::forward(OpContext &ctx, const Tensor &input, const Config &confi
   Vec<size_t> out_shape = output_shapes({input.shape()}, config)[0];
   Tensor output = ctx.make_tensor(out_shape, ctx.io_dtype);
 
-  throw std::runtime_error("SliceOp: unimplemented");
+  size_t outer_size = 1;
+  for (size_t i = 0; i < config.axis; ++i) outer_size *= input.shape()[i];
+  size_t inner_size = 1;
+  for (size_t i = config.axis + 1; i < input.shape().size(); ++i) inner_size *= input.shape()[i];
+
+  SliceStats stats{
+      .outer_size = outer_size,
+      .inner_size = inner_size,
+      .axis_size = input.shape()[config.axis],
+      .start = config.start,
+      .length = config.length,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
+  };
+
+  WorkspaceReq req = ctx.engine->query_slice_graph(ctx.handle, stats, type_desc);
+  size_t ws_size = req.fwd_workspace > 0 ? req.fwd_workspace : 1;
+  Tensor workspace = ctx.make_tensor({ws_size}, DType_t::BYTE);
+
+  ctx.engine->slice_fwd(ctx.handle, stats, input.data_as<void>(), output.data_as<void>(),
+                        workspace.data_as<void>(), type_desc);
+
   return output;
 }
 
@@ -45,8 +70,34 @@ Tensor SliceOp::backward(OpContext &ctx, const Tensor &grad_output, const Config
             original_shape.begin());
 
   Tensor grad_input = ctx.make_tensor(original_shape, ctx.io_dtype);
+  tunx::fill(grad_input, 0.0f, ctx.handle.get_stream());
 
-  throw std::runtime_error("SliceOp: unimplemented");
+  size_t outer_size = 1;
+  for (size_t i = 0; i < config.axis; ++i) outer_size *= original_shape[i];
+  size_t inner_size = 1;
+  for (size_t i = config.axis + 1; i < original_shape.size(); ++i) inner_size *= original_shape[i];
+
+  SliceStats stats{
+      .outer_size = outer_size,
+      .inner_size = inner_size,
+      .axis_size = original_shape[config.axis],
+      .start = config.start,
+      .length = config.length,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
+  };
+
+  WorkspaceReq req = ctx.engine->query_slice_graph(ctx.handle, stats, type_desc);
+  size_t ws_size = req.bwd_workspace > 0 ? req.bwd_workspace : 1;
+  Tensor workspace = ctx.make_tensor({ws_size}, DType_t::BYTE);
+
+  ctx.engine->slice_bwd(ctx.handle, stats, grad_output.data_as<void>(),
+                        grad_input.data_as<void>(), workspace.data_as<void>(), type_desc);
+
   return grad_input;
 }
 

@@ -55,6 +55,8 @@ enum OpType {
   SDPA_FWD,
   SDPA_BWD,
   TRANSPOSE,
+  SLICE_FWD,
+  SLICE_BWD,
 };
 
 struct GraphCacheKey {
@@ -233,6 +235,16 @@ public:
    */
   virtual WorkspaceReq query_transpose_graph(engine_handle backend_handle,
                                              const TransposeStats& stats, DTypeDesc type_desc) = 0;
+
+  /**
+   * @brief Queries the workspace memory requirement for Slice graphs.
+   * @param backend_handle Opaque handle to the backend context.
+   * @param stats Slice configuration.
+   * @param type_desc Data type descriptors.
+   * @return WorkspaceReq specifying forward and backward workspace size in bytes.
+   */
+  virtual WorkspaceReq query_slice_graph(engine_handle backend_handle, const SliceStats& stats,
+                                         DTypeDesc type_desc) = 0;
 
   /**
    * @brief Forward pass for a Dense (Linear) layer.
@@ -801,6 +813,19 @@ public:
    */
   virtual void transpose(engine_handle backend_handle, const TransposeStats& stats,
                          const void* input, void* output, void* workspace, DTypeDesc type_desc) = 0;
+
+  /**
+   * @brief Slice forward pass.
+   */
+  virtual void slice_fwd(engine_handle backend_handle, const SliceStats& stats, const void* input,
+                         void* output, void* workspace, DTypeDesc type_desc) = 0;
+
+  /**
+   * @brief Slice backward pass.
+   */
+  virtual void slice_bwd(engine_handle backend_handle, const SliceStats& stats,
+                         const void* grad_output, void* grad_input, void* workspace,
+                         DTypeDesc type_desc) = 0;
 
   // --- Legacy APIs ---
 

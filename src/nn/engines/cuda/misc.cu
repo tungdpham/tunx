@@ -42,12 +42,12 @@ __inline__ __device__ T blockReduceSum(T val) {
   return val;
 }
 
-template <typename T>
-__global__ void dropout_fwd_kernel_vectorized(const T* __restrict__ input, T* __restrict__ output,
+template <typename IO_T>
+__global__ void dropout_fwd_kernel_vectorized(const IO_T* __restrict__ input, IO_T* __restrict__ output,
                                               bool* __restrict__ mask, size_t n_elements,
-                                              T dropout_rate, T scale, unsigned long long seed) {
-  using VecT = typename VectoredTraits<T>::type;
-  constexpr int vec_width = VectoredTraits<T>::size;
+                                              IO_T dropout_rate, IO_T scale, unsigned long long seed) {
+  using VecT = typename VectoredTraits<IO_T>::type;
+  constexpr int vec_width = VectoredTraits<IO_T>::size;
 
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
@@ -63,8 +63,8 @@ __global__ void dropout_fwd_kernel_vectorized(const T* __restrict__ input, T* __
   for (size_t i = idx; i < n_vectors; i += stride) {
     VecT in_val = input_vec[i];
     VecT out_val;
-    const T* in_arr = reinterpret_cast<const T*>(&in_val);
-    T* out_arr = reinterpret_cast<T*>(&out_val);
+    const IO_T* in_arr = reinterpret_cast<const IO_T*>(&in_val);
+    IO_T* out_arr = reinterpret_cast<IO_T*>(&out_val);
 
     float4 rand_vals = curand_uniform4(&state);
     float rands[4] = {rand_vals.x, rand_vals.y, rand_vals.z, rand_vals.w};
@@ -75,7 +75,7 @@ __global__ void dropout_fwd_kernel_vectorized(const T* __restrict__ input, T* __
     for (int k = 0; k < vec_width; ++k) {
       if (rands[k] < static_cast<float>(dropout_rate)) {
         mask[base + k] = false;
-        out_arr[k] = T(0);
+        out_arr[k] = IO_T(0);
       } else {
         mask[base + k] = true;
         out_arr[k] = in_arr[k] * scale;
@@ -90,7 +90,7 @@ __global__ void dropout_fwd_kernel_vectorized(const T* __restrict__ input, T* __
     float r = curand_uniform(&state);
     if (r < static_cast<float>(dropout_rate)) {
       mask[i] = false;
-      output[i] = T(0);
+      output[i] = IO_T(0);
     } else {
       mask[i] = true;
       output[i] = input[i] * scale;
@@ -98,9 +98,9 @@ __global__ void dropout_fwd_kernel_vectorized(const T* __restrict__ input, T* __
   }
 }
 
-template <typename T>
-__global__ void dropout_fwd_kernel(const T* input, T* output, bool* mask, size_t batch_size,
-                                   size_t channels, size_t spatial_size, T dropout_rate, T scale,
+template <typename IO_T>
+__global__ void dropout_fwd_kernel(const IO_T* input, IO_T* output, bool* mask, size_t batch_size,
+                                   size_t channels, size_t spatial_size, IO_T dropout_rate, IO_T scale,
                                    unsigned long long seed) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   size_t total_elements = batch_size * channels * spatial_size;
@@ -114,7 +114,7 @@ __global__ void dropout_fwd_kernel(const T* input, T* output, bool* mask, size_t
 
     if (rand_val < static_cast<float>(dropout_rate)) {
       mask[i] = false;
-      output[i] = T(0);
+      output[i] = IO_T(0);
     } else {
       mask[i] = true;
       output[i] = input[i] * scale;
@@ -122,15 +122,15 @@ __global__ void dropout_fwd_kernel(const T* input, T* output, bool* mask, size_t
   }
 }
 
-template <typename T>
-__global__ void dropout_dgrad_kernel(const T* __restrict__ grad_output, T* __restrict__ grad_input,
+template <typename IO_T>
+__global__ void dropout_dgrad_kernel(const IO_T* __restrict__ grad_output, IO_T* __restrict__ grad_input,
                                      const bool* __restrict__ mask, size_t total_elements,
-                                     T scale) {
+                                     IO_T scale) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
 
   for (size_t i = idx; i < total_elements; i += stride) {
-    grad_input[i] = mask[i] ? grad_output[i] * scale : T(0);
+    grad_input[i] = mask[i] ? grad_output[i] * scale : IO_T(0);
   }
 }
 
@@ -420,8 +420,8 @@ __global__ void sdpa_dgrad_k_kernel(
   }
 }
 
-template <typename T>
-__global__ void slice_fwd_kernel(const T* input, T* output, size_t outer_size, size_t inner_size,
+template <typename IO_T>
+__global__ void slice_fwd_kernel(const IO_T* input, IO_T* output, size_t outer_size, size_t inner_size,
                                  size_t axis_size, size_t start, size_t length,
                                  size_t total_elements) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -436,8 +436,8 @@ __global__ void slice_fwd_kernel(const T* input, T* output, size_t outer_size, s
   output[idx] = input[input_idx];
 }
 
-template <typename T>
-__global__ void slice_dgrad_kernel(const T* grad_output, T* grad_input, size_t outer_size,
+template <typename IO_T>
+__global__ void slice_dgrad_kernel(const IO_T* grad_output, IO_T* grad_input, size_t outer_size,
                                    size_t inner_size, size_t axis_size, size_t start, size_t length,
                                    size_t total_elements) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -461,18 +461,18 @@ void CUDAEngine::dropout_fwd(engine_handle backend_handle, const DropoutStats& s
                              const void* input, void* output, bool* mask, void* workspace,
                              DTypeDesc type_desc) {
   cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
-  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
+  DISPATCH_DTYPE(type_desc.io_dtype, IO_T, {
     size_t total_elements = stats.batch_size * stats.channels * stats.spatial_size;
     int threads = 256;
     int blocks = (total_elements + threads - 1) / threads;
     blocks = std::min(blocks, 4096);
-    T scale = T(1.0f) / (T(1.0f) - static_cast<T>(stats.dropout_rate));
+    IO_T scale = IO_T(1.0f) / (IO_T(1.0f) - static_cast<IO_T>(stats.dropout_rate));
     unsigned long long seed = static_cast<unsigned long long>(clock()) +
                               static_cast<unsigned long long>(std::time(nullptr));
 
-    dropout_fwd_kernel_vectorized<T><<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(input), static_cast<T*>(output), static_cast<bool*>(mask),
-        total_elements, static_cast<T>(stats.dropout_rate), scale, seed);
+    dropout_fwd_kernel_vectorized<IO_T><<<blocks, threads, 0, stream>>>(
+        static_cast<const IO_T*>(input), static_cast<IO_T*>(output), static_cast<bool*>(mask),
+        total_elements, static_cast<IO_T>(stats.dropout_rate), scale, seed);
   });
 }
 
@@ -480,14 +480,14 @@ void CUDAEngine::dropout_bwd(engine_handle backend_handle, const DropoutStats& s
                              const void* grad_output, void* grad_input, const bool* mask,
                              double scale_in, void* workspace, DTypeDesc type_desc) {
   cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
-  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
+  DISPATCH_DTYPE(type_desc.io_dtype, IO_T, {
     size_t total_elements = stats.batch_size * stats.channels * stats.spatial_size;
     int threads = 256;
     int blocks = (total_elements + threads - 1) / threads;
     blocks = std::min(blocks, 4096);
-    T scale = T(1.0f) / (T(1.0f) - static_cast<T>(stats.dropout_rate));
-    dropout_dgrad_kernel<T><<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(grad_output), static_cast<T*>(grad_input),
+    IO_T scale = IO_T(1.0f) / (IO_T(1.0f) - static_cast<IO_T>(stats.dropout_rate));
+    dropout_dgrad_kernel<IO_T><<<blocks, threads, 0, stream>>>(
+        static_cast<const IO_T*>(grad_output), static_cast<IO_T*>(grad_input),
         static_cast<const bool*>(mask), total_elements, scale);
   });
 }
@@ -501,8 +501,8 @@ struct CudaTransposeParams {
   size_t out_strides[8];
 };
 
-template <typename T>
-__global__ void transpose_kernel(const T* input, T* output, CudaTransposeParams p,
+template <typename IO_T>
+__global__ void transpose_kernel(const IO_T* input, IO_T* output, CudaTransposeParams p,
                                  size_t total_elements) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= total_elements) return;
@@ -584,9 +584,43 @@ void CUDAEngine::transpose(engine_handle backend_handle, const TransposeStats& s
   size_t threads = 256;
   size_t blocks = (total_elements + threads - 1) / threads;
 
-  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
-    transpose_kernel<T><<<blocks, threads, 0, stream>>>(static_cast<const T*>(input),
-                                                        static_cast<T*>(output), p, total_elements);
+  DISPATCH_DTYPE(type_desc.io_dtype, IO_T, {
+    transpose_kernel<IO_T><<<blocks, threads, 0, stream>>>(static_cast<const IO_T*>(input),
+                                                           static_cast<IO_T*>(output), p, total_elements);
+  });
+}
+
+WorkspaceReq CUDAEngine::query_slice_graph(engine_handle backend_handle, const SliceStats& stats,
+                                           DTypeDesc type_desc) {
+  return WorkspaceReq{0, 0, 0};
+}
+
+void CUDAEngine::slice_fwd(engine_handle backend_handle, const SliceStats& stats, const void* input,
+                           void* output, void* workspace, DTypeDesc type_desc) {
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
+  size_t total_elements = stats.outer_size * stats.length * stats.inner_size;
+  if (total_elements == 0) return;
+  size_t threads = 256;
+  size_t blocks = (total_elements + threads - 1) / threads;
+  DISPATCH_DTYPE(type_desc.io_dtype, IO_T, {
+    slice_fwd_kernel<IO_T><<<blocks, threads, 0, stream>>>(
+        static_cast<const IO_T*>(input), static_cast<IO_T*>(output), stats.outer_size, stats.inner_size,
+        stats.axis_size, stats.start, stats.length, total_elements);
+  });
+}
+
+void CUDAEngine::slice_bwd(engine_handle backend_handle, const SliceStats& stats,
+                           const void* grad_output, void* grad_input, void* workspace,
+                           DTypeDesc type_desc) {
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
+  size_t total_elements = stats.outer_size * stats.length * stats.inner_size;
+  if (total_elements == 0) return;
+  size_t threads = 256;
+  size_t blocks = (total_elements + threads - 1) / threads;
+  DISPATCH_DTYPE(type_desc.io_dtype, IO_T, {
+    slice_dgrad_kernel<IO_T><<<blocks, threads, 0, stream>>>(
+        static_cast<const IO_T*>(grad_output), static_cast<IO_T*>(grad_input), stats.outer_size,
+        stats.inner_size, stats.axis_size, stats.start, stats.length, total_elements);
   });
 }
 

@@ -117,6 +117,14 @@ struct AttentionStats {
   bool is_causal = false;
 };
 
+struct SliceStats {
+  size_t outer_size;
+  size_t inner_size;
+  size_t axis_size;
+  size_t start;
+  size_t length;
+};
+
 struct TransposeStats {
   size_t shape[8] = {0};
   size_t ndim = 0;

@@ -532,6 +532,34 @@ void math_transpose(const T* input, T* output, const size_t* shape, size_t ndim,
 }
 
 template <typename T>
+void math_slice_fwd(const T* input, T* output, size_t outer_size, size_t inner_size,
+                    size_t axis_size, size_t start, size_t length) {
+  for (size_t o = 0; o < outer_size; ++o) {
+    for (size_t l = 0; l < length; ++l) {
+      for (size_t i = 0; i < inner_size; ++i) {
+        size_t input_idx = o * axis_size * inner_size + (start + l) * inner_size + i;
+        size_t output_idx = o * length * inner_size + l * inner_size + i;
+        output[output_idx] = input[input_idx];
+      }
+    }
+  }
+}
+
+template <typename T>
+void math_slice_bwd(const T* grad_output, T* grad_input, size_t outer_size, size_t inner_size,
+                    size_t axis_size, size_t start, size_t length) {
+  for (size_t o = 0; o < outer_size; ++o) {
+    for (size_t l = 0; l < length; ++l) {
+      for (size_t i = 0; i < inner_size; ++i) {
+        size_t output_idx = o * axis_size * inner_size + (start + l) * inner_size + i;
+        size_t input_idx = o * length * inner_size + l * inner_size + i;
+        grad_input[output_idx] = grad_output[input_idx];
+      }
+    }
+  }
+}
+
+template <typename T>
 void math_sdpa_fwd(const T* q, const T* k, const T* v, T* o, T* stats, size_t batch_size,
                    size_t num_heads, size_t seq_len, size_t head_dim, float attn_scale,
                    bool is_causal) {

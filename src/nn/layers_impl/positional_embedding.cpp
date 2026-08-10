@@ -10,6 +10,7 @@
 #include <cmath>
 #include <stdexcept>
 
+#include "cuda/error_handler.cuh"
 #include "nn/engines/iengine.hpp"
 #include "nn/stats/stats.hpp"
 #include "tensor/ops.hpp"
@@ -74,6 +75,7 @@ Tensor PositionalEmbeddingOp::forward(OpContext &ctx, const Tensor &input,
   ctx.engine->positional_embedding_fwd(ctx.handle, stats, input.data_as<void>(),
                                        pos_embedding.data_as<void>(), output.data_as<void>(),
                                        ws.data_as<void>(), type_desc);
+  cuda::checkCudaError(cudaGetLastError(), __func__, __FILE__, __LINE__);
 
   return output;
 }

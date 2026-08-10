@@ -59,7 +59,7 @@ Tensor FlashAttentionBlockOp::forward(OpContext &ctx, const Tensor &input, Layer
       .num_heads = config.num_heads,
       .seq_len = seq_len,
       .head_dim = head_dim,
-      .attn_scale = 1.0f,
+      .attn_scale = 1.0f / std::sqrt(static_cast<float>(head_dim)),
       .is_causal = config.is_causal,
   };
 
@@ -151,7 +151,7 @@ Tensor FlashAttentionBlockOp::backward(OpContext &ctx, const Tensor &grad_output
       .num_heads = config.num_heads,
       .seq_len = seq_len,
       .head_dim = head_dim,
-      .attn_scale = 1.0f,
+      .attn_scale = 1.0f / std::sqrt(static_cast<float>(head_dim)),
       .is_causal = config.is_causal,
   };
 
