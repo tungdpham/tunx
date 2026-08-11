@@ -2,18 +2,22 @@
 
 #include <algorithm>
 #include <deque>
+#include <limits>
 #include <map>
 #include <queue>
 #include <set>
 #include <stdexcept>
 #include <utility>
 
+#include "nn/edge_profile.hpp"
+#include "nn/execution_plan.hpp"
+
 namespace tunx {
 namespace {
 
 struct MacroNode {
   std::string id;
-  std::vector<size_t> edges;
+  std::vector<Edge> edges;
   long long a = 0;
   long long b = 0;
 };
@@ -22,122 +26,80 @@ std::pair<long long, long long> rank(const MacroNode &macro) {
   return macro.b < 0 ? std::make_pair(0LL, macro.a) : std::make_pair(1LL, macro.b - macro.a);
 }
 
-bool lower_rank(const MacroNode &left, const MacroNode &right) { return rank(left) < rank(right); }
-
-size_t estimate_peak_memory(const Graph &graph, const TensorBundle &input_map,
-                            const std::vector<size_t> &order, const ForwardPlanCacheEntry &plan) {
-  const Vec<Node> nodes = graph.nodes();
-  const Vec<Edge> edges = graph.edges();
-  std::map<NodeImpl *, size_t> live_bytes;
-  std::map<NodeImpl *, int> remaining_consumers;
-  std::map<std::string, Node> nodes_by_uid;
-  for (const Node &node : nodes) nodes_by_uid[node->uid()] = node;
-  for (const auto &[uid, tensor] : input_map) {
-    const auto node_it = nodes_by_uid.find(uid);
-    if (node_it != nodes_by_uid.end()) live_bytes[node_it->second.get()] = tensor.num_bytes();
-  }
-  for (const Edge &edge : edges) {
-    for (const Node &producer : edge->producers()) ++remaining_consumers[producer.get()];
-  }
-  for (const Node &node : nodes) {
-    if (graph.is_output(node)) ++remaining_consumers[node.get()];
-  }
-
-  size_t live_total = 0;
-  for (const auto &[node, bytes] : live_bytes) live_total += bytes;
-  size_t peak = live_total;
-  for (size_t edge_index : order) {
-    const Edge &edge = edges.at(edge_index);
-    const EdgeExecutionProfile &profile = plan.edge_profiles.at(edge_index);
-    const size_t generated = profile.output_bytes + profile.retained_bytes;
-    peak = std::max(peak, live_total + generated + profile.peak_bytes);
-
-    for (size_t output_index = 0; output_index < edge->consumers().size(); ++output_index) {
-      live_bytes[edge->consumers()[output_index].get()] =
-          profile.output_tensor_bytes.at(output_index);
-      live_total += profile.output_tensor_bytes.at(output_index);
-    }
-    live_total += profile.retained_bytes;
-    for (const Node &producer : edge->producers()) {
-      if (--remaining_consumers[producer.get()] == 0) {
-        const auto live_it = live_bytes.find(producer.get());
-        if (live_it != live_bytes.end()) {
-          live_total -= live_it->second;
-          live_bytes.erase(live_it);
-        }
-      }
-    }
-  }
-  return peak;
-}
-
+bool operator<(const MacroNode &left, const MacroNode &right) { return rank(left) < rank(right); }
 }  // namespace
 
-std::vector<size_t> MacroSolver::find_order(TensorBundle &input_map) {
-  ForwardPlanCacheEntry &plan = graph_.forward_plan_cache(input_map);
+ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_profiles) {
   const auto &edges = graph_.edges_;
-  std::vector<size_t> topological_order(edges.size());
-  for (size_t index = 0; index < edges.size(); ++index) topological_order[index] = index;
-
-  // Profiles are populated by the real first forward pass to avoid executing
-  // stateful layers a second time solely for planning.
-  if (!plan.profiled || plan.edge_profiles.size() != edges.size()) return topological_order;
-
-  std::map<NodeImpl *, size_t> producer;
-  std::map<NodeImpl *, int> consumer_count;
-  for (size_t index = 0; index < edges.size(); ++index) {
-    for (const Node &consumer : edges[index]->consumers()) producer[consumer.get()] = index;
-    for (const Node &input : edges[index]->producers()) ++consumer_count[input.get()];
+  
+  std::map<Node, int> out_deg;
+  for (const Edge &edge : edges) {
+    for (const Node &producer : edge->producers()) {
+      out_deg[producer]++;
+    }
   }
-  for (const Node &output : graph_.output_nodes_) ++consumer_count[output.get()];
 
   std::map<std::string, MacroNode> macros;
   std::map<std::string, std::set<std::string>> deps;
   std::map<std::string, std::set<std::string>> dependents;
-  for (size_t index = 0; index < edges.size(); ++index) {
-    const std::string id = std::to_string(index);
-    const EdgeExecutionProfile &profile = plan.edge_profiles.at(index);
-    long long consumed_bytes = 0;
-    for (const Node &input : edges[index]->producers()) {
-      if (!graph_.is_input(input) && consumer_count[input.get()] == 1) {
-        const auto producer_it = producer.find(input.get());
-        if (producer_it != producer.end()) {
-          consumed_bytes +=
-              static_cast<long long>(plan.edge_profiles.at(producer_it->second).output_bytes);
-        }
+
+  std::map<Node, std::vector<std::string>> node_to_producer_edges;
+  for (const Edge &edge : edges) {
+    for (const Node &consumer : edge->consumers()) {
+      node_to_producer_edges[consumer].push_back(edge->uid());
+    }
+    
+    deps[edge->uid()] = {};
+    dependents[edge->uid()] = {};
+    
+    const EdgeProfile &profile = edge_profiles.at(edge);
+    MacroNode macro{
+        edge->uid(),
+        {edge},
+        static_cast<long long>(profile.total_mem),
+        -static_cast<long long>(profile.net_mem),
+    };
+    macros.emplace(edge->uid(), std::move(macro));
+  }
+  
+  for (const Edge &child_edge : edges) {
+    for (const Node &producer : child_edge->producers()) {
+      for (const std::string &parent_uid : node_to_producer_edges[producer]) {
+        deps[child_edge->uid()].insert(parent_uid);
+        dependents[parent_uid].insert(child_edge->uid());
       }
     }
+  }
 
-    const long long generated_bytes =
-        static_cast<long long>(profile.output_bytes + profile.retained_bytes);
-    macros[id] = {id,
-                  {index},
-                  generated_bytes + static_cast<long long>(profile.peak_bytes),
-                  generated_bytes - consumed_bytes};
-    for (const Node &input : edges[index]->producers()) {
-      const auto producer_it = producer.find(input.get());
-      if (producer_it != producer.end()) deps[id].insert(std::to_string(producer_it->second));
+  std::vector<std::string> topological_order;
+  std::map<std::string, int> in_deg;
+  for (const Edge &edge : edges) {
+    in_deg[edge->uid()] = deps[edge->uid()].size();
+  }
+  std::queue<std::string> q;
+  for (const Edge &edge : edges) {
+    if (in_deg[edge->uid()] == 0) q.push(edge->uid());
+  }
+  while (!q.empty()) {
+    std::string u = q.front();
+    q.pop();
+    topological_order.push_back(u);
+    for (const std::string &v : dependents[u]) {
+      if (--in_deg[v] == 0) q.push(v);
     }
-  }
-  for (const auto &[child, parents] : deps) {
-    for (const std::string &parent : parents) dependents[parent].insert(child);
-  }
-  for (const auto &[id, macro] : macros) {
-    deps.try_emplace(id);
-    dependents.try_emplace(id);
   }
 
   const auto has_peers = [&](const std::string &macro_id) {
-    for (size_t edge_index : macros.at(macro_id).edges) {
-      for (const Node &input : edges[edge_index]->producers()) {
-        if (consumer_count[input.get()] <= 1) continue;
+    for (const Edge &edge : macros.at(macro_id).edges) {
+      for (const Node &input : edge->producers()) {
+        if (out_deg[input] <= 1) continue;
         int internal_consumers = 0;
-        for (size_t inner_edge : macros.at(macro_id).edges) {
-          for (const Node &inner_input : edges[inner_edge]->producers()) {
+        for (const Edge &inner_edge : macros.at(macro_id).edges) {
+          for (const Node &inner_input : inner_edge->producers()) {
             if (inner_input == input) ++internal_consumers;
           }
         }
-        if (internal_consumers < consumer_count[input.get()]) return true;
+        if (internal_consumers < out_deg[input]) return true;
       }
     }
     return false;
@@ -222,7 +184,7 @@ std::vector<size_t> MacroSolver::find_order(TensorBundle &input_map) {
   const auto merge_upward = [&](std::string id) {
     while (deps.at(id).size() == 1) {
       const std::string parent = *deps.at(id).begin();
-      if (dependents.at(parent).size() != 1 || !lower_rank(macros.at(id), macros.at(parent))) break;
+      if (dependents.at(parent).size() != 1 || !(macros.at(id) < macros.at(parent))) break;
       id = merge(parent, id, "upward");
     }
     return id;
@@ -233,9 +195,9 @@ std::vector<size_t> MacroSolver::find_order(TensorBundle &input_map) {
     while (true) {
       std::string best_child;
       for (const std::string &child : dependents.at(ancestor)) {
-        if (deps.at(child).size() != 1 || !lower_rank(macros.at(child), macros.at(ancestor)))
+        if (deps.at(child).size() != 1 || !(macros.at(child) < macros.at(ancestor)))
           continue;
-        if (best_child.empty() || lower_rank(macros.at(child), macros.at(best_child)))
+        if (best_child.empty() || macros.at(child) < macros.at(best_child))
           best_child = child;
       }
       if (best_child.empty()) return merged ? merge_upward(ancestor) : ancestor;
@@ -266,39 +228,64 @@ std::vector<size_t> MacroSolver::find_order(TensorBundle &input_map) {
     }
   };
 
-  std::deque<std::string> pending;
-  for (size_t index : topological_order) pending.push_back(std::to_string(index));
+  const std::string virtual_join_id = "__virtual_join__";
+  std::vector<std::string> terminal_macros;
+  for (const auto &[macro_id, macro] : macros) {
+    if (dependents.at(macro_id).empty()) terminal_macros.push_back(macro_id);
+  }
+  if (terminal_macros.size() > 1) {
+    macros[virtual_join_id] = {virtual_join_id, {}, 0, std::numeric_limits<long long>::max()};
+    deps[virtual_join_id] = {};
+    dependents[virtual_join_id] = {};
+    for (const auto &terminal : terminal_macros) {
+      deps[virtual_join_id].insert(terminal);
+      dependents[terminal].insert(virtual_join_id);
+    }
+  }
+
+  std::deque<std::string> pending(topological_order.begin(), topological_order.end());
   while (!pending.empty()) {
     const std::string current = pending.front();
     pending.pop_front();
     if (!macros.contains(current)) continue;
     if (deps.at(current).size() == 1) {
       const std::string parent = *deps.at(current).begin();
-      if (dependents.at(parent).size() == 1 && lower_rank(macros.at(current), macros.at(parent))) {
+      if (dependents.at(parent).size() == 1 && macros.at(current) < macros.at(parent)) {
         pending.push_front(merge(parent, current, "linear"));
         continue;
       }
     }
-    if (deps.at(current).size() <= 1) continue;
-    prepare_join(current);
-    if (!macros.contains(current)) continue;
-    std::string worst_parent;
-    for (const std::string &parent : deps.at(current)) {
-      if (dependents.at(parent).size() != 1 || has_peers(parent) ||
-          !lower_rank(macros.at(current), macros.at(parent))) {
-        continue;
+    if (deps.at(current).size() > 1) {
+      prepare_join(current);
+      if (!macros.contains(current)) continue;
+      std::string worst_parent;
+      for (const std::string &parent : deps.at(current)) {
+        if (dependents.at(parent).size() != 1 || has_peers(parent) ||
+            !(macros.at(current) < macros.at(parent))) {
+          continue;
+        }
+        if (worst_parent.empty() || macros.at(worst_parent) < macros.at(parent)) {
+          worst_parent = parent;
+        }
       }
-      if (worst_parent.empty() || lower_rank(macros.at(worst_parent), macros.at(parent))) {
-        worst_parent = parent;
-      }
+      if (!worst_parent.empty()) pending.push_front(merge(worst_parent, current, "join"));
     }
-    if (!worst_parent.empty()) pending.push_front(merge(worst_parent, current, "join"));
   }
 
-  std::vector<size_t> final_order;
+  if (macros.contains(virtual_join_id)) {
+    prepare_join(virtual_join_id);
+    for (const auto& terminal : deps.at(virtual_join_id)) {
+      dependents.at(terminal).erase(virtual_join_id);
+    }
+    macros.erase(virtual_join_id);
+    deps.erase(virtual_join_id);
+    dependents.erase(virtual_join_id);
+  }
+
+  std::vector<Edge> final_order;
   std::set<std::string> executed;
   const auto compare_ready = [&](const std::string &left, const std::string &right) {
-    return lower_rank(macros.at(right), macros.at(left));
+    return macros.at(right) < macros.at(left);
   };
   std::priority_queue<std::string, std::vector<std::string>, decltype(compare_ready)> ready(
       compare_ready);
@@ -319,11 +306,10 @@ std::vector<size_t> MacroSolver::find_order(TensorBundle &input_map) {
       }
     }
   }
-  graph_.last_forward_memory_estimate_ = {
-      .topological_peak_bytes = estimate_peak_memory(graph_, input_map, topological_order, plan),
-      .macro_peak_bytes = estimate_peak_memory(graph_, input_map, final_order, plan),
-  };
-  return final_order;
+  
+  ExecutionPlan plan;
+  plan.order = final_order;
+  return plan;
 }
 
 }  // namespace tunx

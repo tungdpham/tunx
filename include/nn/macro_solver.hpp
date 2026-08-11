@@ -4,6 +4,8 @@
 #include <ostream>
 #include <vector>
 
+#include "nn/edge_profile.hpp"
+#include "nn/execution_plan.hpp"
 #include "nn/graph.hpp"
 
 namespace tunx {
@@ -17,6 +19,6 @@ public:
       : graph_(graph),
         log_stream_(log_stream) {}
 
-  std::vector<size_t> find_order(TensorBundle &input_map);
+  ExecutionPlan find_order(const std::map<Edge, EdgeProfile> &edge_profiles);
 };
 }  // namespace tunx

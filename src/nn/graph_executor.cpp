@@ -9,12 +9,14 @@
 
 #include <fmt/core.h>
 
-#include <chrono>
-#include <unordered_map>
-
+#include "nn/edge.hpp"
+#include "nn/edge_profile.hpp"
+#include "nn/execution_plan.hpp"
 #include "nn/graph.hpp"
 #include "nn/macro_solver.hpp"
+#include "nn/tensor_bundle.hpp"
 #include "tensor/ops.hpp"
+#include "tensor/tensor.hpp"
 
 namespace tunx {
 
@@ -81,6 +83,21 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
   for (const auto &node : graph_.nodes_) {
     uid_to_node[node->uid()] = node;
   }
+  PlanKey key;
+  for (const auto &[uid, tensor] : input_map) {
+    auto &node = uid_to_node.at(uid);
+    key.input_shapes[node] = tensor.shape();
+  }
+
+  auto it = plans_.find(key);
+  if (it == plans_.end()) {
+    MacroSolver planner(graph_);
+    std::map<Edge, EdgeProfile> edge_profiles = profile_forward(input_map);
+    ExecutionPlan plan = planner.find_order(edge_profiles);
+    it = plans_.emplace(key, plan).first;
+  }
+  active_plan_ = it->second;
+
   for (const auto &[uid, tensor] : input_map) {
     auto it = uid_to_node.find(uid);
     if (it == uid_to_node.end()) {
@@ -93,35 +110,17 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
   }
 
-  MacroSolver planner(graph_);
-  const std::vector<size_t> execution_order = planner.find_order(input_map);
-  active_plan_ = &graph_.forward_plan_cache(input_map);
-  graph_.last_forward_execution_order_ = execution_order;
-  graph_.last_forward_used_macro_plan_ = active_plan_->profiled;
-
   TensorBundle output_map;
-  for (size_t edge_index : execution_order) {
-    Edge &edge = graph_.edges_.at(edge_index);
-    const auto start = std::chrono::high_resolution_clock::now();
-    forward_edge(edge, edge_index);
-    const auto end = std::chrono::high_resolution_clock::now();
-    const double duration = std::chrono::duration<double, std::milli>(end - start).count();
-    const std::string timing_key = edge->layer()->name() + " forward";
-    if (graph_.timing_map_.find(timing_key) == graph_.timing_map_.end()) {
-      graph_.timing_order_.push_back(timing_key);
-    }
-    graph_.timing_map_[timing_key] += duration;
+  for (Edge &edge : active_plan_.order) {
+    forward_edge(edge);
 
-    for (const auto &consumer : edge->consumers()) {
+    for (const Node &consumer : edge->consumers()) {
       if (graph_.is_output(consumer)) {
         output_map.set(consumer->uid(), data(consumer));
       }
     }
   }
 
-  active_plan_->profiled = active_plan_->edge_profiles.size() == graph_.edges_.size();
-  ++active_plan_->execution_count;
-  active_plan_ = nullptr;
   cleanup_released(data_);
   return output_map;
 }
@@ -144,18 +143,10 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
   }
 
   TensorBundle grad_input_map;
-  for (auto it = graph_.last_forward_execution_order_.rbegin();
-       it != graph_.last_forward_execution_order_.rend(); ++it) {
-    Edge &edge = graph_.edges_.at(*it);
-    const auto start = std::chrono::high_resolution_clock::now();
+
+  for (auto it = active_plan_.order.rbegin(); it != active_plan_.order.rend(); ++it) {
+    Edge &edge = *it;
     backward_edge(edge);
-    const auto end = std::chrono::high_resolution_clock::now();
-    const double duration = std::chrono::duration<double, std::milli>(end - start).count();
-    const std::string timing_key = edge->layer()->name() + " backward";
-    if (graph_.timing_map_.find(timing_key) == graph_.timing_map_.end()) {
-      graph_.timing_order_.push_back(timing_key);
-    }
-    graph_.timing_map_[timing_key] += duration;
 
     for (const auto &producer : edge->producers()) {
       if (graph_.is_input(producer)) {
@@ -168,94 +159,157 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
   return grad_input_map;
 }
 
+std::map<Edge, EdgeProfile> GraphExecutor::profile_forward(TensorBundle &input_map) {
+  std::map<Edge, EdgeProfile> edge_profiles;
+  std::map<std::string, Node> uid_to_node;
+  for (const auto &node : graph_.nodes_) {
+    uid_to_node[node->uid()] = node;
+  }
+  for (const auto &[uid, tensor] : input_map) {
+    auto it = uid_to_node.find(uid);
+    if (it == uid_to_node.end()) {
+      throw std::runtime_error("Input UID not found in graph: " + uid);
+    }
+    Tensor device_tensor = tensor;
+    if (tensor.device() != graph_.device()) {
+      device_tensor = to_device(tensor, graph_.device(), graph_.engine_handle_.get_stream());
+    }
+    set_data(it->second, device_tensor, data_ref_counts_[it->second]);
+  }
+
+  TensorBundle output_map;  // placeholder to ensure outputs arent prematurely deallocated
+
+  // assuming sorted topologically
+  for (Edge &edge : graph_.edges()) {
+    EdgeProfile profile = forward_edge(edge);
+    edge_profiles[edge] = profile;
+    for (const Node &consumer : edge->consumers()) {
+      if (graph_.is_output(consumer)) {
+        output_map.set(consumer->uid(), data(consumer));
+      }
+    }
+  }
+
+  // free memory for residuals since this is just profiling
+  residuals_.clear();
+
+  return edge_profiles;
+}
+
 void GraphExecutor::clear_grads() { grads_.clear(); }
 
-void GraphExecutor::forward_edge(Edge &edge, size_t edge_index) {
-  Vec<Tensor> input_data;
+EdgeProfile GraphExecutor::forward_edge(Edge &edge) {
+  auto &allocator = graph_.workspace_allocator_;
+  Vec<Tensor> inputs;
   for (const auto &producer : edge->producers()) {
     if (!data(producer)) {
       throw std::runtime_error("Null input data while forwarding graph");
     }
-    input_data.push_back(data(producer));
+    inputs.push_back(data(producer));
     release_data(producer);
   }
-
   Residuals residuals;
   Vec<Tensor> output_data;
-  size_t workspace_bytes = 0;
-  const size_t usage_before = graph_.workspace_allocator_->allocated();
+  const size_t usage_before = allocator->allocated();
   size_t peak_usage = usage_before;
-  const size_t hook_id = graph_.workspace_allocator_->add_allocation_hook(
+  const size_t hook_id = allocator->add_allocation_hook(
       [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
-  output_data = edge->layer()->forward(input_data, residuals);
-  const size_t usage_after = graph_.workspace_allocator_->allocated();
-  graph_.workspace_allocator_->remove_allocation_hook(hook_id);
+  auto start = std::chrono::high_resolution_clock::now();
+  output_data = edge->layer()->forward(inputs, residuals);
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  const size_t usage_after = allocator->allocated();
+  allocator->remove_allocation_hook(hook_id);
 
-  const size_t peak_edge_usage = peak_usage - usage_before;
-  const size_t retained = usage_after - usage_before;
-  workspace_bytes = peak_usage - usage_after;
-
-  if (graph_.enable_memory_profiling_ && graph_.memory_profile_logger_) {
-    std::unordered_map<std::string, std::string> row;
-    row["layer"] = edge->layer()->name();
-    row["peak_usage_bytes"] = std::to_string(peak_edge_usage);
-    row["retained_bytes"] = std::to_string(retained);
-    row["unused_bytes"] = std::to_string(graph_.workspace_allocator_->unused());
-    row["reserved_bytes"] = std::to_string(graph_.workspace_allocator_->reserved());
-    row["allocated_bytes"] = std::to_string(graph_.workspace_allocator_->allocated());
-    graph_.memory_profile_logger_->log(row);
-  } else if (graph_.enable_memory_profiling_) {
-    fmt::print(
-        "Layer {} peak usage: {:.2f} MB, retained: {:.2f} MB, unused: {:.2f} MB, reserved: "
-        "{:.2f} MB\n",
-        edge->layer()->name(), static_cast<double>(peak_edge_usage) / 1024 / 1024,
-        static_cast<double>(retained) / 1024 / 1024,
-        static_cast<double>(graph_.workspace_allocator_->unused()) / 1024 / 1024,
-        static_cast<double>(graph_.workspace_allocator_->reserved()) / 1024 / 1024);
-  }
-
-  size_t output_bytes = 0;
-  Vec<size_t> output_tensor_bytes;
-  output_tensor_bytes.reserve(output_data.size());
+  EdgeProfile profile;
+  profile.exec_time = elapsed.count();
+  profile.total_mem = peak_usage - usage_before;
+  profile.workspace_mem = peak_usage - usage_after;
+  profile.output_mem = 0;
   for (const Tensor &output : output_data) {
-    output_tensor_bytes.push_back(output.num_bytes());
-    output_bytes += output.num_bytes();
+    profile.output_mem += output.num_bytes();
   }
-  if (active_plan_) {
-    active_plan_->edge_profiles[edge_index] = {
-        .peak_bytes = workspace_bytes,
-        .retained_bytes = residuals.num_bytes(),
-        .output_bytes = output_bytes,
-        .output_tensor_bytes = std::move(output_tensor_bytes),
-    };
+  profile.input_mem = 0;
+  for (const Tensor &input : inputs) {
+    profile.input_mem += input.num_bytes();
   }
+  for (const Tensor &residual : residuals.tensors()) {
+    bool is_input_or_output = false;
+    for (Tensor &input : inputs) {
+      if (input.data_as<void>() == residual.data_as<void>()) {
+        is_input_or_output = true;
+        break;
+      }
+    }
+    for (const Tensor &output : output_data) {
+      if (output.data_as<void>() == residual.data_as<void>()) {
+        is_input_or_output = true;
+        break;
+      }
+    }
+    if (is_input_or_output) {
+      continue;
+    }
+    profile.secondary_mem += residual.num_bytes();
+  }
+
   residuals_[edge] = std::move(residuals);
   for (size_t index = 0; index < edge->consumers().size(); ++index) {
     const Node &consumer = edge->consumers()[index];
     set_data(consumer, output_data[index], data_ref_counts_[consumer]);
   }
+  inputs = Vec<Tensor>();
+  output_data = Vec<Tensor>();
+  profile.net_mem = usage_before - allocator->allocated();
+  return profile;
 }
 
-void GraphExecutor::backward_edge(Edge &edge) {
-  Vec<Tensor> output_grads;
+EdgeProfile GraphExecutor::backward_edge(Edge &edge) {
+  auto &allocator = graph_.workspace_allocator_;
+  Vec<Tensor> grad_outputs;
   for (const auto &consumer : edge->consumers()) {
     if (!grad(consumer)) {
       throw std::runtime_error("Null output gradient while backwarding graph");
     }
-    output_grads.push_back(grad(consumer));
+    grad_outputs.push_back(grad(consumer));
     release_grad(consumer);
   }
   auto residuals_it = residuals_.find(edge);
   if (residuals_it == residuals_.end()) {
     throw std::runtime_error("Residuals not found for the given graph executor");
   }
-  Vec<Tensor> grad_inputs = edge->layer()->backward(output_grads, residuals_it->second);
+  const size_t usage_before = allocator->allocated();
+  size_t peak_usage = usage_before;
+  const size_t hook_id = allocator->add_allocation_hook(
+      [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
+  auto start = std::chrono::high_resolution_clock::now();
+  Vec<Tensor> grad_inputs = edge->layer()->backward(grad_outputs, residuals_it->second);
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double, std::milli> elapsed = end - start;
+  const size_t usage_after = allocator->allocated();
+  allocator->remove_allocation_hook(hook_id);
   residuals_.erase(residuals_it);
 
   for (size_t index = 0; index < edge->producers().size(); ++index) {
     const Node &producer = edge->producers()[index];
     accumulate_grad(producer, grad_inputs[index], grad_ref_counts_[producer]);
   }
+  EdgeProfile profile;
+  profile.exec_time = elapsed.count();
+  profile.total_mem = peak_usage - usage_before;
+  profile.workspace_mem = peak_usage - usage_after;
+  profile.input_mem = 0;
+  for (const Tensor &grad_output : grad_outputs) {
+    profile.input_mem += grad_output.num_bytes();
+  }
+  profile.output_mem = 0;
+  for (const Tensor &grad_input : grad_inputs) {
+    profile.output_mem += grad_input.num_bytes();
+  }
+  profile.secondary_mem = 0;     // none since backward
+  grad_outputs = Vec<Tensor>();  // free inputs;
+  profile.net_mem = usage_before - allocator->allocated();
+  return profile;
 }
 
 }  // namespace tunx

@@ -87,7 +87,8 @@ public:
     if (impl_->data.index() == 0) {
       impl_->data = vec;
     } else if (impl_->data.index() == 1) {
-      throw std::runtime_error("ResidualObject: Attempting to assign a Vec<size_t> to a non-leaf node");
+      throw std::runtime_error(
+          "ResidualObject: Attempting to assign a Vec<size_t> to a non-leaf node");
     }
     return *this;
   }
@@ -101,7 +102,8 @@ public:
 
   operator Vec<size_t> &() {
     if (impl_->data.index() != 3) {
-      throw std::runtime_error("ResidualObject: Attempting to convert a non-leaf node to Vec<size_t>");
+      throw std::runtime_error(
+          "ResidualObject: Attempting to convert a non-leaf node to Vec<size_t>");
     }
     return std::get<3>(impl_->data);
   }
@@ -178,6 +180,26 @@ public:
     obj.print(os, 0);
     return os;
   }
+
+  Vec<Tensor> tensors() const {
+    Vec<Tensor> res;
+    std::visit(
+        [&res](auto &&arg) {
+          using T = std::decay_t<decltype(arg)>;
+          if constexpr (std::is_same_v<T, std::monostate>) {
+          } else if constexpr (std::is_same_v<T, std::map<std::string, ResidualObject>>) {
+            for (const auto &[_key, value] : arg) {
+              auto inner_tensors = value.tensors();
+              res.insert(res.end(), inner_tensors.begin(), inner_tensors.end());
+            }
+          } else if constexpr (std::is_same_v<T, Tensor>) {
+            res.push_back(arg);
+          } else if constexpr (std::is_same_v<T, Vec<size_t>>) {
+          }
+        },
+        impl_->data);
+    return res;
+  }
 };
 
 using Residuals = ResidualObject;
@@ -224,8 +246,10 @@ public:
   virtual Vec<Param> params();
   virtual const Vec<Param> params() const;
 
-  void register_layer(std::shared_ptr<LayerImpl> layer) { registered_layers_.push_back(std::move(layer)); }
-  const Vec<std::shared_ptr<LayerImpl>>& layers() const { return registered_layers_; }
+  void register_layer(std::shared_ptr<LayerImpl> layer) {
+    registered_layers_.push_back(std::move(layer));
+  }
+  const Vec<std::shared_ptr<LayerImpl>> &layers() const { return registered_layers_; }
 
   void zero_grads() {
     for (auto &param : params_) {

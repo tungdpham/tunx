@@ -3,11 +3,12 @@
 #include <map>
 
 #include "nn/edge.hpp"
+#include "nn/edge_profile.hpp"
+#include "nn/execution_plan.hpp"
 #include "nn/tensor_bundle.hpp"
 
 namespace tunx {
 class Graph;
-struct ForwardPlanCacheEntry;
 
 class GraphExecutor {
 public:
@@ -17,14 +18,22 @@ public:
   TensorBundle backward(TensorBundle &output_grad_map);
   void clear_grads();
 
+  std::map<Edge, EdgeProfile> profile_forward(TensorBundle &input_map);
+
 private:
+  struct PlanKey {
+    std::map<Node, Vec<size_t>> input_shapes;
+    bool operator<(const PlanKey &other) const { return input_shapes < other.input_shapes; }
+  };
+
   struct Entry {
     Tensor tensor;
     int ref_count = 0;
   };
 
   Graph &graph_;
-  ForwardPlanCacheEntry *active_plan_ = nullptr;
+  ExecutionPlan active_plan_;
+  std::map<PlanKey, ExecutionPlan> plans_;
   std::map<Node, Entry> data_;
   std::map<Node, Entry> grads_;
   std::map<Edge, Residuals> residuals_;
@@ -38,8 +47,8 @@ private:
   void set_grad(const Node &node, const Tensor &tensor, int ref_count);
   void accumulate_grad(const Node &node, const Tensor &tensor, int ref_count);
   void release_grad(const Node &node);
-  void forward_edge(Edge &edge, size_t edge_index);
-  void backward_edge(Edge &edge);
+  EdgeProfile forward_edge(Edge &edge);
+  EdgeProfile backward_edge(Edge &edge);
   void cleanup_released(std::map<Node, Entry> &entries);
 };
 

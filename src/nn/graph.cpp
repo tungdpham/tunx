@@ -50,7 +50,6 @@ static Engine get_default_engine(Device &device) {
 
 void Graph::compile(IAllocator &allocator, GraphOpts opts) {
   clear_executors();
-  forward_plan_cache_.clear();
   sort();
   std::set<LayerImpl *> unique_layers;
   for (const auto &edge : edges_) {
@@ -68,18 +67,15 @@ void Graph::compile(IAllocator &allocator, GraphOpts opts) {
   param_allocator_ = &allocator;
   workspace_allocator_ = DELAllocatorV2::create(allocator.device(), s);
   engine_handle_ = engine_->create_handle(s);
-  io_dtype_ = opts.io_dtype;
-  param_dtype_ = opts.param_dtype;
-  compute_dtype_ = opts.compute_dtype;
 
   InitOptions layer_opts{
       .ws_allocator = workspace_allocator_.get(),
       .engine = engine_,
       .handle = engine_handle_,
       .seed = opts.seed,
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = opts.io_dtype,
+      .param_dtype = opts.param_dtype,
+      .compute_dtype = opts.compute_dtype,
   };
 
   for (LayerImpl *layer_ptr : unique_layers) {
@@ -117,17 +113,14 @@ Vec<std::string> Graph::output_uids() const {
 void Graph::add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producers,
                      const Vec<Node> &consumers) {
   clear_executors();
-  forward_plan_cache_.clear();
   Edge edge = std::make_shared<EdgeImpl>(layer, producers, consumers);
+  edge->set_uid(generate_edge_uid());
   edges_.push_back(edge);
 }
 
 void Graph::add_edge(std::shared_ptr<LayerImpl> layer, std::initializer_list<Node> producers,
                      std::initializer_list<Node> consumers) {
-  clear_executors();
-  forward_plan_cache_.clear();
-  Edge edge = std::make_shared<EdgeImpl>(layer, producers, consumers);
-  edges_.push_back(edge);
+  add_edge(layer, Vec<Node>(producers), Vec<Node>(consumers));
 }
 
 void Graph::sort() {
@@ -233,15 +226,6 @@ void Graph::save_dot(const std::string &filename) const {
   output << "}\n";
 }
 
-std::vector<std::string> Graph::last_forward_execution_order() const {
-  std::vector<std::string> order;
-  order.reserve(last_forward_execution_order_.size());
-  for (size_t edge_index : last_forward_execution_order_) {
-    order.push_back(std::to_string(edge_index) + ": " + edges_.at(edge_index)->layer()->name());
-  }
-  return order;
-}
-
 TensorBundle Graph::forward(TensorBundle &input_map, size_t pid) {
   return executor(pid).forward(input_map);
 }
@@ -252,11 +236,11 @@ TensorBundle Graph::backward(TensorBundle &output_grad_map, size_t pid) {
 
 Node Graph::make_node(std::string uid) {
   if (uid.empty()) {
-    uid = generate_uid();
-  } else if (used_uids_.count(uid) > 0) {
+    uid = generate_node_uid();
+  } else if (used_node_uids_.count(uid) > 0) {
     throw std::runtime_error("Duplicate node UID: " + uid);
   } else {
-    used_uids_.insert(uid);
+    used_node_uids_.insert(uid);
   }
   Node node = std::make_shared<NodeImpl>(this, uid);
   nodes_.push_back(node);
@@ -264,7 +248,6 @@ Node Graph::make_node(std::string uid) {
 }
 
 void Graph::set_mode(ExecutionMode mode) {
-  if (mode_ != mode) forward_plan_cache_.clear();
   mode_ = mode;
   for (const auto &edge : edges_) {
     edge->layer()->set_training(mode == ExecutionMode::TRAIN);
@@ -276,7 +259,6 @@ void Graph::set_input(Node node) {
     throw std::runtime_error("Input node does not belong to graph");
   }
   clear_executors();
-  forward_plan_cache_.clear();
   input_nodes_.insert(node);
 }
 
@@ -285,7 +267,6 @@ void Graph::set_output(Node node) {
     throw std::runtime_error("Output node does not belong to graph");
   }
   clear_executors();
-  forward_plan_cache_.clear();
   output_nodes_.insert(node);
 }
 
@@ -309,23 +290,15 @@ Graph::Graph(Graph &&other) noexcept
       workspace_allocator_(std::move(other.workspace_allocator_)),
       engine_(std::move(other.engine_)),
       engine_handle_(std::move(other.engine_handle_)),
-      io_dtype_(other.io_dtype_),
-      param_dtype_(other.param_dtype_),
-      compute_dtype_(other.compute_dtype_),
       nodes_(std::move(other.nodes_)),
       edges_(std::move(other.edges_)),
       input_nodes_(std::move(other.input_nodes_)),
       output_nodes_(std::move(other.output_nodes_)),
-      timing_map_(std::move(other.timing_map_)),
-      timing_order_(std::move(other.timing_order_)),
       mode_(other.mode_),
       node_count_(other.node_count_),
-      used_uids_(std::move(other.used_uids_)),
-      forward_plan_cache_(std::move(other.forward_plan_cache_)),
-      enable_memory_profiling_(other.enable_memory_profiling_),
-      memory_profile_logger_(other.memory_profile_logger_) {
-  other.executors_.clear();
-}
+      used_node_uids_(std::move(other.used_node_uids_)),
+      used_edge_uids_(std::move(other.used_edge_uids_)),
+      executors_(std::move(other.executors_)) {}
 
 Vec<Param> Graph::params() {
   Vec<Param> params;
@@ -337,12 +310,21 @@ Vec<Param> Graph::params() {
   return params;
 }
 
-std::string Graph::generate_uid() {
+std::string Graph::generate_node_uid() {
   std::string uid;
   do {
     uid = "node_" + std::to_string(node_count_++);
-  } while (used_uids_.count(uid) > 0);
-  used_uids_.insert(uid);
+  } while (used_node_uids_.count(uid) > 0);
+  used_node_uids_.insert(uid);
+  return uid;
+}
+
+std::string Graph::generate_edge_uid() {
+  std::string uid;
+  do {
+    uid = "edge_" + std::to_string(edge_count_++);
+  } while (used_edge_uids_.count(uid) > 0);
+  used_edge_uids_.insert(uid);
   return uid;
 }
 
@@ -361,18 +343,6 @@ GraphExecutor &Graph::executor(size_t pid) {
 }
 
 void Graph::clear_executors() { executors_.clear(); }
-
-ForwardPlanCacheEntry &Graph::forward_plan_cache(TensorBundle &input_map) {
-  std::map<std::string, Vec<size_t>> input_shapes;
-  for (const auto &[uid, tensor] : input_map) {
-    input_shapes[uid] = tensor.shape();
-  }
-  for (auto &entry : forward_plan_cache_) {
-    if (entry.mode == mode_ && entry.input_shapes == input_shapes) return entry;
-  }
-  forward_plan_cache_.push_back({.mode = mode_, .input_shapes = std::move(input_shapes)});
-  return forward_plan_cache_.back();
-}
 
 namespace {
 

@@ -73,7 +73,6 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
   size_t total_class_num = 0;
   int num_batches = 0;
   int grad_accum_counter = 0;
-  bool execution_order_logged = false;
 
   std::unique_ptr<BatchPrefetcher> prefetcher;
   if (config.prefetch_data) {
@@ -92,6 +91,8 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
   graph.save_dot("current_graph.dot");
 
+  auto &executor = graph.executor(0);
+
   cout << "Training batches: " << train_dataset->size() << endl;
   while (get_next(batch_data, batch_labels) &&
          (config.max_steps == -1 || num_batches < config.max_steps)) {
@@ -102,30 +103,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
     TensorBundle inputs{{"input", device_input}};
 
-    if (config.print_layer_memory_usage && epoch == 1 && num_batches == 1) {
-      if (mem_logger) {
-        graph.enable_memory_profiling(true, mem_logger.get());
-      }
-    }
-
-    TensorBundle outputs = graph.forward(inputs);
-
-    if (!execution_order_logged && graph.last_forward_used_macro_plan()) {
-      cout << "Macro forward execution order: ";
-      for (const string &edge : graph.last_forward_execution_order()) cout << "[" << edge << "] ";
-      cout << endl;
-      const ForwardMemoryEstimate estimate = graph.last_forward_memory_estimate();
-      cout << "Estimated forward peak memory - topological: " << fixed << setprecision(2)
-           << static_cast<double>(estimate.topological_peak_bytes) / 1024 / 1024
-           << " MiB, macro plan: " << static_cast<double>(estimate.macro_peak_bytes) / 1024 / 1024
-           << " MiB" << endl;
-      execution_order_logged = true;
-    }
-
-    if (config.print_layer_memory_usage && epoch == 1 && num_batches == 1) {
-      graph.enable_memory_profiling(false);
-      if (mem_logger) mem_logger->flush();
-    }
+    TensorBundle outputs = executor.forward(inputs);
 
     Tensor predictions = outputs.get("output");
 
@@ -189,17 +167,10 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
       }
       cout << ", Batch Time: " << batch_duration.count() << "ms" << endl;
       if (config.print_layer_profiling) {
-        print_timing_table(graph.profiling_details());
+        // TODO: add timing for executor
       }
-      /*
-      print_timing_table(graph.profiling_details());
-      cout << "Forward time: " << forward_duration << ", Backward time: " << grad_backward_duration
-           << ", Loss time: " << loss_duration << ", Gradient time: " << gradient_duration
-           << ", Update time: " << update_time << "ms, " << "Zero grads time: " << zero_grads_time
-           << "ms" << endl;
-      */
     }
-    graph.clear_profiling_details();
+    // TODO: clear timing after each iteration
   }
   cout << endl;
 
@@ -297,7 +268,6 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
   auto &mem_pool = PoolAllocator::instance(model_device, model_device.default_stream());
 
   int grad_accum_counter = 0;
-  bool execution_order_logged = false;
   const std::string artifact_name = training_artifact_name(config);
   MetricsLogger logger("tunx_" + artifact_name, config.log_dir, config.log_mode);
 
@@ -343,30 +313,7 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
       Tensor device_labels = to_device(batch_labels, model_device);
       TensorBundle inputs{{"input", device_input}};
 
-      if (config.print_layer_memory_usage && steps == 0) {
-        if (mem_logger) {
-          graph.enable_memory_profiling(true, mem_logger.get());
-        }
-      }
-
       TensorBundle outputs = graph.forward(inputs);
-
-      if (!execution_order_logged && graph.last_forward_used_macro_plan()) {
-        cout << "Macro forward execution order: ";
-        for (const string &edge : graph.last_forward_execution_order()) cout << "[" << edge << "] ";
-        cout << endl;
-        const ForwardMemoryEstimate estimate = graph.last_forward_memory_estimate();
-        cout << "Estimated forward peak memory - default: " << fixed << setprecision(2)
-             << static_cast<double>(estimate.topological_peak_bytes) / 1024 / 1024
-             << " MiB, macro plan: " << static_cast<double>(estimate.macro_peak_bytes) / 1024 / 1024
-             << " MiB" << endl;
-        execution_order_logged = true;
-      }
-
-      if (config.print_layer_memory_usage && steps == 0) {
-        graph.enable_memory_profiling(false);
-        if (mem_logger) mem_logger->flush();
-      }
 
       Tensor predictions = outputs.get("output");
       float loss;

@@ -18,11 +18,15 @@ public:
         producers_(inputs),
         consumers_(outputs) {}
 
+  const std::string &uid() const { return uid_; }
   const Vec<Node> &producers() const { return producers_; }
   const Vec<Node> &consumers() const { return consumers_; }
   std::shared_ptr<LayerImpl> layer() const { return layer_; }
 
+  void set_uid(const std::string &uid) { uid_ = uid; }
+
 private:
+  std::string uid_;
   std::shared_ptr<LayerImpl> layer_;
   Vec<Node> producers_;
   Vec<Node> consumers_;

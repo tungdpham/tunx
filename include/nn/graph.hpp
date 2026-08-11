@@ -8,10 +8,7 @@
 #include <memory>
 #include <set>
 #include <string>
-#include <utility>
-#include <vector>
 
-#include "common/csv_logger.hpp"
 #include "device/del_allocator_v2.hpp"
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
@@ -28,42 +25,6 @@ namespace tunx {
 enum class ExecutionMode {
   TRAIN,
   EVAL,
-};
-
-struct SPSCRegion {
-  Vec<size_t> edge_indices;
-};
-
-struct MPSCRegion {
-  size_t join_edge_index = 0;
-  Vec<Vec<size_t>> branch_edge_indices;
-};
-
-struct GraphRegionSummary {
-  Vec<SPSCRegion> spsc_regions;
-  Vec<MPSCRegion> mpsc_regions;
-  Vec<size_t> unsupported_edge_indices;
-};
-
-struct EdgeExecutionProfile {
-  size_t peak_bytes = 0;
-  size_t retained_bytes = 0;
-  size_t output_bytes = 0;
-  Vec<size_t> output_tensor_bytes;
-};
-
-struct ForwardMemoryEstimate {
-  size_t topological_peak_bytes = 0;
-  size_t macro_peak_bytes = 0;
-};
-
-struct ForwardPlanCacheEntry {
-  ExecutionMode mode = ExecutionMode::TRAIN;
-  std::map<std::string, Vec<size_t>> input_shapes;
-  GraphRegionSummary regions;
-  std::map<size_t, EdgeExecutionProfile> edge_profiles;
-  size_t execution_count = 0;
-  bool profiled = false;
 };
 
 struct GraphOpts {
@@ -117,11 +78,6 @@ public:
 
   TensorBundle forward(TensorBundle &input_map, size_t pid = 0);
   TensorBundle backward(TensorBundle &output_grad_map, size_t pid = 0);
-  std::vector<std::string> last_forward_execution_order() const;
-  bool last_forward_used_macro_plan() const { return last_forward_used_macro_plan_; }
-  ForwardMemoryEstimate last_forward_memory_estimate() const {
-    return last_forward_memory_estimate_;
-  }
 
   Node make_node(std::string uid = "");
 
@@ -143,23 +99,8 @@ public:
 
   Vec<Param> params();
 
-  std::vector<std::pair<std::string, double>> profiling_details() const {
-    std::vector<std::pair<std::string, double>> res;
-    for (const auto &k : timing_order_) {
-      res.push_back({k, timing_map_.at(k)});
-    }
-    return res;
-  }
-
-  void clear_profiling_details() {
-    timing_map_.clear();
-    timing_order_.clear();
-  }
-
-  void enable_memory_profiling(bool enable, CsvLogger *logger = nullptr) {
-    enable_memory_profiling_ = enable;
-    memory_profile_logger_ = logger;
-  }
+  GraphExecutor &executor(size_t pid);
+  void clear_executors();
 
 private:
   friend class GraphExecutor;
@@ -170,36 +111,24 @@ private:
   std::shared_ptr<DELAllocatorV2> workspace_allocator_;
   Engine engine_;
   engine_handle engine_handle_;
-  DType_t io_dtype_;
-  DType_t param_dtype_;
-  DType_t compute_dtype_;
 
   // connectivity
   Vec<Node> nodes_;
   Vec<Edge> edges_;
   std::set<Node> input_nodes_;
   std::set<Node> output_nodes_;
-  std::map<std::string, double> timing_map_;  // layer name -> total time taken.
-  std::vector<std::string> timing_order_;
   ExecutionMode mode_ = ExecutionMode::TRAIN;
   size_t node_count_ = 0;
-  std::set<std::string> used_uids_;
+  size_t edge_count_ = 0;
+  std::set<std::string> used_node_uids_;
+  std::set<std::string> used_edge_uids_;
   std::map<size_t, std::unique_ptr<GraphExecutor>> executors_;
-  std::vector<ForwardPlanCacheEntry> forward_plan_cache_;
-  std::vector<size_t> last_forward_execution_order_;
-  bool last_forward_used_macro_plan_ = false;
-  ForwardMemoryEstimate last_forward_memory_estimate_;
-  bool enable_memory_profiling_ = false;
-  CsvLogger *memory_profile_logger_ = nullptr;
 
-  std::string generate_uid();
+  std::string generate_node_uid();
+  std::string generate_edge_uid();
 
   Vec<Node> inputs();
   Vec<Node> outputs();
-
-  GraphExecutor &executor(size_t pid);
-  void clear_executors();
-  ForwardPlanCacheEntry &forward_plan_cache(TensorBundle &input_map);
 };
 
 }  // namespace tunx
