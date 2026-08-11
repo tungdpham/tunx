@@ -5,7 +5,6 @@
 #include "nn/engines/cudnn_engine.hpp"
 #include "nn/engines/engine_handle.hpp"
 #include "nn/stats/stats.hpp"
-#include "type/type.hpp"
 
 namespace tunx {
 

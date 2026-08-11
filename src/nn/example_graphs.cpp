@@ -659,7 +659,7 @@ Graph create_gpt2_graph(IAllocator &allocator, size_t embed_dim, size_t num_head
 Graph create_inception_v1_graph(IAllocator &allocator, GraphOpts opts) {
   Graph graph;
   Node input = graph.input("input");
-  Shape shape = {1, 32, 32, 3};
+  Shape shape = {1, 224, 224, 3};
 
   Node x = conv2d(input, shape, 64, 7, 7, 2, 2, 3, 3, false, "conv1");
   x = batchnorm(x, shape, true, "bn1");
@@ -672,9 +672,9 @@ Graph create_inception_v1_graph(IAllocator &allocator, GraphOpts opts) {
   x = inception_block(x, shape, 128, "inc3");
   x = inception_block(x, shape, 128, "inc4");
 
-  x = avgpool2d(x, shape, 4, 4, 1, 1, 0, 0, "avgpool");
+  x = avgpool2d(x, shape, 28, 28, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
-  Node output = dense(x, shape, 10, true, "output");
+  Node output = dense(x, shape, 100, true, "output");
 
   finalize_graph(graph, allocator, output, opts);
   return graph;

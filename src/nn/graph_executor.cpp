@@ -183,38 +183,35 @@ void GraphExecutor::forward_edge(Edge &edge, size_t edge_index) {
   Residuals residuals;
   Vec<Tensor> output_data;
   size_t workspace_bytes = 0;
-  if (graph_.workspace_allocator_) {
-    const size_t usage_before = graph_.workspace_allocator_->allocated();
-    size_t peak_usage = usage_before;
-    const size_t hook_id = graph_.workspace_allocator_->add_allocation_hook(
-        [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
-    output_data = edge->layer()->forward(input_data, residuals);
-    const size_t usage_after = graph_.workspace_allocator_->allocated();
-    graph_.workspace_allocator_->remove_allocation_hook(hook_id);
+  const size_t usage_before = graph_.workspace_allocator_->allocated();
+  size_t peak_usage = usage_before;
+  const size_t hook_id = graph_.workspace_allocator_->add_allocation_hook(
+      [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
+  output_data = edge->layer()->forward(input_data, residuals);
+  const size_t usage_after = graph_.workspace_allocator_->allocated();
+  graph_.workspace_allocator_->remove_allocation_hook(hook_id);
 
-    const size_t peak_edge_usage = peak_usage - usage_before;
-    const size_t retained = usage_after - usage_before;
-    workspace_bytes = peak_usage > usage_after ? peak_usage - usage_after : 0;
+  const size_t peak_edge_usage = peak_usage - usage_before;
+  const size_t retained = usage_after - usage_before;
+  workspace_bytes = peak_usage - usage_after;
 
-    if (graph_.enable_memory_profiling_ && graph_.memory_profile_logger_) {
-      std::unordered_map<std::string, std::string> row;
-      row["layer"] = edge->layer()->name();
-      row["peak_usage_bytes"] = std::to_string(peak_edge_usage);
-      row["retained_bytes"] = std::to_string(retained);
-      row["unused_bytes"] = std::to_string(graph_.workspace_allocator_->unused());
-      row["reserved_bytes"] = std::to_string(graph_.workspace_allocator_->reserved());
-      graph_.memory_profile_logger_->log(row);
-    } else if (graph_.enable_memory_profiling_) {
-      fmt::print(
-          "Layer {} peak usage: {:.2f} MB, retained: {:.2f} MB, unused: {:.2f} MB, reserved: "
-          "{:.2f} MB\n",
-          edge->layer()->name(), static_cast<double>(peak_edge_usage) / 1024 / 1024,
-          static_cast<double>(retained) / 1024 / 1024,
-          static_cast<double>(graph_.workspace_allocator_->unused()) / 1024 / 1024,
-          static_cast<double>(graph_.workspace_allocator_->reserved()) / 1024 / 1024);
-    }
-  } else {
-    output_data = edge->layer()->forward(input_data, residuals);
+  if (graph_.enable_memory_profiling_ && graph_.memory_profile_logger_) {
+    std::unordered_map<std::string, std::string> row;
+    row["layer"] = edge->layer()->name();
+    row["peak_usage_bytes"] = std::to_string(peak_edge_usage);
+    row["retained_bytes"] = std::to_string(retained);
+    row["unused_bytes"] = std::to_string(graph_.workspace_allocator_->unused());
+    row["reserved_bytes"] = std::to_string(graph_.workspace_allocator_->reserved());
+    row["allocated_bytes"] = std::to_string(graph_.workspace_allocator_->allocated());
+    graph_.memory_profile_logger_->log(row);
+  } else if (graph_.enable_memory_profiling_) {
+    fmt::print(
+        "Layer {} peak usage: {:.2f} MB, retained: {:.2f} MB, unused: {:.2f} MB, reserved: "
+        "{:.2f} MB\n",
+        edge->layer()->name(), static_cast<double>(peak_edge_usage) / 1024 / 1024,
+        static_cast<double>(retained) / 1024 / 1024,
+        static_cast<double>(graph_.workspace_allocator_->unused()) / 1024 / 1024,
+        static_cast<double>(graph_.workspace_allocator_->reserved()) / 1024 / 1024);
   }
 
   size_t output_bytes = 0;

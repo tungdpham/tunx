@@ -458,8 +458,8 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
   std::unique_ptr<CsvLogger> mem_logger;
   if (config.print_layer_memory_usage) {
     std::string artifact_name = training_artifact_name(config);
-    std::vector<std::string> headers = {"layer", "peak_usage_bytes", "retained_bytes",
-                                        "unused_bytes", "reserved_bytes"};
+    std::vector<std::string> headers = {"layer",        "peak_usage_bytes", "retained_bytes",
+                                        "unused_bytes", "reserved_bytes",   "allocated"};
     std::string mem_csv_path = "tunx_" + artifact_name + "_" + csv_timestamp() + "_memory.csv";
     if (!config.log_dir.empty()) {
       mem_csv_path = config.log_dir + "/" + mem_csv_path;
