@@ -27,7 +27,8 @@
   },
   "scheduler": {
     "type": "warmup_cosine_annealing",
-    "base_lr": 0.00015,
+    "start_lr": 0.00015,
+    "base_lr": 0.0003,
     "warmup_steps": 2000,
     "T_max": 10,
     "eta_min": 0.0
