@@ -80,7 +80,7 @@ Tensor EmbeddingOp::backward(OpContext &ctx, const Tensor &grad_output, Param &w
   const Tensor &input = ctx.residuals["input"];
 
   Tensor grad_input = ctx.make_tensor(input.shape(), ctx.io_dtype);
-  fill(grad_input, 0.0f);
+  fill(grad_input, 0.0f, ctx.handle.get_stream());
 
   size_t num_tokens = input.size();
 

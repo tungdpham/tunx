@@ -43,9 +43,10 @@ __inline__ __device__ T blockReduceSum(T val) {
 }
 
 template <typename IO_T>
-__global__ void dropout_fwd_kernel_vectorized(const IO_T* __restrict__ input, IO_T* __restrict__ output,
-                                              bool* __restrict__ mask, size_t n_elements,
-                                              IO_T dropout_rate, IO_T scale, unsigned long long seed) {
+__global__ void dropout_fwd_kernel_vectorized(const IO_T* __restrict__ input,
+                                              IO_T* __restrict__ output, bool* __restrict__ mask,
+                                              size_t n_elements, IO_T dropout_rate, IO_T scale,
+                                              unsigned long long seed) {
   using VecT = typename VectoredTraits<IO_T>::type;
   constexpr int vec_width = VectoredTraits<IO_T>::size;
 
@@ -100,8 +101,8 @@ __global__ void dropout_fwd_kernel_vectorized(const IO_T* __restrict__ input, IO
 
 template <typename IO_T>
 __global__ void dropout_fwd_kernel(const IO_T* input, IO_T* output, bool* mask, size_t batch_size,
-                                   size_t channels, size_t spatial_size, IO_T dropout_rate, IO_T scale,
-                                   unsigned long long seed) {
+                                   size_t channels, size_t spatial_size, IO_T dropout_rate,
+                                   IO_T scale, unsigned long long seed) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   size_t total_elements = batch_size * channels * spatial_size;
   int stride = blockDim.x * gridDim.x;
@@ -123,9 +124,9 @@ __global__ void dropout_fwd_kernel(const IO_T* input, IO_T* output, bool* mask, 
 }
 
 template <typename IO_T>
-__global__ void dropout_dgrad_kernel(const IO_T* __restrict__ grad_output, IO_T* __restrict__ grad_input,
-                                     const bool* __restrict__ mask, size_t total_elements,
-                                     IO_T scale) {
+__global__ void dropout_dgrad_kernel(const IO_T* __restrict__ grad_output,
+                                     IO_T* __restrict__ grad_input, const bool* __restrict__ mask,
+                                     size_t total_elements, IO_T scale) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
 
@@ -421,8 +422,8 @@ __global__ void sdpa_dgrad_k_kernel(
 }
 
 template <typename IO_T>
-__global__ void slice_fwd_kernel(const IO_T* input, IO_T* output, size_t outer_size, size_t inner_size,
-                                 size_t axis_size, size_t start, size_t length,
+__global__ void slice_fwd_kernel(const IO_T* input, IO_T* output, size_t outer_size,
+                                 size_t inner_size, size_t axis_size, size_t start, size_t length,
                                  size_t total_elements) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= total_elements) return;
@@ -449,7 +450,7 @@ __global__ void slice_dgrad_kernel(const IO_T* grad_output, IO_T* grad_input, si
   size_t o = tmp / length;
 
   size_t output_idx = o * axis_size * inner_size + (start + l) * inner_size + i;
-  grad_input[output_idx] = grad_output[idx];
+  grad_input[output_idx] += grad_output[idx];
 }
 
 WorkspaceReq CUDAEngine::query_dropout_graph(engine_handle backend_handle,
@@ -585,8 +586,8 @@ void CUDAEngine::transpose(engine_handle backend_handle, const TransposeStats& s
   size_t blocks = (total_elements + threads - 1) / threads;
 
   DISPATCH_DTYPE(type_desc.io_dtype, IO_T, {
-    transpose_kernel<IO_T><<<blocks, threads, 0, stream>>>(static_cast<const IO_T*>(input),
-                                                           static_cast<IO_T*>(output), p, total_elements);
+    transpose_kernel<IO_T><<<blocks, threads, 0, stream>>>(
+        static_cast<const IO_T*>(input), static_cast<IO_T*>(output), p, total_elements);
   });
 }
 
@@ -604,8 +605,8 @@ void CUDAEngine::slice_fwd(engine_handle backend_handle, const SliceStats& stats
   size_t blocks = (total_elements + threads - 1) / threads;
   DISPATCH_DTYPE(type_desc.io_dtype, IO_T, {
     slice_fwd_kernel<IO_T><<<blocks, threads, 0, stream>>>(
-        static_cast<const IO_T*>(input), static_cast<IO_T*>(output), stats.outer_size, stats.inner_size,
-        stats.axis_size, stats.start, stats.length, total_elements);
+        static_cast<const IO_T*>(input), static_cast<IO_T*>(output), stats.outer_size,
+        stats.inner_size, stats.axis_size, stats.start, stats.length, total_elements);
   });
 }
 

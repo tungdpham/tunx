@@ -72,6 +72,7 @@ Tensor MaxPool2DOp::forward(OpContext &ctx, const Tensor &input, const Config &c
     Tensor mask_indices =
         ctx.make_tensor({batch_size, output_h, output_w, channels}, DType_t::INT32);
     ctx.residuals["mask_indices"] = mask_indices;
+    ctx.residuals["input_shape"] = input.shape();
 
     ctx.engine->maxpool2d_fwd(ctx.handle, stats, input.data_as<void>(), output.data_as<void>(),
                               mask_indices.data_as<void>(), ws.data_as<void>(), type_desc);
@@ -79,7 +80,6 @@ Tensor MaxPool2DOp::forward(OpContext &ctx, const Tensor &input, const Config &c
     ctx.engine->maxpool2d_infer(ctx.handle, stats, input.data_as<void>(), output.data_as<void>(),
                                 ws.data_as<void>(), type_desc);
   }
-
   return output;
 }
 
@@ -91,11 +91,11 @@ Tensor MaxPool2DOp::backward(OpContext &ctx, const Tensor &grad_output, const Co
     throw std::runtime_error("MaxPool2DOp: grad_output must be 4D (NHWC format)");
   }
   size_t batch_size = grad_shape[0];
-  size_t output_h = grad_shape[1];
-  size_t output_w = grad_shape[2];
   size_t channels = grad_shape[3];
-  size_t input_h = (output_h - 1) * config.stride_h - 2 * config.pad_h + config.pool_h;
-  size_t input_w = (output_w - 1) * config.stride_w - 2 * config.pad_w + config.pool_w;
+
+  Vec<size_t> &input_shape = ctx.residuals["input_shape"];
+  size_t input_h = input_shape[1];
+  size_t input_w = input_shape[2];
 
   MaxPool2DStats stats{.batch_size = batch_size,
                        .height = input_h,
@@ -116,7 +116,7 @@ Tensor MaxPool2DOp::backward(OpContext &ctx, const Tensor &grad_output, const Co
 
   Tensor grad_input =
       ctx.make_tensor({batch_size, input_h, input_w, channels}, grad_output.dtype());
-  fill(grad_input, 0.0f);
+  fill(grad_input, 0.0f, ctx.handle.get_stream());
 
   WorkspaceReq ws_req = ctx.engine->query_maxpool2d_graph(ctx.handle, stats, type_desc);
   Tensor ws = ctx.make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);

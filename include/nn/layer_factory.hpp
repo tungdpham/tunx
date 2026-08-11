@@ -11,6 +11,7 @@
 #include "layers_impl/dropout.hpp"
 #include "layers_impl/elu.hpp"
 #include "layers_impl/embedding.hpp"
+#include "layers_impl/concat.hpp"
 #include "layers_impl/flatten.hpp"
 #include "layers_impl/gelu.hpp"
 #include "layers_impl/layer_norm.hpp"
@@ -110,6 +111,7 @@ public:
     register_layer_type<ClassToken>();
     register_layer_type<PositionalEmbedding>();
     register_layer_type<Slice>();
+    register_layer_type<Concat>();
     register_layer_type<Embedding>();
     register_layer_type<SDPA>();
     register_layer_type<ResidualBlock>();

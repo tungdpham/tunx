@@ -5,6 +5,7 @@
 #include "device/device_manager.hpp"
 #include "device/pool_allocator.hpp"
 #include "device/stream.hpp"
+#include "nn/example_graphs.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/batchnorm.hpp"
@@ -90,6 +91,7 @@ Graph make_mnist_model(Device& device) {
 }
 
 signed main() {
+  ExampleGraphs::register_defaults();
   cout << "Testing Graph API v2" << endl;
 
   Device& device = getGPU();

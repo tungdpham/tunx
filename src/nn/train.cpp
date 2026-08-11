@@ -90,6 +90,8 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     return train_dataset->get_batch(config.batch_size, data, labels);
   };
 
+  graph.save_dot("current_graph.dot");
+
   cout << "Training batches: " << train_dataset->size() << endl;
   while (get_next(batch_data, batch_labels) &&
          (config.max_steps == -1 || num_batches < config.max_steps)) {
@@ -478,7 +480,7 @@ static Result validate_model_impl(Graph &graph, unique_ptr<Dataset> &val_dataset
                                   MetricsLogger *logger, int epoch) {
   Tensor batch_data, batch_labels;
 
-  graph.set_mode(ExecutionMode::EVAL);
+  // graph.set_mode(ExecutionMode::EVAL);
   val_dataset->reset();
 
   cout << "Starting validation..." << endl;

@@ -63,7 +63,6 @@ signed main(int argc, char *argv[]) {
     cerr << "Failed to create data loaders for dataset: " << train_config.dataset_name << endl;
     return 1;
   }
-  train_dataset->set_seed(123456);
 
   GraphOpts opts{
       .s = device.default_stream(),

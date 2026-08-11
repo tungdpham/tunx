@@ -7,10 +7,14 @@
 
 #include "nn/example_graphs.hpp"
 
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+
 #include <string>
 
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
+#include "nn/layers_impl/concat.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -214,6 +218,12 @@ Node gpt_block(Node input, Shape &shape, size_t embed_dim, size_t num_heads, siz
   return x + ffn;
 }
 
+Node concat(const Vec<Node> &inputs, size_t axis, const std::string &name) {
+  auto layer = Concat(axis, name);
+  return layer(inputs[0], inputs[1], inputs[2],
+               inputs[3]);  // Currently supporting 4 inputs since inception uses 4
+}
+
 Node inception_block(Node input, Shape &shape, size_t out_channels, const std::string &name) {
   Shape b1_shape = shape;
   Node b1 = conv2d(input, b1_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b1_conv");
@@ -237,9 +247,15 @@ Node inception_block(Node input, Shape &shape, size_t out_channels, const std::s
   b4 = batchnorm(b4, b4_shape, true, name + "_b4_bn");
 
   shape = b1_shape;
-  Node out = b1 + b2;
-  out = out + b3;
-  out = out + b4;
+  shape[3] = b1_shape[3] + b2_shape[3] + b3_shape[3] + b4_shape[3];
+  std::cout << "Inception block " + name + " shape: ";
+  for (size_t i = 0; i < shape.size(); i++) {
+    std::cout << shape[i] << " ";
+  }
+  std::cout << std::endl;
+
+  Node out = concat({b1, b2, b3, b4}, 3, name + "_concat");
+  // Node out = b1 + b2 + b3 + b4;
   return relu(out, shape, name + "_relu");
 }
 

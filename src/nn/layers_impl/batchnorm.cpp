@@ -11,6 +11,7 @@
 #include <stdexcept>
 
 #include "nn/engines/iengine.hpp"
+#include "nn/param.hpp"
 #include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
@@ -26,11 +27,21 @@ void BatchNormOp::init(OpContext &ctx, const Config &config) {
   Param beta = ctx.make_param({num_features});
   fill(beta.data(), 0.0f);
 
-  Param running_mean = ctx.make_param({num_features});
-  fill(running_mean.grad(), 0.0f);
+  Param prev_running_mean = ctx.make_param({num_features}, ctx.compute_dtype);
+  prev_running_mean.set_requires_grad(false);
+  fill(prev_running_mean.data(), 0.0f);
 
-  Param running_var = ctx.make_param({num_features});
-  fill(running_var.grad(), 1.0f);
+  Param prev_running_var = ctx.make_param({num_features}, ctx.compute_dtype);
+  prev_running_var.set_requires_grad(false);
+  fill(prev_running_var.data(), 1.0f);
+
+  Param running_mean = ctx.make_param({num_features}, ctx.compute_dtype);
+  running_mean.set_requires_grad(false);
+  fill(running_mean.data(), 0.0f);
+
+  Param running_var = ctx.make_param({num_features}, ctx.compute_dtype);
+  running_var.set_requires_grad(false);
+  fill(running_var.data(), 1.0f);
 }
 
 Vec<Vec<size_t>> BatchNormOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
@@ -42,8 +53,8 @@ Vec<Vec<size_t>> BatchNormOp::output_shapes(const Vec<Vec<size_t>> &input_shapes
 }
 
 Tensor BatchNormOp::forward(OpContext &ctx, const Tensor &input, const Param &gamma,
-                            const Param &beta, Param &running_mean, Param &running_var,
-                            const Config &config) {
+                            const Param &beta, Param &prev_running_mean, Param &prev_running_var,
+                            Param &running_mean, Param &running_var, const Config &config) {
   if (input.dims() < 4) {
     throw std::invalid_argument("BatchNormOp: Input tensor must have at least 4 dimensions got " +
                                 std::to_string(input.dims()) + " dims");
@@ -97,10 +108,13 @@ Tensor BatchNormOp::forward(OpContext &ctx, const Tensor &input, const Param &ga
 
     ctx.engine->batchnorm_fwd(
         ctx.handle, stats, input.data_as<void>(), gamma.data_as<void>(), beta.data_as<void>(),
-        output.data_as<void>(), running_mean.data_as<void>(), running_var.data_as<void>(),
+        output.data_as<void>(), prev_running_mean.data_as<void>(), prev_running_var.data_as<void>(),
         running_mean.data_as<void>(), running_var.data_as<void>(), batch_mean.data_as<void>(),
         batch_invar.data_as<void>(), config.use_relu ? relu_mask.data_as<void>() : nullptr,
         ws.data_as<void>(), type_desc);
+
+    copy(running_mean.data(), prev_running_mean.data(), ctx.handle.get_stream());
+    copy(running_var.data(), prev_running_var.data(), ctx.handle.get_stream());
 
     return output;
   } else {

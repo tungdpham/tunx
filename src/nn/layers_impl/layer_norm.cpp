@@ -62,8 +62,8 @@ Tensor LayerNormOp::forward(OpContext &ctx, const Tensor &input, const Param &ga
   WorkspaceReq ws_req = ctx.engine->query_layernorm_graph(ctx.handle, stats, type_desc);
 
   if (ctx.is_training) {
-    Tensor batch_mean = ctx.make_tensor({batch_size}, DType_t::FP32);
-    Tensor batch_invar = ctx.make_tensor({batch_size}, DType_t::FP32);
+    Tensor batch_mean = ctx.make_tensor({batch_size}, ctx.compute_dtype);
+    Tensor batch_invar = ctx.make_tensor({batch_size}, ctx.compute_dtype);
     ctx.residuals["batch_mean"] = batch_mean;
     ctx.residuals["batch_invar"] = batch_invar;
 

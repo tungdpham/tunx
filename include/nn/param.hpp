@@ -20,6 +20,7 @@ private:
   struct Impl {
     Tensor data_;
     Tensor grad_;
+    bool requires_grad_ = true;
 
     Impl(const Vec<size_t> &shape, DType_t dtype, IAllocator &allocator) {
       data_ = Tensor(shape, dtype, allocator);
@@ -116,6 +117,16 @@ public:
   }
 
   bool is_same(const Param &other) const { return impl_ == other.impl_; }
+
+  bool requires_grad() const {
+    check_valid("requires_grad");
+    return impl_->requires_grad_;
+  }
+
+  void set_requires_grad(bool val) {
+    check_valid("set_requires_grad");
+    impl_->requires_grad_ = val;
+  }
 };
 
 }  // namespace tunx

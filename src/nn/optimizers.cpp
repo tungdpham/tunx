@@ -18,7 +18,12 @@ namespace tunx {
 
 void Optimizer::attach(Graph &graph) {
   graph_ = &graph;
-  params_ = graph.params();
+  auto all_params = graph.params();
+  for (const auto &p : all_params) {
+    if (p.requires_grad()) {
+      params_.push_back(p);
+    }
+  }
   on_attach();
   std::cout << "Optimizer attached to " << params_.size() << " parameters" << std::endl;
 }

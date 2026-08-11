@@ -120,9 +120,9 @@ LegacyBatchNorm::LegacyBatchNorm(size_t num_features, float epsilon, float momen
   impl_->register_param("beta", {num_features},
                         [](Param &p, OpContext &ctx) { fill(p.data(), 0.0f); });
   impl_->register_param("running_mean", {num_features},
-                        [](Param &p, OpContext &ctx) { fill(p.data(), 0.0f); });
+                        [](Param &p, OpContext &ctx) { p.set_requires_grad(false); fill(p.data(), 0.0f); });
   impl_->register_param("running_var", {num_features},
-                        [](Param &p, OpContext &ctx) { fill(p.data(), 1.0f); });
+                        [](Param &p, OpContext &ctx) { p.set_requires_grad(false); fill(p.data(), 1.0f); });
 }
 
 }  // namespace tunx

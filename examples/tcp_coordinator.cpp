@@ -75,7 +75,6 @@ int main(int argc, char *argv[]) {
     cerr << "Failed to create data loaders for model: " << train_config.model_name << endl;
     return 1;
   }
-  train_dataset->set_seed(123456);
 
   auto criterion = LossFactory::create_from_config(train_config.loss_config);
 

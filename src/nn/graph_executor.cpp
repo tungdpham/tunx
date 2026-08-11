@@ -144,8 +144,9 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
   }
 
   TensorBundle grad_input_map;
-  for (auto it = graph_.edges_.rbegin(); it != graph_.edges_.rend(); ++it) {
-    Edge &edge = *it;
+  for (auto it = graph_.last_forward_execution_order_.rbegin();
+       it != graph_.last_forward_execution_order_.rend(); ++it) {
+    Edge &edge = graph_.edges_.at(*it);
     const auto start = std::chrono::high_resolution_clock::now();
     backward_edge(edge);
     const auto end = std::chrono::high_resolution_clock::now();

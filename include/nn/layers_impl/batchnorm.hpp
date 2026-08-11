@@ -29,7 +29,8 @@ struct BatchNormOp {
 
   static void init(OpContext &ctx, const Config &config);
   static Tensor forward(OpContext &ctx, const Tensor &input, const Param &gamma, const Param &beta,
-                        Param &running_mean, Param &running_var, const Config &config);
+                        Param &prev_running_mean, Param &prev_running_var, Param &running_mean,
+                        Param &running_var, const Config &config);
   static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &gamma, Param &beta,
                          const Config &config);
 

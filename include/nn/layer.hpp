@@ -47,7 +47,7 @@ class ResidualObject {
 private:
   struct Impl {
     using ResidualValue =
-        std::variant<std::monostate, std::map<std::string, ResidualObject>, Tensor>;
+        std::variant<std::monostate, std::map<std::string, ResidualObject>, Tensor, Vec<size_t>>;
 
     ResidualValue data;
   };
@@ -83,11 +83,27 @@ public:
     return *this;
   }
 
+  ResidualObject &operator=(const Vec<size_t> &vec) {
+    if (impl_->data.index() == 0) {
+      impl_->data = vec;
+    } else if (impl_->data.index() == 1) {
+      throw std::runtime_error("ResidualObject: Attempting to assign a Vec<size_t> to a non-leaf node");
+    }
+    return *this;
+  }
+
   operator Tensor &() {
     if (impl_->data.index() != 2) {
       throw std::runtime_error("ResidualObject: Attempting to convert a non-leaf node to Tensor");
     }
     return std::get<2>(impl_->data);
+  }
+
+  operator Vec<size_t> &() {
+    if (impl_->data.index() != 3) {
+      throw std::runtime_error("ResidualObject: Attempting to convert a non-leaf node to Vec<size_t>");
+    }
+    return std::get<3>(impl_->data);
   }
 
   void print(std::ostream &os, int indent = 0) const {
@@ -123,6 +139,13 @@ public:
               if (i < shape.size() - 1) os << ", ";
             }
             os << "])\n";
+          } else if constexpr (std::is_same_v<T, Vec<size_t>>) {
+            os << "Vec<size_t>[";
+            for (size_t i = 0; i < arg.size(); ++i) {
+              os << arg[i];
+              if (i < arg.size() - 1) os << ", ";
+            }
+            os << "]\n";
           }
         },
         impl_->data);
@@ -143,6 +166,8 @@ public:
             return total;
           } else if constexpr (std::is_same_v<T, Tensor>) {
             return arg.num_bytes();
+          } else if constexpr (std::is_same_v<T, Vec<size_t>>) {
+            return arg.size() * sizeof(size_t);
           }
           return 0;
         },
