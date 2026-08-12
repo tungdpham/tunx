@@ -21,11 +21,12 @@ void DenseOp::init(OpContext &ctx, const Config &config) {
   size_t input_features = config.input_features;
   size_t output_features = config.output_features;
 
-  float stddev = static_cast<float>(std::sqrt(2.0 / static_cast<double>(input_features + output_features)));
+  float stddev =
+      static_cast<float>(std::sqrt(2.0 / static_cast<double>(input_features + output_features)));
   long long seed =
       ctx.use_seed ? ctx.srand_seed : std::chrono::system_clock::now().time_since_epoch().count();
 
-  Param weights = ctx.make_param({input_features, output_features});
+  Param weights = ctx.make_param({output_features, input_features});
   fill_normal(weights.data(), 0, stddev, seed);
 
   if (config.use_bias) {
