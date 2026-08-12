@@ -316,7 +316,7 @@ public:
   bool load_data(const std::string &source) override { return load_data(source, true); }
 
   bool get_batch(size_t batch_size, Tensor &batch_data, Tensor &batch_labels) override {
-    DISPATCH_DTYPE(dtype_, T, return get_batch_impl<T>(batch_size, batch_data, batch_labels));
+    DISPATCH_ANY_DTYPE(dtype_, T, return get_batch_impl<T>(batch_size, batch_data, batch_labels));
   }
 
   void reset() override { this->current_index_ = 0; }
@@ -337,9 +337,7 @@ public:
             tiny_imagenet_constants::NUM_CHANNELS};
   }
 
-  int get_num_classes() const {
-    return static_cast<int>(tiny_imagenet_constants::NUM_CLASSES);
-  }
+  int get_num_classes() const { return static_cast<int>(tiny_imagenet_constants::NUM_CLASSES); }
 
   Vec<std::string> get_class_names() const {
     Vec<std::string> names;

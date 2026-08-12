@@ -1,100 +1,10 @@
 #pragma once
 
-#include <functional>
-#include <vector>
-
 #include "nn/engines/engine_handle.hpp"
 #include "nn/stats/stats.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
-
-struct DTypeDesc {
-  DType_t io_dtype;
-  DType_t param_dtype;
-  DType_t compute_dtype;
-};
-
-inline bool operator==(const DTypeDesc& lhs, const DTypeDesc& rhs) {
-  return lhs.io_dtype == rhs.io_dtype && lhs.param_dtype == rhs.param_dtype &&
-         lhs.compute_dtype == rhs.compute_dtype;
-}
-
-enum OpType {
-  DENSE_FWD,
-  DENSE_WGRAD,
-  DENSE_DGRAD,
-  DENSE_BGRAD,
-  DENSE_ADD_BIAS,
-  AVG_POOL_FWD,
-  AVG_POOL_BWD,
-  MAXPOOL2D_FWD,
-  MAXPOOL2D_INFER,
-  MAXPOOL2D_BWD,
-  CLASS_TOKEN_FWD,
-  CLASS_TOKEN_BWD,
-  DROPOUT_FWD,
-  DROPOUT_BWD,
-  RELU_FWD,
-  RELU_INFER,
-  RELU_BWD,
-  EMBEDDING_FWD,
-  EMBEDDING_BWD,
-  POS_EMBEDDING_FWD,
-  POS_EMBEDDING_BWD,
-  BATCHNORM_FWD,
-  BATCHNORM_INFER,
-  BATCHNORM_BWD,
-  CONV2D_FWD,
-  CONV2D_DGRAD,
-  CONV2D_WGRAD,
-  CONV2D_BGRAD,
-  LAYERNORM_FWD,
-  LAYERNORM_INFER,
-  LAYERNORM_BWD,
-  SDPA_FWD,
-  SDPA_BWD,
-  TRANSPOSE,
-  SLICE_FWD,
-  SLICE_BWD,
-};
-
-struct GraphCacheKey {
-  OpType op_type;
-  DTypeDesc dtype_desc;
-  std::vector<size_t> dims;
-  std::unordered_map<std::string, float> attributes;
-};
-
-inline bool operator==(const GraphCacheKey& lhs, const GraphCacheKey& rhs) {
-  return lhs.op_type == rhs.op_type && lhs.dtype_desc == rhs.dtype_desc && lhs.dims == rhs.dims &&
-         lhs.attributes == rhs.attributes;
-}
-
-}  // namespace tunx
-
-namespace std {
-
-template <>
-struct hash<tunx::GraphCacheKey> {
-  size_t operator()(const tunx::GraphCacheKey& key) const {
-    size_t h = hash<int>()(static_cast<int>(key.op_type));
-    auto hash_combine = [](size_t& seed, size_t val) {
-      seed ^= val + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-    };
-    hash_combine(h, hash<tunx::DType_t>()(key.dtype_desc.io_dtype));
-    hash_combine(h, hash<tunx::DType_t>()(key.dtype_desc.param_dtype));
-    hash_combine(h, hash<tunx::DType_t>()(key.dtype_desc.compute_dtype));
-    for (size_t dim : key.dims) {
-      hash_combine(h, hash<size_t>()(dim));
-    }
-    return h;
-  }
-};
-}  // namespace std
-
-namespace tunx {
-
 class IEngine {
 public:
   virtual ~IEngine() = default;

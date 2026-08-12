@@ -7,12 +7,12 @@
 #pragma once
 
 #include <fcntl.h>
-#include <device/stream.hpp>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <device/stream.hpp>
 #include <fstream>
 #include <iostream>
 #include <numeric>
@@ -213,7 +213,7 @@ public:
   }
 
   bool get_batch(size_t batch_size, Tensor &batch_data, Tensor &batch_labels) override {
-    DISPATCH_DTYPE(dtype_, T, return get_batch_impl<T>(batch_size, batch_data, batch_labels));
+    DISPATCH_ANY_DTYPE(dtype_, T, return get_batch_impl<T>(batch_size, batch_data, batch_labels));
   }
 
   void reset() override { this->current_index_ = 0; }
@@ -263,7 +263,8 @@ public:
     std::cout << "Number of classes: " << num_classes << std::endl;
   }
 
-  static void create(const std::string &data_path, CIFAR100 &train_dataset, CIFAR100 &test_dataset) {
+  static void create(const std::string &data_path, CIFAR100 &train_dataset,
+                     CIFAR100 &test_dataset) {
     const std::string fine_labels = data_path + "/cifar-100-binary/fine_label_names.txt";
     const std::string coarse_labels = data_path + "/cifar-100-binary/coarse_label_names.txt";
     train_dataset.set_label_files(fine_labels, coarse_labels);

@@ -76,8 +76,8 @@ __global__ void class_token_wgrad_kernel(const IO_T* grad_output, PARAM_T* grad_
   }
 }
 
-template <typename IO_T, typename PARAM_T>
-__global__ void embedding_fwd_kernel(const IO_T* input, const PARAM_T* weight, IO_T* output, size_t num_indices,
+template <typename INDEX_T, typename IO_T, typename PARAM_T>
+__global__ void embedding_fwd_kernel(const INDEX_T* input, const PARAM_T* weight, IO_T* output, size_t num_indices,
                                      size_t vocab_size, size_t embed_dim, size_t padding_idx) {
   size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
   if (tid >= num_indices * embed_dim) return;
@@ -96,8 +96,8 @@ __global__ void embedding_fwd_kernel(const IO_T* input, const PARAM_T* weight, I
   output[tid] = static_cast<IO_T>(weight[vocab_idx * embed_dim + dim_idx]);
 }
 
-template <typename IO_T, typename PARAM_T>
-__global__ void embedding_wgrad_kernel(const IO_T* input, const IO_T* grad, PARAM_T* grad_weight,
+template <typename INDEX_T, typename IO_T, typename PARAM_T>
+__global__ void embedding_wgrad_kernel(const INDEX_T* input, const IO_T* grad, PARAM_T* grad_weight,
                                        size_t num_indices, size_t vocab_size, size_t embed_dim,
                                        size_t padding_idx) {
   size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -177,8 +177,8 @@ void CUDAEngine::embedding_fwd(engine_handle backend_handle, const EmbeddingStat
     size_t total_elements = stats.num_indices * stats.embed_dim;
     int blockSize = 256;
     int numBlocks = (total_elements + blockSize - 1) / blockSize;
-    embedding_fwd_kernel<IO_T, PARAM_T><<<numBlocks, blockSize, 0, stream>>>(
-        static_cast<const IO_T*>(input), static_cast<const PARAM_T*>(weight), static_cast<IO_T*>(output),
+    embedding_fwd_kernel<int32_t, IO_T, PARAM_T><<<numBlocks, blockSize, 0, stream>>>(
+        static_cast<const int32_t*>(input), static_cast<const PARAM_T*>(weight), static_cast<IO_T*>(output),
         stats.num_indices, stats.vocab_size, stats.embed_dim, stats.padding_idx);
   });
 }
@@ -191,8 +191,8 @@ void CUDAEngine::embedding_bwd(engine_handle backend_handle, const EmbeddingStat
     size_t total_elements = stats.num_indices * stats.embed_dim;
     int blockSize = 256;
     int numBlocks = (total_elements + blockSize - 1) / blockSize;
-    embedding_wgrad_kernel<IO_T, PARAM_T><<<numBlocks, blockSize, 0, stream>>>(
-        static_cast<const IO_T*>(input), static_cast<const IO_T*>(grad_output),
+    embedding_wgrad_kernel<int32_t, IO_T, PARAM_T><<<numBlocks, blockSize, 0, stream>>>(
+        static_cast<const int32_t*>(input), static_cast<const IO_T*>(grad_output),
         static_cast<PARAM_T*>(grad_weight), stats.num_indices, stats.vocab_size, stats.embed_dim,
         stats.padding_idx);
   });

@@ -190,7 +190,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     ComputedMetrics computed_metrics = metrics_comp.compute(predictions, device_labels, loss);
     int batch_corrects = computed_metrics.corrects;
 
-    Tensor loss_gradient = Tensor(predictions.shape(), batch_data.dtype(), mem_pool);
+    Tensor loss_gradient = Tensor(predictions.shape(), predictions.dtype(), mem_pool);
     criterion->compute_gradient(predictions, device_labels, loss_gradient);
 
     predictions = Tensor();  // free prediction buffer early
@@ -394,7 +394,7 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
       ComputedMetrics computed_metrics = metrics_comp.compute(predictions, device_labels, loss);
       int corrects = computed_metrics.corrects;
 
-      Tensor loss_gradient = Tensor(predictions.shape(), batch_data.dtype(), mem_pool);
+      Tensor loss_gradient = Tensor(predictions.shape(), predictions.dtype(), mem_pool);
       criterion->compute_gradient(predictions, device_labels, loss_gradient);
 
       if (config.gradient_accumulation_steps > 1) {

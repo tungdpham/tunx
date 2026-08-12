@@ -15,6 +15,21 @@
 
 namespace tunx {
 
+template <typename T>
+__device__ __forceinline__ T compute_rsqrt(T x) {
+  return static_cast<T>(rsqrt(static_cast<double>(x)));
+}
+
+template <>
+__device__ __forceinline__ float compute_rsqrt<float>(float x) {
+  return rsqrt(x);
+}
+
+template <>
+__device__ __forceinline__ double compute_rsqrt<double>(double x) {
+  return rsqrt(x);
+}
+
 #define BLOCK_SIZE 256
 #define WARP_SIZE 32
 
@@ -167,7 +182,7 @@ __global__ void batchnorm_stats_kernel(const IO_T* __restrict__ input,
 
     mean_out[c] = mu;
 
-    COMPUTE_T inv_std = rsqrt(var + epsilon);
+    COMPUTE_T inv_std = compute_rsqrt(var + epsilon);
     inv_std_out[c] = inv_std;
 
     COMPUTE_T unbiased_var =
@@ -224,7 +239,7 @@ __global__ void batchnorm_stats_kernel_vec(const IO_T* __restrict__ input,
     COMPUTE_T mu = result.mean;
     COMPUTE_T var = result.m2 / result.count;
     mean_out[c] = mu;
-    COMPUTE_T inv_std = rsqrt(var + epsilon);
+    COMPUTE_T inv_std = compute_rsqrt(var + epsilon);
     inv_std_out[c] = inv_std;
     COMPUTE_T unbiased_var =
         (result.count > COMPUTE_T(1)) ? (result.m2 / (result.count - COMPUTE_T(1))) : COMPUTE_T(0);
@@ -476,7 +491,7 @@ __global__ void batchnorm_nchw_inf_kernel(const IO_T* input, const COMPUTE_T* ru
   for (int c = threadIdx.x; c < channels; c += blockDim.x) {
     s_mean[c] = running_mean[c];
     COMPUTE_T var_val = running_var[c];
-    s_inv_std[c] = rsqrt(var_val + epsilon);
+    s_inv_std[c] = compute_rsqrt(var_val + epsilon);
     if (affine) {
       s_gamma[c] = gamma[c];
       s_beta[c] = beta[c];

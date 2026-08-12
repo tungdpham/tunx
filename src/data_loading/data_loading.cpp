@@ -123,8 +123,8 @@ DatasetPair DatasetFactory::create(const std::string &dataset_type, const std::s
       pair.val = std::move(val);
     }
   } else if (dataset_type == "open-web-text") {
-    auto train = std::make_unique<OpenWebText>(1024, io_dtype_);
-    auto val = std::make_unique<OpenWebText>(1024, io_dtype_);
+    auto train = std::make_unique<OpenWebText>(1024, DType_t::INT32);
+    auto val = std::make_unique<OpenWebText>(1024, DType_t::INT32);
 
     if (train->load_data(dataset_path)) {
       pair.train = std::move(train);

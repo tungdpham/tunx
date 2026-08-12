@@ -9,6 +9,7 @@
 #include "type/bf16.hpp"  // IWYU pragma: export
 #include "type/fp16.hpp"  // IWYU pragma: export
 #endif
+#include <unordered_map>
 #include <vector>
 
 namespace tunx {
@@ -110,6 +111,27 @@ struct TypeTraits<size_t> {
   static constexpr const char *name = "size_t";
   using ComputePrecision = size_t;
   using HigherPrecision = size_t;
+};
+
+template <>
+struct TypeTraits<int64_t> {
+  static constexpr const char *name = "int64";
+  using ComputePrecision = int64_t;
+  using HigherPrecision = int64_t;
+};
+
+template <>
+struct TypeTraits<bool> {
+  static constexpr const char *name = "bool";
+  using ComputePrecision = bool;
+  using HigherPrecision = bool;
+};
+
+template <>
+struct TypeTraits<uint8_t> {
+  static constexpr const char *name = "uint8";
+  using ComputePrecision = int32_t;
+  using HigherPrecision = int32_t;
 };
 
 enum class DType_t : uint32_t {
@@ -353,6 +375,16 @@ inline DType_t string_to_dtype(const std::string &dtype_str) {
       __VA_ARGS__;                                           \
       break;                                                 \
     }                                                        \
+    case DType_t::INT64: {                                   \
+      using type_alias = int64_t;                            \
+      __VA_ARGS__;                                           \
+      break;                                                 \
+    }                                                        \
+    case DType_t::SIZE_T: {                                  \
+      using type_alias = size_t;                             \
+      __VA_ARGS__;                                           \
+      break;                                                 \
+    }                                                        \
     default:                                                 \
       throw std::runtime_error("Unknown dtype in dispatch"); \
   }
@@ -361,6 +393,68 @@ inline DType_t string_to_dtype(const std::string &dtype_str) {
   DISPATCH_ANY_DTYPE(dtype_value_a, type_alias_a,                                          \
                      { DISPATCH_ANY_DTYPE(dtype_value_b, type_alias_b, { __VA_ARGS__; }); })
 
+struct DTypeDesc {
+  DType_t io_dtype;
+  DType_t param_dtype;
+  DType_t compute_dtype;
+};
+
+inline bool operator==(const DTypeDesc &lhs, const DTypeDesc &rhs) {
+  return lhs.io_dtype == rhs.io_dtype && lhs.param_dtype == rhs.param_dtype &&
+         lhs.compute_dtype == rhs.compute_dtype;
+}
+
+enum OpType {
+  DENSE_FWD,
+  DENSE_WGRAD,
+  DENSE_DGRAD,
+  DENSE_BGRAD,
+  DENSE_ADD_BIAS,
+  AVG_POOL_FWD,
+  AVG_POOL_BWD,
+  MAXPOOL2D_FWD,
+  MAXPOOL2D_INFER,
+  MAXPOOL2D_BWD,
+  CLASS_TOKEN_FWD,
+  CLASS_TOKEN_BWD,
+  DROPOUT_FWD,
+  DROPOUT_BWD,
+  RELU_FWD,
+  RELU_INFER,
+  RELU_BWD,
+  EMBEDDING_FWD,
+  EMBEDDING_BWD,
+  POS_EMBEDDING_FWD,
+  POS_EMBEDDING_BWD,
+  BATCHNORM_FWD,
+  BATCHNORM_INFER,
+  BATCHNORM_BWD,
+  CONV2D_FWD,
+  CONV2D_DGRAD,
+  CONV2D_WGRAD,
+  CONV2D_BGRAD,
+  LAYERNORM_FWD,
+  LAYERNORM_INFER,
+  LAYERNORM_BWD,
+  SDPA_FWD,
+  SDPA_BWD,
+  TRANSPOSE,
+  SLICE_FWD,
+  SLICE_BWD,
+};
+
+struct GraphCacheKey {
+  OpType op_type;
+  DTypeDesc dtype_desc;
+  std::vector<size_t> dims;
+  std::unordered_map<std::string, float> attributes;
+};
+
+inline bool operator==(const GraphCacheKey &lhs, const GraphCacheKey &rhs) {
+  return lhs.op_type == rhs.op_type && lhs.dtype_desc == rhs.dtype_desc && lhs.dims == rhs.dims &&
+         lhs.attributes == rhs.attributes;
+}
+
 }  // namespace tunx
 
 namespace std {
@@ -368,6 +462,23 @@ template <>
 struct hash<tunx::DType_t> {
   size_t operator()(const tunx::DType_t &dtype) const {
     return hash<uint32_t>()(static_cast<uint32_t>(dtype));
+  }
+};
+
+template <>
+struct hash<tunx::GraphCacheKey> {
+  size_t operator()(const tunx::GraphCacheKey &key) const {
+    size_t h = hash<int>()(static_cast<int>(key.op_type));
+    auto hash_combine = [](size_t &seed, size_t val) {
+      seed ^= val + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+    };
+    hash_combine(h, hash<tunx::DType_t>()(key.dtype_desc.io_dtype));
+    hash_combine(h, hash<tunx::DType_t>()(key.dtype_desc.param_dtype));
+    hash_combine(h, hash<tunx::DType_t>()(key.dtype_desc.compute_dtype));
+    for (size_t dim : key.dims) {
+      hash_combine(h, hash<size_t>()(dim));
+    }
+    return h;
   }
 };
 }  // namespace std

@@ -69,14 +69,15 @@ void CUDAEngine::dense_fwd(engine_handle backend_handle, const DenseStats& stats
                            const void* weight, const void* bias, void* output, void* workspace,
                            DTypeDesc type_desc) {
   cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
-  DISPATCH_DTYPE3(type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, IO_T, PARAM_T,
-                  COMPUTE_T, {
-                    cuda::gemm_ex<IO_T, PARAM_T, IO_T, COMPUTE_T>(
-                        static_cast<const IO_T*>(input), static_cast<const PARAM_T*>(weight),
-                        static_cast<IO_T*>(output), stats.batch_size, stats.out_features,
-                        stats.in_features, false, true, 1.0f, 0.0f, stats.in_features,
-                        stats.in_features, stats.out_features, stream);
-                    if (stats.use_bias) {
+  
+  cuda::gemm_ex(input, weight, output, stats.batch_size, stats.out_features,
+                stats.in_features, false, true, 1.0f, 0.0f, stats.in_features,
+                stats.in_features, stats.out_features, 
+                type_desc.io_dtype, type_desc.param_dtype, type_desc.io_dtype, type_desc.compute_dtype, stream);
+
+  if (stats.use_bias) {
+    DISPATCH_DTYPE3(type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, IO_T, PARAM_T,
+                    COMPUTE_T, {
                       int total_size = stats.batch_size * stats.out_features;
                       int threads_per_block = 256;
                       int num_blocks = (total_size + threads_per_block - 1) / threads_per_block;
@@ -84,36 +85,28 @@ void CUDAEngine::dense_fwd(engine_handle backend_handle, const DenseStats& stats
                           <<<num_blocks, threads_per_block, 0, stream>>>(
                               static_cast<IO_T*>(output), static_cast<const PARAM_T*>(bias),
                               stats.batch_size, stats.out_features);
-                    }
-                  });
+                    });
+  }
 }
 
 void CUDAEngine::dense_wgrad(engine_handle backend_handle, const DenseStats& stats,
                              const void* grad_output, const void* input, void* grad_weight,
                              void* workspace, DTypeDesc type_desc) {
   cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
-  DISPATCH_DTYPE3(type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, IO_T, PARAM_T,
-                  COMPUTE_T, {
-                    cuda::gemm_ex<IO_T, IO_T, PARAM_T, COMPUTE_T>(
-                        static_cast<const IO_T*>(grad_output), static_cast<const IO_T*>(input),
-                        static_cast<PARAM_T*>(grad_weight), stats.out_features, stats.in_features,
-                        stats.batch_size, true, false, 1.0f, 1.0f, stats.out_features,
-                        stats.in_features, stats.in_features, stream);
-                  });
+  cuda::gemm_ex(grad_output, input, grad_weight, stats.out_features, stats.in_features,
+                stats.batch_size, true, false, 1.0f, 1.0f, stats.out_features,
+                stats.in_features, stats.in_features, 
+                type_desc.io_dtype, type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, stream);
 }
 
 void CUDAEngine::dense_dgrad(engine_handle backend_handle, const DenseStats& stats,
                              const void* grad_output, const void* weight, void* grad_input,
                              void* workspace, DTypeDesc type_desc) {
   cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
-  DISPATCH_DTYPE3(type_desc.io_dtype, type_desc.param_dtype, type_desc.compute_dtype, IO_T, PARAM_T,
-                  COMPUTE_T, {
-                    cuda::gemm_ex<IO_T, PARAM_T, IO_T, COMPUTE_T>(
-                        static_cast<const IO_T*>(grad_output), static_cast<const PARAM_T*>(weight),
-                        static_cast<IO_T*>(grad_input), stats.batch_size, stats.in_features,
-                        stats.out_features, false, false, 1.0f, 0.0f, stats.out_features,
-                        stats.in_features, stats.in_features, stream);
-                  });
+  cuda::gemm_ex(grad_output, weight, grad_input, stats.batch_size, stats.in_features,
+                stats.out_features, false, false, 1.0f, 0.0f, stats.out_features,
+                stats.in_features, stats.in_features, 
+                type_desc.io_dtype, type_desc.param_dtype, type_desc.io_dtype, type_desc.compute_dtype, stream);
 }
 
 void CUDAEngine::dense_bgrad(engine_handle backend_handle, const DenseStats& stats,
