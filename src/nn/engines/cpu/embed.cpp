@@ -54,7 +54,11 @@ void embedding_fwd_impl(const INDEX_T* input_data, const PARAM_T* weight_data, I
     } else {
       const PARAM_T* w_row = weight_data + idx * embed_dim;
       for (size_t j = 0; j < embed_dim; ++j) {
-        out_row[j] = static_cast<IO_T>(w_row[j]);
+        if constexpr (std::is_same_v<IO_T, fp16> || std::is_same_v<IO_T, bf16>) {
+           out_row[j] = static_cast<IO_T>(static_cast<float>(w_row[j]));
+        } else {
+           out_row[j] = static_cast<IO_T>(w_row[j]);
+        }
       }
     }
   });
@@ -69,7 +73,11 @@ void embedding_bwd_impl(const INDEX_T* input_data, const IO_T* gradient_data,
       size_t idx = static_cast<size_t>(input_data[i]);
       if (idx >= vocab_size) idx = 0;
       if (padding_idx < vocab_size && idx == padding_idx) continue;
-      grad_weight_data[idx * embed_dim + j] += static_cast<PARAM_T>(gradient_data[i * embed_dim + j]);
+      if constexpr (std::is_same_v<PARAM_T, fp16> || std::is_same_v<PARAM_T, bf16>) {
+        grad_weight_data[idx * embed_dim + j] += static_cast<PARAM_T>(static_cast<float>(gradient_data[i * embed_dim + j]));
+      } else {
+        grad_weight_data[idx * embed_dim + j] += static_cast<PARAM_T>(gradient_data[i * embed_dim + j]);
+      }
     }
   });
 }

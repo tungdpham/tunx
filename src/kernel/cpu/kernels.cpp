@@ -667,7 +667,11 @@ void cast(DType_t a_dtype, DType_t b_dtype, const void *a_ptr, void *b_ptr, size
     B_T *b = static_cast<B_T *>(b_ptr);
 
     for (size_t i = 0; i < size; ++i) {
-      b[i] = static_cast<B_T>(a[i]);
+      if constexpr (std::is_same_v<B_T, fp16> || std::is_same_v<B_T, bf16>) {
+         b[i] = static_cast<B_T>(static_cast<float>(a[i]));
+      } else {
+         b[i] = static_cast<B_T>(a[i]);
+      }
     }
   };
   DISPATCH_ANY_DTYPE2(a_dtype, b_dtype, A_T, B_T, func(A_T{}, B_T{}));

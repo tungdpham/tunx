@@ -253,9 +253,12 @@ public:
   }
   const Vec<std::shared_ptr<LayerImpl>> &layers() const { return registered_layers_; }
 
-  void zero_grads() {
+  virtual void zero_grads() {
     for (auto &param : params_) {
       param.zero_grad(engine_handle_.get_stream());
+    }
+    for (auto &layer : registered_layers_) {
+      layer->zero_grads();
     }
   }
 
