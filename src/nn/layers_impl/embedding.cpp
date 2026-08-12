@@ -65,6 +65,10 @@ Tensor EmbeddingOp::forward(OpContext &ctx, const Tensor &input, const Param &we
       .compute_dtype = ctx.compute_dtype,
   };
 
+  if (input.dtype() != DType_t::INT32) {
+    throw std::runtime_error("EmbeddingOp input dtype must be INT32");
+  }
+
   WorkspaceReq ws_req = ctx.engine->query_embedding_graph(ctx.handle, stats, type_desc);
   Tensor ws = ctx.make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 

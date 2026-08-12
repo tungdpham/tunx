@@ -321,9 +321,46 @@ void math_maxpool2d_bwd(const T* grad_output, T* grad_input, const int32_t* mask
 }
 
 template <typename T>
-void math_layernorm_bwd(const T* grad_output, const T* input, const T* gamma, T* grad_input,
-                        T* grad_gamma, T* grad_beta, size_t batch_size, size_t channels,
+void math_layernorm_fwd(const T* input, const T* gamma, const T* beta, T* output, T* mean_out,
+                        T* invar_out, size_t batch_size, size_t seq_len, size_t channels,
                         T epsilon) {
+  size_t total_elements = batch_size * seq_len;
+  size_t batch_stride = channels;
+
+  for (size_t n = 0; n < total_elements; ++n) {
+    size_t base_idx = n * batch_stride;
+    T sum = 0;
+    for (size_t c = 0; c < channels; ++c) {
+      sum += input[base_idx + c];
+    }
+    T mean = sum / static_cast<T>(channels);
+    if (mean_out) mean_out[n] = mean;
+
+    T sq_sum = 0;
+    for (size_t c = 0; c < channels; ++c) {
+      T diff = input[base_idx + c] - mean;
+      sq_sum += diff * diff;
+    }
+    T var = sq_sum / static_cast<T>(channels);
+    T inv_std = T(1) / static_cast<T>(std::sqrt(static_cast<double>(var + epsilon)));
+    if (invar_out) invar_out[n] = inv_std;
+
+    for (size_t c = 0; c < channels; ++c) {
+      size_t idx = base_idx + c;
+      T val = input[idx];
+      T normalized = (val - mean) * inv_std;
+      T g = gamma ? gamma[c] : T(1);
+      T b = beta ? beta[c] : T(0);
+      output[idx] = normalized * g + b;
+    }
+  }
+}
+
+template <typename T>
+void math_layernorm_bwd(const T* grad_output, const T* input, const T* gamma, T* grad_input,
+                        T* grad_gamma, T* grad_beta, size_t batch_size, size_t seq_len,
+                        size_t channels, T epsilon) {
+  batch_size = batch_size * seq_len;
   size_t batch_stride = channels;
   std::vector<T> means(batch_size);
   std::vector<T> inv_stds(batch_size);

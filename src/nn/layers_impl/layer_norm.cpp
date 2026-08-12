@@ -41,13 +41,20 @@ Tensor LayerNormOp::forward(OpContext &ctx, const Tensor &input, const Param &ga
   size_t last_dim = shape.back();
   size_t channels = last_dim;
   size_t batch_size = 1;
-  for (size_t i = 0; i < shape.size() - 1; ++i) {
-    batch_size *= shape[i];
+  size_t seq_len = 1;
+
+  if (shape.size() == 3) {
+    batch_size = shape[0];
+    seq_len = shape[1];
+  } else {
+    for (size_t i = 0; i < shape.size() - 1; ++i) {
+      batch_size *= shape[i];
+    }
   }
 
   LayerNormStats stats{
       .batch_size = batch_size,
-      .seq_len = 1,
+      .seq_len = seq_len,
       .channels = channels,
       .epsilon = config.epsilon,
   };
@@ -61,8 +68,8 @@ Tensor LayerNormOp::forward(OpContext &ctx, const Tensor &input, const Param &ga
   WorkspaceReq ws_req = ctx.engine->query_layernorm_graph(ctx.handle, stats, type_desc);
 
   if (ctx.is_training) {
-    Tensor batch_mean = ctx.make_tensor({batch_size}, ctx.compute_dtype);
-    Tensor batch_invar = ctx.make_tensor({batch_size}, ctx.compute_dtype);
+    Tensor batch_mean = ctx.make_tensor({batch_size, seq_len, 1}, ctx.compute_dtype);
+    Tensor batch_invar = ctx.make_tensor({batch_size, seq_len, 1}, ctx.compute_dtype);
     ctx.residuals["batch_mean"] = batch_mean;
     ctx.residuals["batch_invar"] = batch_invar;
 
@@ -101,13 +108,20 @@ Tensor LayerNormOp::backward(OpContext &ctx, const Tensor &grad_output, Param &g
   size_t last_dim = shape.back();
   size_t channels = last_dim;
   size_t batch_size = 1;
-  for (size_t i = 0; i < shape.size() - 1; ++i) {
-    batch_size *= shape[i];
+  size_t seq_len = 1;
+
+  if (shape.size() == 3) {
+    batch_size = shape[0];
+    seq_len = shape[1];
+  } else {
+    for (size_t i = 0; i < shape.size() - 1; ++i) {
+      batch_size *= shape[i];
+    }
   }
 
   LayerNormStats stats{
       .batch_size = batch_size,
-      .seq_len = 1,
+      .seq_len = seq_len,
       .channels = channels,
       .epsilon = config.epsilon,
   };

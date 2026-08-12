@@ -231,11 +231,32 @@ protected:
     math_layernorm_bwd(grad_out_host.data_as<float>(), input_host.data_as<float>(),
                        gamma_host.data_as<float>(), expected_grad_input.data_as<float>(),
                        expected_grad_gamma.data_as<float>(), expected_grad_beta.data_as<float>(),
-                       stats.batch_size, stats.channels, static_cast<float>(stats.epsilon));
+                       stats.batch_size, stats.seq_len, stats.channels, static_cast<float>(stats.epsilon));
 
     compare_tensor(to_host(grad_input), expected_grad_input);
     compare_tensor(to_host(grad_gamma), expected_grad_gamma);
     compare_tensor(to_host(grad_beta), expected_grad_beta);
+  }
+  void check_layernorm_fwd(const Tensor& input, const Tensor& gamma, const Tensor& beta,
+                           const Tensor& output, const Tensor& mean, const Tensor& invar,
+                           const LayerNormStats& stats) {
+    Tensor expected_output(output.shape(), output.dtype(), DeviceAllocator::instance(getHost()));
+    Tensor expected_mean(mean.shape(), mean.dtype(), DeviceAllocator::instance(getHost()));
+    Tensor expected_invar(invar.shape(), invar.dtype(), DeviceAllocator::instance(getHost()));
+
+    Tensor input_host = to_host(input);
+    Tensor gamma_host = to_host(gamma);
+    Tensor beta_host = to_host(beta);
+
+    math_layernorm_fwd(input_host.data_as<float>(), gamma_host.data_as<float>(),
+                       beta_host.data_as<float>(), expected_output.data_as<float>(),
+                       expected_mean.data_as<float>(), expected_invar.data_as<float>(),
+                       stats.batch_size, stats.seq_len, stats.channels,
+                       static_cast<float>(stats.epsilon));
+
+    compare_tensor(to_host(output), expected_output);
+    compare_tensor(to_host(mean), expected_mean);
+    compare_tensor(to_host(invar), expected_invar);
   }
 
   void check_avgpool_fwd(const Tensor& input, const Tensor& output, const AvgPool2DStats& stats) {
@@ -728,13 +749,15 @@ TEST_F(CuDNNEngineTest, BatchNormBwdReturnsCorrectResult) {
                       stats);
 }
 
-TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
+TEST_F(CuDNNEngineTest, LayerNormFwdReturnsCorrectResult) {
   size_t batch_size = 2;
+  size_t seq_len = 32;
   size_t channels = 4;
   float epsilon = 1e-5f;
 
   LayerNormStats stats{
       .batch_size = batch_size,
+      .seq_len = seq_len,
       .channels = channels,
       .epsilon = epsilon,
   };
@@ -745,9 +768,49 @@ TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
       .compute_dtype = DType_t::FP32,
   };
 
-  Tensor input({batch_size, channels}, DType_t::FP32, getGPU());
+  Tensor input({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
   fill_normal(input, 0.0, 0.5, 12345ULL);
-  Tensor grad_output({batch_size, channels}, DType_t::FP32, getGPU());
+  Tensor gamma({channels}, DType_t::FP32, getGPU());
+  fill_normal(gamma, 1.0, 0.1, 12345ULL);
+  Tensor beta({channels}, DType_t::FP32, getGPU());
+  fill_normal(beta, 0.0, 0.1, 12345ULL);
+
+  Tensor output({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
+  Tensor mean({batch_size, seq_len, 1}, DType_t::FP32, getGPU());
+  Tensor invar({batch_size, seq_len, 1}, DType_t::FP32, getGPU());
+
+  WorkspaceReq req = engine_->query_layernorm_graph(engine_handle_, stats, type_desc);
+  Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
+
+  engine_->layernorm_fwd(engine_handle_, stats, input.data_as<void>(), gamma.data_as<void>(),
+                         beta.data_as<void>(), output.data_as<void>(), mean.data_as<void>(),
+                         invar.data_as<void>(), workspace.data_as<void>(), type_desc);
+
+  check_layernorm_fwd(input, gamma, beta, output, mean, invar, stats);
+}
+
+TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
+  size_t batch_size = 2;
+  size_t seq_len = 32;
+  size_t channels = 4;
+  float epsilon = 1e-5f;
+
+  LayerNormStats stats{
+      .batch_size = batch_size,
+      .seq_len = seq_len,
+      .channels = channels,
+      .epsilon = epsilon,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::FP32,
+      .param_dtype = DType_t::FP32,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor input({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
+  fill_normal(input, 0.0, 0.5, 12345ULL);
+  Tensor grad_output({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
   fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor gamma({channels}, DType_t::FP32, getGPU());
   fill_normal(gamma, 1.0, 0.1, 12345ULL);
@@ -755,9 +818,9 @@ TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
   // Run layernorm forward first to capture real mean and inv_variance
   Tensor beta({channels}, DType_t::FP32, getGPU());
   fill(beta, 0.0f);
-  Tensor ln_output({batch_size, channels}, DType_t::FP32, getGPU());
-  Tensor mean({batch_size, 1}, DType_t::FP32, getGPU());
-  Tensor invar({batch_size, 1}, DType_t::FP32, getGPU());
+  Tensor ln_output({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
+  Tensor mean({batch_size, seq_len, 1}, DType_t::FP32, getGPU());
+  Tensor invar({batch_size, seq_len, 1}, DType_t::FP32, getGPU());
   {
     WorkspaceReq fwd_req = engine_->query_layernorm_graph(engine_handle_, stats, type_desc);
     Tensor fwd_workspace({fwd_req.fwd_workspace > 0 ? fwd_req.fwd_workspace : 1}, DType_t::BYTE,
@@ -767,7 +830,7 @@ TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
                            invar.data_as<void>(), fwd_workspace.data_as<void>(), type_desc);
   }
 
-  Tensor grad_input({batch_size, channels}, DType_t::FP32, getGPU());
+  Tensor grad_input({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
   Tensor grad_gamma({channels}, DType_t::FP32, getGPU());
   Tensor grad_beta({channels}, DType_t::FP32, getGPU());
   fill(grad_gamma, 0.0f);

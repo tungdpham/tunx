@@ -319,8 +319,9 @@ struct layernorm_fwd_graph {
   size_t workspace_size;
 
   layernorm_fwd_graph(cudnnHandle_t handle, const LayerNormStats& stats, DTypeDesc& type_desc) {
-    const int64 n = static_cast<int64>(stats.batch_size);
-    const int64 c = static_cast<int64>(stats.channels);
+    const int64 b = static_cast<int64>(stats.batch_size);
+    const int64 s = static_cast<int64>(stats.seq_len);
+    const int64 d = static_cast<int64>(stats.channels);
 
     auto io_type = to_fe_data_type(type_desc.io_dtype);
     auto param_type = to_fe_data_type(type_desc.param_dtype);
@@ -333,8 +334,8 @@ struct layernorm_fwd_graph {
 
     x = graph->tensor(fe::graph::Tensor_attributes()
                           .set_name("input")
-                          .set_dim({n, c, 1, 1})
-                          .set_stride({c, 1, c, c})
+                          .set_dim({b, s, d})
+                          .set_stride({s * d, d, 1})
                           .set_data_type(io_type));
 
     auto epsilon = graph->tensor(stats.epsilon);
@@ -345,14 +346,14 @@ struct layernorm_fwd_graph {
 
     scale = graph->tensor(fe::graph::Tensor_attributes()
                               .set_name("scale")
-                              .set_dim({1, c, 1, 1})
-                              .set_stride({c, 1, c, c})
+                              .set_dim({1, 1, d})
+                              .set_stride({d, d, 1})
                               .set_data_type(param_type));
 
     bias = graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("bias")
-                             .set_dim({1, c, 1, 1})
-                             .set_stride({c, 1, c, c})
+                             .set_dim({1, 1, d})
+                             .set_stride({d, d, 1})
                              .set_data_type(param_type));
 
     auto outputs = graph->layernorm(x, scale, bias, ln_options);
@@ -386,8 +387,9 @@ struct layernorm_inf_graph {
   size_t workspace_size;
 
   layernorm_inf_graph(cudnnHandle_t handle, const LayerNormStats& stats, DTypeDesc& type_desc) {
-    const int64 n = static_cast<int64>(stats.batch_size);
-    const int64 c = static_cast<int64>(stats.channels);
+    const int64 b = static_cast<int64>(stats.batch_size);
+    const int64 s = static_cast<int64>(stats.seq_len);
+    const int64 d = static_cast<int64>(stats.channels);
 
     auto io_type = to_fe_data_type(type_desc.io_dtype);
     auto param_type = to_fe_data_type(type_desc.param_dtype);
@@ -400,8 +402,8 @@ struct layernorm_inf_graph {
 
     x = graph->tensor(fe::graph::Tensor_attributes()
                           .set_name("input")
-                          .set_dim({n, c, 1, 1})
-                          .set_stride({c, 1, c, c})
+                          .set_dim({b, s, d})
+                          .set_stride({s * d, d, 1})
                           .set_data_type(io_type));
 
     auto epsilon = graph->tensor(stats.epsilon);
@@ -412,14 +414,14 @@ struct layernorm_inf_graph {
 
     scale = graph->tensor(fe::graph::Tensor_attributes()
                               .set_name("scale")
-                              .set_dim({1, c, 1, 1})
-                              .set_stride({c, 1, c, c})
+                              .set_dim({1, 1, d})
+                              .set_stride({d, d, 1})
                               .set_data_type(param_type));
 
     bias = graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("bias")
-                             .set_dim({1, c, 1, 1})
-                             .set_stride({c, 1, c, c})
+                             .set_dim({1, 1, d})
+                             .set_stride({d, d, 1})
                              .set_data_type(param_type));
 
     auto outputs = graph->layernorm(x, scale, bias, ln_options);
@@ -453,8 +455,9 @@ struct layernorm_bwd_graph {
   size_t workspace_size;
 
   layernorm_bwd_graph(cudnnHandle_t handle, const LayerNormStats& stats, DTypeDesc& type_desc) {
-    const int64 n = static_cast<int64>(stats.batch_size);
-    const int64 c = static_cast<int64>(stats.channels);
+    const int64 b = static_cast<int64>(stats.batch_size);
+    const int64 s = static_cast<int64>(stats.seq_len);
+    const int64 d = static_cast<int64>(stats.channels);
 
     auto io_type = to_fe_data_type(type_desc.io_dtype);
     auto param_type = to_fe_data_type(type_desc.param_dtype);
@@ -467,26 +470,26 @@ struct layernorm_bwd_graph {
 
     dy = graph->tensor(fe::graph::Tensor_attributes()
                            .set_name("grad_output")
-                           .set_dim({n, c, 1, 1})
-                           .set_stride({c, 1, c, c})
+                           .set_dim({b, s, d})
+                           .set_stride({s * d, d, 1})
                            .set_data_type(io_type));
 
     x = graph->tensor(fe::graph::Tensor_attributes()
                           .set_name("input")
-                          .set_dim({n, c, 1, 1})
-                          .set_stride({c, 1, c, c})
+                          .set_dim({b, s, d})
+                          .set_stride({s * d, d, 1})
                           .set_data_type(io_type));
 
     mean = graph->tensor(fe::graph::Tensor_attributes()
                              .set_name("mean")
-                             .set_dim({n, 1, 1, 1})
-                             .set_stride({1, 1, 1, 1})
+                             .set_dim({b, s, 1})
+                             .set_stride({s, 1, 1})
                              .set_data_type(compute_type));
 
     inv_variance = graph->tensor(fe::graph::Tensor_attributes()
                                      .set_name("inv_variance")
-                                     .set_dim({n, 1, 1, 1})
-                                     .set_stride({1, 1, 1, 1})
+                                     .set_dim({b, s, 1})
+                                     .set_stride({s, 1, 1})
                                      .set_data_type(compute_type));
 
     auto ln_bwd_options =
@@ -495,8 +498,8 @@ struct layernorm_bwd_graph {
 
     scale = graph->tensor(fe::graph::Tensor_attributes()
                               .set_name("scale")
-                              .set_dim({1, c, 1, 1})
-                              .set_stride({c, 1, c, c})
+                              .set_dim({1, 1, d})
+                              .set_stride({d, d, 1})
                               .set_data_type(param_type));
 
     auto outputs = graph->layernorm_backward(dy, x, scale, ln_bwd_options);
@@ -579,8 +582,8 @@ WorkspaceReq CuDNNEngine::query_layernorm_graph(engine_handle backend_handle,
   GraphCacheKey fwd_key{
       .op_type = OpType::LAYERNORM_FWD,
       .dtype_desc = type_desc,
-      .dims = {stats.batch_size, stats.channels},
-      .attributes = {{"seq_len", stats.seq_len}, {"epsilon", stats.epsilon}},
+      .dims = {stats.batch_size, stats.seq_len, stats.channels},
+      .attributes = {{"epsilon", stats.epsilon}},
   };
   auto it_fwd = graph_cache_.find(fwd_key);
   if (it_fwd == graph_cache_.end()) {
@@ -590,8 +593,8 @@ WorkspaceReq CuDNNEngine::query_layernorm_graph(engine_handle backend_handle,
   GraphCacheKey inf_key{
       .op_type = OpType::LAYERNORM_INFER,
       .dtype_desc = type_desc,
-      .dims = {stats.batch_size, stats.channels},
-      .attributes = {{"seq_len", stats.seq_len}, {"epsilon", stats.epsilon}},
+      .dims = {stats.batch_size, stats.seq_len, stats.channels},
+      .attributes = {{"epsilon", stats.epsilon}},
   };
   auto it_inf = graph_cache_.find(inf_key);
   if (it_inf == graph_cache_.end()) {
@@ -601,8 +604,8 @@ WorkspaceReq CuDNNEngine::query_layernorm_graph(engine_handle backend_handle,
   GraphCacheKey bwd_key{
       .op_type = OpType::LAYERNORM_BWD,
       .dtype_desc = type_desc,
-      .dims = {stats.batch_size, stats.channels},
-      .attributes = {{"seq_len", stats.seq_len}, {"epsilon", stats.epsilon}},
+      .dims = {stats.batch_size, stats.seq_len, stats.channels},
+      .attributes = {{"epsilon", stats.epsilon}},
   };
   auto it_bwd = graph_cache_.find(bwd_key);
   if (it_bwd == graph_cache_.end()) {
@@ -748,8 +751,8 @@ void CuDNNEngine::layernorm_fwd(engine_handle backend_handle, const LayerNormSta
   GraphCacheKey key{
       .op_type = OpType::LAYERNORM_FWD,
       .dtype_desc = type_desc,
-      .dims = {stats.batch_size, stats.channels},
-      .attributes = {{"seq_len", stats.seq_len}, {"epsilon", stats.epsilon}},
+      .dims = {stats.batch_size, stats.seq_len, stats.channels},
+      .attributes = {{"epsilon", stats.epsilon}},
   };
   auto it = graph_cache_.find(key);
   if (it == graph_cache_.end()) {
@@ -776,8 +779,8 @@ void CuDNNEngine::layernorm_infer(engine_handle backend_handle, const LayerNormS
   GraphCacheKey key{
       .op_type = OpType::LAYERNORM_INFER,
       .dtype_desc = type_desc,
-      .dims = {stats.batch_size, stats.channels},
-      .attributes = {{"seq_len", stats.seq_len}, {"epsilon", stats.epsilon}},
+      .dims = {stats.batch_size, stats.seq_len, stats.channels},
+      .attributes = {{"epsilon", stats.epsilon}},
   };
   auto it = graph_cache_.find(key);
   if (it == graph_cache_.end()) {
@@ -814,8 +817,8 @@ void CuDNNEngine::layernorm_bwd(engine_handle backend_handle, const LayerNormSta
   GraphCacheKey key{
       .op_type = OpType::LAYERNORM_BWD,
       .dtype_desc = type_desc,
-      .dims = {stats.batch_size, stats.channels},
-      .attributes = {{"seq_len", stats.seq_len}, {"epsilon", stats.epsilon}},
+      .dims = {stats.batch_size, stats.seq_len, stats.channels},
+      .attributes = {{"epsilon", stats.epsilon}},
   };
   auto it = graph_cache_.find(key);
   if (it == graph_cache_.end()) {
