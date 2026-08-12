@@ -498,7 +498,7 @@ static Result validate_model_impl(Graph &graph, unique_ptr<Dataset> &val_dataset
                                   MetricsLogger *logger, int epoch) {
   Tensor batch_data, batch_labels;
 
-  // graph.set_mode(ExecutionMode::EVAL);
+  graph.set_mode(ExecutionMode::EVAL);
   val_dataset->reset();
 
   cout << "Starting validation..." << endl;
