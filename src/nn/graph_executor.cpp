@@ -225,7 +225,7 @@ ExecutionPlanStats GraphExecutor::profile_plan(TensorBundle &input_map, const Ex
   // assuming sorted topologically
   for (const Edge &edge : plan.order) {
     forward_edge(edge);
-    
+
     EdgeMemStats edge_stat;
     edge_stat.layer_name = edge->layer()->name();
     edge_stat.allocated_mem = allocator->allocated();
@@ -286,7 +286,7 @@ EdgeProfile GraphExecutor::forward_edge(const Edge &edge) {
   for (const Tensor &input : inputs) {
     profile.input_mem += input.num_bytes();
   }
-  for (const Tensor &residual : residuals.tensors()) {
+  for (const auto &[name, residual] : residuals.tensors()) {
     bool is_input_or_output = false;
     for (Tensor &input : inputs) {
       if (input.data_as<void>() == residual.data_as<void>()) {

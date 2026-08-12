@@ -181,19 +181,21 @@ public:
     return os;
   }
 
-  Vec<Tensor> tensors() const {
-    Vec<Tensor> res;
+  std::map<std::string, Tensor> tensors() const {
+    std::map<std::string, Tensor> res;
     std::visit(
         [&res](auto &&arg) {
           using T = std::decay_t<decltype(arg)>;
           if constexpr (std::is_same_v<T, std::monostate>) {
           } else if constexpr (std::is_same_v<T, std::map<std::string, ResidualObject>>) {
-            for (const auto &[_key, value] : arg) {
+            for (const auto &[key, value] : arg) {
               auto inner_tensors = value.tensors();
-              res.insert(res.end(), inner_tensors.begin(), inner_tensors.end());
+              for (auto &[inner_key, inner_value] : inner_tensors) {
+                res[key + "." + inner_key] = inner_value;
+              }
             }
           } else if constexpr (std::is_same_v<T, Tensor>) {
-            res.push_back(arg);
+            res[""] = arg;
           } else if constexpr (std::is_same_v<T, Vec<size_t>>) {
           }
         },

@@ -116,8 +116,8 @@ Tensor SDPAOp::forward(OpContext &ctx, const Tensor &q, const Tensor &k, const T
   }
 
   ctx.engine->sdpa_fwd(ctx.handle, stats, q.data_as<void>(), k.data_as<void>(), v.data_as<void>(),
-                       output.data_as<void>(), stats_tensor.data_as<void>(), workspace.data_as<void>(),
-                       type_desc);
+                       output.data_as<void>(), stats_tensor.data_as<void>(),
+                       workspace.data_as<void>(), type_desc);
 
   return output;
 }
@@ -170,4 +170,3 @@ SDPA::SDPA(float attn_scale, bool is_causal, const std::string &name)
     : FunctionalLayer(SDPAOp::Config{attn_scale, is_causal}, name) {}
 
 }  // namespace tunx
-

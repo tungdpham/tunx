@@ -10,8 +10,6 @@
 #include <cmath>
 #include <stdexcept>
 
-#include "cuda/error_handler.cuh"
-#include "nn/engines/iengine.hpp"
 #include "tensor/ops.hpp"
 #include "type/type.hpp"
 
@@ -71,7 +69,6 @@ Tensor ClassTokenOp::forward(OpContext &ctx, const Tensor &input, const Param &c
 
   ctx.engine->class_token_fwd(ctx.handle, stats, input.data_as<void>(), class_token.data_as<void>(),
                               output.data_as<void>(), ws.data_as<void>(), type_desc);
-  cuda::checkCudaError(cudaGetLastError(), __func__, __FILE__, __LINE__);
 
   return output;
 }

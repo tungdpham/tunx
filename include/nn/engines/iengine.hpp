@@ -359,7 +359,7 @@ public:
    * @brief Forward pass for an Embedding layer.
    * @param backend_handle Opaque handle to the backend context.
    * @param stats Embedding layer configuration.
-   * @param input Input indices tensor. Shape: [num_indices], DType: io_dtype.
+   * @param input Input indices tensor. Shape: [num_indices], DType: int32.
    * @param weight Embedding lookup table. Shape: [vocab_size, embed_dim], DType: param_dtype.
    * @param output Output embeddings. Shape: [num_indices, embed_dim], DType: io_dtype.
    * @param workspace Workspace buffer.

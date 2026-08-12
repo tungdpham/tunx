@@ -20,7 +20,7 @@ Vec<Vec<size_t>> SliceOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
     throw std::invalid_argument("Slice axis out of bounds");
   }
   size_t final_axis = static_cast<size_t>(axis);
-  
+
   if (config.start + config.length > out_shape[final_axis]) {
     throw std::invalid_argument("Slice range out of bounds");
   }
@@ -102,8 +102,8 @@ Tensor SliceOp::backward(OpContext &ctx, const Tensor &grad_output, const Config
   size_t ws_size = req.bwd_workspace > 0 ? req.bwd_workspace : 1;
   Tensor workspace = ctx.make_tensor({ws_size}, DType_t::BYTE);
 
-  ctx.engine->slice_bwd(ctx.handle, stats, grad_output.data_as<void>(),
-                        grad_input.data_as<void>(), workspace.data_as<void>(), type_desc);
+  ctx.engine->slice_bwd(ctx.handle, stats, grad_output.data_as<void>(), grad_input.data_as<void>(),
+                        workspace.data_as<void>(), type_desc);
 
   return grad_input;
 }

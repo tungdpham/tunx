@@ -24,9 +24,12 @@ struct FlashAttentionBlockOp {
     bool is_causal = true;
   };
 
+  // Expects input with shape: [batch_size, seq_len, embed_dim]
+  // Outputs with shape: [batch_size, seq_len, embed_dim]
   static Tensor forward(OpContext &ctx, const Tensor &input, Layer q_proj, Layer k_proj,
                         Layer v_proj, Layer out_proj, const Config &config);
 
+  // Expects grad_output with shape: [batch_size, seq_len, embed_dim]
   static Tensor backward(OpContext &ctx, const Tensor &grad_output, Layer q_proj, Layer k_proj,
                          Layer v_proj, Layer out_proj, const Config &config);
 

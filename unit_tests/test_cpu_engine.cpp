@@ -671,8 +671,8 @@ TEST_F(CPUEngineTest, EmbeddingFwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getHost());
 
-  Tensor input({4}, DType_t::FP32, getHost());
-  float host_input[] = {1.0f, 2.0f, 1.0f, 0.0f};
+  Tensor input({4}, DType_t::INT32, getHost());
+  int32_t host_input[] = {1, 2, 1, 0};
   std::memcpy(input.data_as<void>(), host_input, sizeof(host_input));
   Tensor weight({10, 8}, DType_t::FP32, getHost());
   fill_normal(weight, 0.0, 0.5, 12345ULL);
@@ -682,7 +682,7 @@ TEST_F(CPUEngineTest, EmbeddingFwdReturnsCorrectResult) {
                          output.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   Tensor expected_output({4, 8}, DType_t::FP32, getHost());
-  math_embedding_fwd(input.data_as<float>(), weight.data_as<float>(),
+  math_embedding_fwd(input.data_as<int32_t>(), weight.data_as<float>(),
                      expected_output.data_as<float>(), stats.num_indices, stats.vocab_size,
                      stats.embed_dim, stats.padding_idx);
 
@@ -705,8 +705,8 @@ TEST_F(CPUEngineTest, EmbeddingBwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getHost());
 
-  Tensor input({4}, DType_t::FP32, getHost());
-  float host_input[] = {1.0f, 2.0f, 1.0f, 0.0f};
+  Tensor input({4}, DType_t::INT32, getHost());
+  int32_t host_input[] = {1, 2, 1, 0};
   std::memcpy(input.data_as<void>(), host_input, sizeof(host_input));
   Tensor grad_output({4, 8}, DType_t::FP32, getHost());
   fill_normal(grad_output, 0.0, 0.2, 12345ULL);
@@ -720,7 +720,7 @@ TEST_F(CPUEngineTest, EmbeddingBwdReturnsCorrectResult) {
 
   Tensor expected_grad_weight({10, 8}, DType_t::FP32, getHost());
   fill(expected_grad_weight, 0.0f);
-  math_embedding_bwd(input.data_as<float>(), grad_output.data_as<float>(),
+  math_embedding_bwd(input.data_as<int32_t>(), grad_output.data_as<float>(),
                      expected_grad_weight.data_as<float>(), stats.num_indices, stats.vocab_size,
                      stats.embed_dim, stats.padding_idx);
 

@@ -5,13 +5,15 @@
  * project root for the full license text.
  */
 #include "nn/layers_impl/transpose.hpp"
+
 #include <stdexcept>
+
 #include "nn/stats/stats.hpp"
-#include "nn/engines/iengine.hpp"
 
 namespace tunx {
 
-Vec<Vec<size_t>> TransposeOp::output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config) {
+Vec<Vec<size_t>> TransposeOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                            const Config &config) {
   if (input_shapes.empty()) throw std::invalid_argument("TransposeOp expects input shapes");
   auto out_shape = input_shapes[0];
   if (config.dim0 >= out_shape.size() || config.dim1 >= out_shape.size()) {
@@ -43,7 +45,7 @@ Tensor TransposeOp::forward(OpContext &ctx, const Tensor &input, const Config &c
   Tensor ws = ctx.make_tensor({ws_req.fwd_workspace}, ctx.io_dtype);
 
   ctx.engine->transpose(ctx.handle, stats, input.data_as<void>(), output.data_as<void>(),
-                     ws.data_as<void>(), type_desc);
+                        ws.data_as<void>(), type_desc);
 
   return output;
 }
@@ -70,7 +72,7 @@ Tensor TransposeOp::backward(OpContext &ctx, const Tensor &grad_output, const Co
   Tensor ws = ctx.make_tensor({ws_req.bwd_workspace}, ctx.io_dtype);
 
   ctx.engine->transpose(ctx.handle, stats, grad_output.data_as<void>(), grad_input.data_as<void>(),
-                     ws.data_as<void>(), type_desc);
+                        ws.data_as<void>(), type_desc);
 
   return grad_input;
 }

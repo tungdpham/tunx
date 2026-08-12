@@ -9,14 +9,15 @@ namespace tunx::test {
 template <typename LayerType>
 Graph compile_single_layer(LayerType &layer, IAllocator &allocator,
                            const std::string &input_uid = "input",
-                           const std::string &output_uid = "output") {
+                           const std::string &output_uid = "output",
+                           GraphOpts opts = GraphOpts{}) {
   Graph graph;
   Node input = graph.make_node(input_uid);
   graph.set_input(input);
   Node output = layer(input);
   output->set_uid(output_uid);
   graph.set_output(output);
-  graph.compile(allocator);
+  graph.compile(allocator, opts);
   return graph;
 }
 

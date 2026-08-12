@@ -380,7 +380,7 @@ protected:
     Tensor input_host = to_host(input);
     Tensor weight_host = to_host(weight);
 
-    math_embedding_fwd(input_host.data_as<float>(), weight_host.data_as<float>(),
+    math_embedding_fwd(input_host.data_as<int32_t>(), weight_host.data_as<float>(),
                        expected_output.data_as<float>(), stats.num_indices, stats.vocab_size,
                        stats.embed_dim, stats.padding_idx);
 
@@ -396,7 +396,7 @@ protected:
     Tensor input_host = to_host(input);
     Tensor grad_out_host = to_host(grad_output);
 
-    math_embedding_bwd(input_host.data_as<float>(), grad_out_host.data_as<float>(),
+    math_embedding_bwd(input_host.data_as<int32_t>(), grad_out_host.data_as<float>(),
                        expected_grad_weight.data_as<float>(), stats.num_indices, stats.vocab_size,
                        stats.embed_dim, stats.padding_idx);
 
@@ -1145,7 +1145,7 @@ TEST_F(CuDNNEngineTest, EmbeddingFwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
 
-  Tensor input({4}, DType_t::FP32, getGPU());
+  Tensor input({4}, DType_t::INT32, getGPU());
   Tensor weight({10, 8}, DType_t::FP32, getGPU());
   Tensor output({4, 8}, DType_t::FP32, getGPU());
 
@@ -1162,7 +1162,7 @@ TEST_F(CuDNNEngineTest, EmbeddingBwdReturnsCorrectResult) {
   size_t vocab_size = 10;
   size_t embed_dim = 8;
   size_t padding_idx = 0;
-  float host_input[] = {1.0f, 2.0f, 1.0f, 0.0f};
+  int32_t host_input[] = {1, 2, 1, 0};
 
   EmbeddingStats stats{
       .num_indices = num_indices,
@@ -1178,7 +1178,7 @@ TEST_F(CuDNNEngineTest, EmbeddingBwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getGPU());
 
-  Tensor input({num_indices}, DType_t::FP32, getGPU());
+  Tensor input({num_indices}, DType_t::INT32, getGPU());
   cudaMemcpy(input.data_as<void>(), host_input, sizeof(host_input), cudaMemcpyHostToDevice);
   Tensor grad_output({num_indices, embed_dim}, DType_t::FP32, getGPU());
   fill_normal(grad_output, 0.0, 0.2, 12345ULL);
