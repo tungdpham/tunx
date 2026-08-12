@@ -196,9 +196,62 @@ std::map<Edge, EdgeProfile> GraphExecutor::profile_forward(TensorBundle &input_m
   return edge_profiles;
 }
 
+ExecutionPlanStats GraphExecutor::profile_plan(TensorBundle &input_map, const ExecutionPlan &plan) {
+  std::map<std::string, Node> uid_to_node;
+  for (const auto &node : graph_.nodes_) {
+    uid_to_node[node->uid()] = node;
+  }
+  for (const auto &[uid, tensor] : input_map) {
+    auto it = uid_to_node.find(uid);
+    if (it == uid_to_node.end()) {
+      throw std::runtime_error("Input UID not found in graph: " + uid);
+    }
+    Tensor device_tensor = tensor;
+    if (tensor.device() != graph_.device()) {
+      device_tensor = to_device(tensor, graph_.device(), graph_.engine_handle_.get_stream());
+    }
+    set_data(it->second, device_tensor, data_ref_counts_[it->second]);
+  }
+
+  TensorBundle output_map;  // placeholder to ensure outputs arent prematurely deallocated
+
+  auto &allocator = graph_.workspace_allocator_;
+  size_t peak_usage = 0;
+  const size_t hook_id = allocator->add_allocation_hook(
+      [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
+
+  ExecutionPlanStats stats;
+
+  // assuming sorted topologically
+  for (const Edge &edge : plan.order) {
+    forward_edge(edge);
+    
+    EdgeMemStats edge_stat;
+    edge_stat.layer_name = edge->layer()->name();
+    edge_stat.allocated_mem = allocator->allocated();
+    edge_stat.reserved_mem = allocator->reserved();
+    edge_stat.unused_mem = allocator->unused();
+    stats.edge_stats.push_back(edge_stat);
+
+    for (const Node &consumer : edge->consumers()) {
+      if (graph_.is_output(consumer)) {
+        output_map.set(consumer->uid(), data(consumer));
+      }
+    }
+  }
+
+  allocator->remove_allocation_hook(hook_id);
+
+  // free memory for residuals since this is just profiling
+  residuals_.clear();
+
+  stats.peak_mem = peak_usage;
+  return stats;
+}
+
 void GraphExecutor::clear_grads() { grads_.clear(); }
 
-EdgeProfile GraphExecutor::forward_edge(Edge &edge) {
+EdgeProfile GraphExecutor::forward_edge(const Edge &edge) {
   auto &allocator = graph_.workspace_allocator_;
   Vec<Tensor> inputs;
   for (const auto &producer : edge->producers()) {
@@ -260,11 +313,11 @@ EdgeProfile GraphExecutor::forward_edge(Edge &edge) {
   }
   inputs = Vec<Tensor>();
   output_data = Vec<Tensor>();
-  profile.net_mem = usage_before - allocator->allocated();
+  profile.net_mem = allocator->allocated() - usage_before;
   return profile;
 }
 
-EdgeProfile GraphExecutor::backward_edge(Edge &edge) {
+EdgeProfile GraphExecutor::backward_edge(const Edge &edge) {
   auto &allocator = graph_.workspace_allocator_;
   Vec<Tensor> grad_outputs;
   for (const auto &consumer : edge->consumers()) {
@@ -308,7 +361,7 @@ EdgeProfile GraphExecutor::backward_edge(Edge &edge) {
   }
   profile.secondary_mem = 0;     // none since backward
   grad_outputs = Vec<Tensor>();  // free inputs;
-  profile.net_mem = usage_before - allocator->allocated();
+  profile.net_mem = allocator->allocated() - usage_before;
   return profile;
 }
 

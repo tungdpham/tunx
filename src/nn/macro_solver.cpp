@@ -31,7 +31,7 @@ bool operator<(const MacroNode &left, const MacroNode &right) { return rank(left
 
 ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_profiles) {
   const auto &edges = graph_.edges_;
-  
+
   std::map<Node, int> out_deg;
   for (const Edge &edge : edges) {
     for (const Node &producer : edge->producers()) {
@@ -48,20 +48,20 @@ ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_pr
     for (const Node &consumer : edge->consumers()) {
       node_to_producer_edges[consumer].push_back(edge->uid());
     }
-    
+
     deps[edge->uid()] = {};
     dependents[edge->uid()] = {};
-    
+
     const EdgeProfile &profile = edge_profiles.at(edge);
     MacroNode macro{
         edge->uid(),
         {edge},
         static_cast<long long>(profile.total_mem),
-        -static_cast<long long>(profile.net_mem),
+        static_cast<long long>(profile.net_mem),
     };
     macros.emplace(edge->uid(), std::move(macro));
   }
-  
+
   for (const Edge &child_edge : edges) {
     for (const Node &producer : child_edge->producers()) {
       for (const std::string &parent_uid : node_to_producer_edges[producer]) {
@@ -195,10 +195,8 @@ ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_pr
     while (true) {
       std::string best_child;
       for (const std::string &child : dependents.at(ancestor)) {
-        if (deps.at(child).size() != 1 || !(macros.at(child) < macros.at(ancestor)))
-          continue;
-        if (best_child.empty() || macros.at(child) < macros.at(best_child))
-          best_child = child;
+        if (deps.at(child).size() != 1 || !(macros.at(child) < macros.at(ancestor))) continue;
+        if (best_child.empty() || macros.at(child) < macros.at(best_child)) best_child = child;
       }
       if (best_child.empty()) return merged ? merge_upward(ancestor) : ancestor;
       ancestor = merge(ancestor, best_child, "branch");
@@ -274,7 +272,7 @@ ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_pr
 
   if (macros.contains(virtual_join_id)) {
     prepare_join(virtual_join_id);
-    for (const auto& terminal : deps.at(virtual_join_id)) {
+    for (const auto &terminal : deps.at(virtual_join_id)) {
       dependents.at(terminal).erase(virtual_join_id);
     }
     macros.erase(virtual_join_id);
@@ -306,7 +304,7 @@ ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_pr
       }
     }
   }
-  
+
   ExecutionPlan plan;
   plan.order = final_order;
   return plan;

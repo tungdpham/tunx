@@ -19,6 +19,10 @@ public:
   void clear_grads();
 
   std::map<Edge, EdgeProfile> profile_forward(TensorBundle &input_map);
+  ExecutionPlanStats profile_plan(TensorBundle &input_map, const ExecutionPlan &plan);
+
+  ExecutionPlan &active_plan() { return active_plan_; }
+  const ExecutionPlan &active_plan() const { return active_plan_; }
 
 private:
   struct PlanKey {
@@ -47,8 +51,8 @@ private:
   void set_grad(const Node &node, const Tensor &tensor, int ref_count);
   void accumulate_grad(const Node &node, const Tensor &tensor, int ref_count);
   void release_grad(const Node &node);
-  EdgeProfile forward_edge(Edge &edge);
-  EdgeProfile backward_edge(Edge &edge);
+  EdgeProfile forward_edge(const Edge &edge);
+  EdgeProfile backward_edge(const Edge &edge);
   void cleanup_released(std::map<Node, Entry> &entries);
 };
 

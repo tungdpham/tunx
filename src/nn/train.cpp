@@ -23,6 +23,9 @@
 #include "data_loading/batch_prefetcher.hpp"
 #include "device/pool_allocator.hpp"
 #include "device/stream.hpp"
+#include "nn/edge_profile.hpp"
+#include "nn/execution_plan.hpp"
+#include "nn/macro_solver.hpp"
 #include "nn/metrics_computer.hpp"
 #include "nn/metrics_logger.hpp"
 #include "threading/thread_wrapper.hpp"
@@ -50,6 +53,67 @@ void print_timing_table(const std::vector<std::pair<std::string, double>> &timin
   // Rows
   for (const auto &[layer, time_ms] : timings) {
     fmt::print("{:<25} | {:>10.3f} ms\n", layer, time_ms);
+  }
+}
+
+static void log_edge_profiles(GraphExecutor &executor, TensorBundle &inputs) {
+  std::map<Edge, EdgeProfile> profiles = executor.profile_forward(inputs);
+  fmt::print("\n{:=^80}\n", " Edge Profiles ");
+  fmt::print("{:<30} | {:>10} | {:>12} | {:>12}\n", "Layer Name", "Time (ms)", "Peak Mem (B)",
+             "Net Mem (B)");
+  fmt::print("{:-<30}-+-{:-<10}-+-{:-<12}-+-{:-<12}\n", "", "", "", "");
+  for (const auto &[edge, profile] : profiles) {
+    fmt::print("{:<30} | {:>10.3f} | {:>12} | {:>12}\n", edge->layer()->name(), profile.exec_time,
+               profile.total_mem, profile.net_mem);
+  }
+  fmt::print("{:=^80}\n\n", "");
+}
+
+static void log_execution_plan_stats(GraphExecutor &executor, Graph &graph, TensorBundle &inputs) {
+  ExecutionPlan naive_plan;
+  naive_plan.order = graph.edges();
+  auto naive_stats = executor.profile_plan(inputs, naive_plan);
+
+  std::map<Edge, EdgeProfile> profiles = executor.profile_forward(inputs);
+  tunx::MacroSolver solver(graph);
+  ExecutionPlan macro_plan = solver.find_order(profiles);
+  auto macro_stats = executor.profile_plan(inputs, macro_plan);
+
+  fmt::print("\n{:=^80}\n", " Execution Plan Stats ");
+  fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
+  fmt::print("Naive Path: ");
+  for (size_t i = 0; i < naive_plan.order.size(); ++i) {
+    fmt::print("{}", naive_plan.order[i]->layer()->name());
+    if (i != naive_plan.order.size() - 1) fmt::print(" -> ");
+  }
+  fmt::print("\n\n");
+
+  fmt::print("Macro Order Peak Memory: {} bytes\n", macro_stats.peak_mem);
+  fmt::print("Macro Path: ");
+  for (size_t i = 0; i < macro_plan.order.size(); ++i) {
+    fmt::print("{}", macro_plan.order[i]->layer()->name());
+    if (i != macro_plan.order.size() - 1) fmt::print(" -> ");
+  }
+  fmt::print("\n");
+  fmt::print("{:=^80}\n\n", "");
+
+  // log to csv
+  std::ofstream csv_file("execution_plan_stats.csv");
+  if (csv_file.is_open()) {
+    csv_file << "plan,step,layer_name,allocated_mem,reserved_mem,unused_mem\n";
+    for (size_t i = 0; i < naive_stats.edge_stats.size(); ++i) {
+      const auto &s = naive_stats.edge_stats[i];
+      csv_file << "naive," << i << "," << s.layer_name << "," << s.allocated_mem << ","
+               << s.reserved_mem << "," << s.unused_mem << "\n";
+    }
+    for (size_t i = 0; i < macro_stats.edge_stats.size(); ++i) {
+      const auto &s = macro_stats.edge_stats[i];
+      csv_file << "macro," << i << "," << s.layer_name << "," << s.allocated_mem << ","
+               << s.reserved_mem << "," << s.unused_mem << "\n";
+    }
+    csv_file.close();
+  } else {
+    std::cerr << "Failed to open execution_plan_stats.csv for writing.\n";
   }
 }
 
@@ -102,6 +166,11 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     Tensor device_labels = to_device(batch_labels, model_device);
 
     TensorBundle inputs{{"input", device_input}};
+
+    if (config.print_layer_profiling && epoch == 1 && num_batches == 1) {
+      log_edge_profiles(executor, inputs);
+      log_execution_plan_stats(executor, graph, inputs);
+    }
 
     TensorBundle outputs = executor.forward(inputs);
 
@@ -166,11 +235,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
         cout << ", PPL: " << setprecision(2) << *computed_metrics.perplexity;
       }
       cout << ", Batch Time: " << batch_duration.count() << "ms" << endl;
-      if (config.print_layer_profiling) {
-        // TODO: add timing for executor
-      }
     }
-    // TODO: clear timing after each iteration
   }
   cout << endl;
 
@@ -312,6 +377,12 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
       Tensor device_input = to_device(batch_data, model_device);
       Tensor device_labels = to_device(batch_labels, model_device);
       TensorBundle inputs{{"input", device_input}};
+
+      if (config.print_layer_profiling && steps == 0) {
+        auto &executor = graph.executor(0);
+        log_edge_profiles(executor, inputs);
+        log_execution_plan_stats(executor, graph, inputs);
+      }
 
       TensorBundle outputs = graph.forward(inputs);
 
