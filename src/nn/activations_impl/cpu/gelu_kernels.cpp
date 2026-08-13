@@ -9,7 +9,7 @@ namespace func {
 namespace cpu {
 
 template <typename T>
-void gelu(const T *input, T *output, size_t size) {
+void gelu_impl(const T *input, T *output, size_t size) {
   const double k0 = 0.7978845608028654;  // sqrt(2/pi)
   const double k1 = 0.044715;
 
@@ -22,7 +22,7 @@ void gelu(const T *input, T *output, size_t size) {
 }
 
 template <typename T>
-void gelu_gradient(const T *input, const T *grad_output, T *grad_input, size_t size) {
+void gelu_gradient_impl(const T *input, const T *grad_output, T *grad_input, size_t size) {
   const double k0 = 0.7978845608028654;  // sqrt(2/pi)
   const double k1 = 0.044715;
 
@@ -44,11 +44,18 @@ void gelu_gradient(const T *input, const T *grad_output, T *grad_input, size_t s
   }
 }
 
-#define INSTANTIATE(T)                                           \
-  template void gelu<T>(const T *input, T *output, size_t size); \
-  template void gelu_gradient<T>(const T *input, const T *grad_output, T *grad_input, size_t size);
-#include "macros/floating_type_instantiation.hpp"
-#undef INSTANTIATE
+void gelu(DType_t dtype, const void *input, void *output, size_t size) {
+  DISPATCH_DTYPE(dtype, T,
+                 gelu_impl<T>(static_cast<const T *>(input), static_cast<T *>(output), size));
+}
+
+void gelu_gradient(DType_t dtype, const void *input, const void *grad_output, void *grad_input,
+                   size_t size) {
+  DISPATCH_DTYPE(
+      dtype, T,
+      gelu_gradient_impl<T>(static_cast<const T *>(input), static_cast<const T *>(grad_output),
+                            static_cast<T *>(grad_input), size));
+}
 
 }  // namespace cpu
 }  // namespace func

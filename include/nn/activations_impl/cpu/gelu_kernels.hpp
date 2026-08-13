@@ -1,16 +1,15 @@
 #pragma once
 
 #include <cstddef>
+#include "type/type.hpp"
 
 namespace tunx {
 namespace func {
 namespace cpu {
 
-template <typename T>
-void gelu(const T *input, T *output, size_t size);
+void gelu(DType_t dtype, const void *input, void *output, size_t size);
 
-template <typename T>
-void gelu_gradient(const T *input, const T *grad_output, T *grad_input, size_t size);
+void gelu_gradient(DType_t dtype, const void *input, const void *grad_output, void *grad_input, size_t size);
 
 }  // namespace cpu
 }  // namespace func

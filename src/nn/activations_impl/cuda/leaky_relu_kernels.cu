@@ -6,6 +6,13 @@
 namespace tunx {
 namespace cuda {
 
+template <typename T>
+void leaky_relu_impl(const T* input, T* output, size_t size, T negative_slope, cudaStream_t stream);
+
+template <typename T>
+void leaky_relu_gradient_impl(const T* input, const T* grad_output, T* grad_input, size_t size,
+                              T negative_slope, cudaStream_t stream);
+
 constexpr int BLOCK_SIZE = 256;
 
 __global__ void leaky_relu_kernel(const float* input, float* output, size_t size,
@@ -42,31 +49,33 @@ __global__ void leaky_relu_gradient_kernel_double(const double* input, const dou
 }
 
 template <>
-void leaky_relu<float>(const float* input, float* output, size_t size, float negative_slope,
-                       cudaStream_t stream) {
+void leaky_relu_impl<float>(const float* input, float* output, size_t size, float negative_slope,
+                            cudaStream_t stream) {
   const int numBlocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
   leaky_relu_kernel<<<numBlocks, BLOCK_SIZE, 0, stream>>>(input, output, size, negative_slope);
 }
 
 template <>
-void leaky_relu_gradient<float>(const float* input, const float* grad_output, float* grad_input,
-                                size_t size, float negative_slope, cudaStream_t stream) {
+void leaky_relu_gradient_impl<float>(const float* input, const float* grad_output,
+                                     float* grad_input, size_t size, float negative_slope,
+                                     cudaStream_t stream) {
   const int numBlocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
   leaky_relu_gradient_kernel<<<numBlocks, BLOCK_SIZE, 0, stream>>>(input, grad_output, grad_input,
                                                                    size, negative_slope);
 }
 
 template <>
-void leaky_relu<double>(const double* input, double* output, size_t size, double negative_slope,
-                        cudaStream_t stream) {
+void leaky_relu_impl<double>(const double* input, double* output, size_t size,
+                             double negative_slope, cudaStream_t stream) {
   const int numBlocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
   leaky_relu_kernel_double<<<numBlocks, BLOCK_SIZE, 0, stream>>>(input, output, size,
                                                                  negative_slope);
 }
 
 template <>
-void leaky_relu_gradient<double>(const double* input, const double* grad_output, double* grad_input,
-                                 size_t size, double negative_slope, cudaStream_t stream) {
+void leaky_relu_gradient_impl<double>(const double* input, const double* grad_output,
+                                      double* grad_input, size_t size, double negative_slope,
+                                      cudaStream_t stream) {
   const int numBlocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
   leaky_relu_gradient_kernel_double<<<numBlocks, BLOCK_SIZE, 0, stream>>>(
       input, grad_output, grad_input, size, negative_slope);
@@ -93,16 +102,16 @@ __global__ void leaky_relu_gradient_half_scalar_kernel(const fp16* input, const 
 }
 
 template <>
-void leaky_relu<fp16>(const fp16* input, fp16* output, size_t size, fp16 negative_slope,
-                      cudaStream_t stream) {
+void leaky_relu_impl<fp16>(const fp16* input, fp16* output, size_t size, fp16 negative_slope,
+                           cudaStream_t stream) {
   const int numBlocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
   leaky_relu_half_scalar_kernel<<<numBlocks, BLOCK_SIZE, 0, stream>>>(input, output, size,
                                                                       negative_slope);
 }
 
 template <>
-void leaky_relu_gradient<fp16>(const fp16* input, const fp16* grad_output, fp16* grad_input,
-                               size_t size, fp16 negative_slope, cudaStream_t stream) {
+void leaky_relu_gradient_impl<fp16>(const fp16* input, const fp16* grad_output, fp16* grad_input,
+                                    size_t size, fp16 negative_slope, cudaStream_t stream) {
   const int numBlocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
   leaky_relu_gradient_half_scalar_kernel<<<numBlocks, BLOCK_SIZE, 0, stream>>>(
       input, grad_output, grad_input, size, negative_slope);
@@ -128,19 +137,35 @@ __global__ void leaky_relu_gradient_bf16_scalar_kernel(const bf16* input, const 
 }
 
 template <>
-void leaky_relu<bf16>(const bf16* input, bf16* output, size_t size, bf16 negative_slope,
-                      cudaStream_t stream) {
+void leaky_relu_impl<bf16>(const bf16* input, bf16* output, size_t size, bf16 negative_slope,
+                           cudaStream_t stream) {
   const int numBlocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
   leaky_relu_bf16_scalar_kernel<<<numBlocks, BLOCK_SIZE, 0, stream>>>(input, output, size,
                                                                       negative_slope);
 }
 
 template <>
-void leaky_relu_gradient<bf16>(const bf16* input, const bf16* grad_output, bf16* grad_input,
-                               size_t size, bf16 negative_slope, cudaStream_t stream) {
+void leaky_relu_gradient_impl<bf16>(const bf16* input, const bf16* grad_output, bf16* grad_input,
+                                    size_t size, bf16 negative_slope, cudaStream_t stream) {
   const int numBlocks = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
   leaky_relu_gradient_bf16_scalar_kernel<<<numBlocks, BLOCK_SIZE, 0, stream>>>(
       input, grad_output, grad_input, size, negative_slope);
+}
+
+void leaky_relu(DType_t dtype, const void* input, void* output, size_t size, double negative_slope,
+                cudaStream_t stream) {
+  DISPATCH_DTYPE(dtype, T,
+                 leaky_relu_impl<T>(static_cast<const T*>(input), static_cast<T*>(output), size,
+                                    static_cast<T>(negative_slope), stream));
+}
+
+void leaky_relu_gradient(DType_t dtype, const void* input, const void* grad_output,
+                         void* grad_input, size_t size, double negative_slope,
+                         cudaStream_t stream) {
+  DISPATCH_DTYPE(dtype, T,
+                 leaky_relu_gradient_impl<T>(
+                     static_cast<const T*>(input), static_cast<const T*>(grad_output),
+                     static_cast<T*>(grad_input), size, static_cast<T>(negative_slope), stream));
 }
 
 }  // namespace cuda

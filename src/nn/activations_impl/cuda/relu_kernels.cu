@@ -90,7 +90,7 @@ __global__ void relu_gradient_tail_kernel(const T* input, const T* grad_output, 
 }
 
 template <typename T>
-void relu(const T* input, T* output, size_t size, cudaStream_t stream) {
+void relu_impl(const T* input, T* output, size_t size, cudaStream_t stream) {
   if (size == 0) return;
 
   constexpr int VecSize = VectoredTraits<T>::size;
@@ -111,8 +111,8 @@ void relu(const T* input, T* output, size_t size, cudaStream_t stream) {
 }
 
 template <typename T>
-void relu_gradient(const T* input, const T* grad_output, T* grad_input, size_t size,
-                   cudaStream_t stream) {
+void relu_gradient_impl(const T* input, const T* grad_output, T* grad_input, size_t size,
+                        cudaStream_t stream) {
   if (size == 0) return;
 
   constexpr int VecSize = VectoredTraits<T>::size;
@@ -133,14 +133,18 @@ void relu_gradient(const T* input, const T* grad_output, T* grad_input, size_t s
   }
 }
 
-#define INSTANTIATE(T)                                                                             \
-  template void relu<T>(const T* input, T* output, size_t size, cudaStream_t stream);              \
-  template void relu_gradient<T>(const T* input, const T* grad_output, T* grad_input, size_t size, \
-                                 cudaStream_t stream);
+void relu(DType_t dtype, const void* input, void* output, size_t size, cudaStream_t stream) {
+  DISPATCH_DTYPE(dtype, T,
+                 relu_impl<T>(static_cast<const T*>(input), static_cast<T*>(output), size, stream));
+}
 
-#include "macros/floating_type_instantiation.hpp"
-
-#undef INSTANTIATE
+void relu_gradient(DType_t dtype, const void* input, const void* grad_output, void* grad_input,
+                   size_t size, cudaStream_t stream) {
+  DISPATCH_DTYPE(
+      dtype, T,
+      relu_gradient_impl<T>(static_cast<const T*>(input), static_cast<const T*>(grad_output),
+                            static_cast<T*>(grad_input), size, stream));
+}
 
 }  // namespace cuda
 }  // namespace tunx

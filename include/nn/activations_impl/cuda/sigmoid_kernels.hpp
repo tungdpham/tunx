@@ -4,14 +4,13 @@
 #include <cuda_runtime.h>
 
 #include <cstddef>
+#include "type/type.hpp"
 
 namespace tunx {
 namespace cuda {
-template <typename T>
-void sigmoid(const T *input, T *output, size_t size, cudaStream_t stream);
+void sigmoid(DType_t dtype, const void *input, void *output, size_t size, cudaStream_t stream);
 
-template <typename T>
-void sigmoid_gradient(const T *input, const T *grad_output, T *grad_input, size_t size,
+void sigmoid_gradient(DType_t dtype, const void *input, const void *grad_output, void *grad_input, size_t size,
                       cudaStream_t stream);
 }  // namespace cuda
 }  // namespace tunx
