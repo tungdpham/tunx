@@ -49,7 +49,6 @@ static Engine get_default_engine(Device &device) {
 }
 
 void Graph::compile(IAllocator &allocator, GraphOpts opts) {
-  clear_executors();
   sort();
   std::set<LayerImpl *> unique_layers;
   for (const auto &edge : edges_) {
@@ -112,7 +111,6 @@ Vec<std::string> Graph::output_uids() const {
 
 void Graph::add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producers,
                      const Vec<Node> &consumers) {
-  clear_executors();
   Edge edge = std::make_shared<EdgeImpl>(layer, producers, consumers);
   edge->set_uid(generate_edge_uid());
   edges_.push_back(edge);
@@ -226,14 +224,6 @@ void Graph::save_dot(const std::string &filename) const {
   output << "}\n";
 }
 
-TensorBundle Graph::forward(TensorBundle &input_map, size_t pid) {
-  return executor(pid).forward(input_map);
-}
-
-TensorBundle Graph::backward(TensorBundle &output_grad_map, size_t pid) {
-  return executor(pid).backward(output_grad_map);
-}
-
 Node Graph::make_node(std::string uid) {
   if (uid.empty()) {
     uid = generate_node_uid();
@@ -258,7 +248,6 @@ void Graph::set_input(Node node) {
   if (std::find(nodes_.begin(), nodes_.end(), node) == nodes_.end()) {
     throw std::runtime_error("Input node does not belong to graph");
   }
-  clear_executors();
   input_nodes_.insert(node);
 }
 
@@ -266,7 +255,6 @@ void Graph::set_output(Node node) {
   if (std::find(nodes_.begin(), nodes_.end(), node) == nodes_.end()) {
     throw std::runtime_error("Output node does not belong to graph");
   }
-  clear_executors();
   output_nodes_.insert(node);
 }
 
@@ -274,15 +262,6 @@ Node Graph::input(const std::string &uid) {
   Node node = make_node(uid);
   set_input(node);
   return node;
-}
-
-void Graph::zero_grads() {
-  for (auto &[pid, executor] : executors_) {
-    executor->clear_grads();
-  }
-  for (const auto &edge : edges_) {
-    edge->layer()->zero_grads();
-  }
 }
 
 Graph::Graph(Graph &&other) noexcept
@@ -297,8 +276,7 @@ Graph::Graph(Graph &&other) noexcept
       mode_(other.mode_),
       node_count_(other.node_count_),
       used_node_uids_(std::move(other.used_node_uids_)),
-      used_edge_uids_(std::move(other.used_edge_uids_)),
-      executors_(std::move(other.executors_)) {}
+      used_edge_uids_(std::move(other.used_edge_uids_)) {}
 
 Vec<Param> Graph::params() {
   Vec<Param> params;
@@ -328,21 +306,7 @@ std::string Graph::generate_edge_uid() {
   return uid;
 }
 
-Vec<Node> Graph::inputs() { return Vec<Node>(input_nodes_.begin(), input_nodes_.end()); }
-
-Vec<Node> Graph::outputs() { return Vec<Node>(output_nodes_.begin(), output_nodes_.end()); }
-
 Graph::~Graph() = default;
-
-GraphExecutor &Graph::executor(size_t pid) {
-  auto [it, inserted] = executors_.try_emplace(pid, nullptr);
-  if (inserted) {
-    it->second = std::make_unique<GraphExecutor>(*this);
-  }
-  return *it->second;
-}
-
-void Graph::clear_executors() { executors_.clear(); }
 
 namespace {
 

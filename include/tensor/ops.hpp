@@ -989,7 +989,7 @@ inline void load(Tensor &input, std::istream &in) {
     Tensor host_tensor(shape, dtype, DeviceAllocator::instance(getHost()));
     in.read(reinterpret_cast<char *>(host_tensor.data_as<uchar>()),
             input.size() * get_dtype_size(dtype));
-    copy(host_tensor, input);
+    cd_copy(host_tensor, input);
   }
 }
 

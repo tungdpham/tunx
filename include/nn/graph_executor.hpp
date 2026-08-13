@@ -5,24 +5,30 @@
 #include "nn/edge.hpp"
 #include "nn/edge_profile.hpp"
 #include "nn/execution_plan.hpp"
+#include "nn/graph.hpp"
+#include "nn/layer.hpp"
 #include "nn/tensor_bundle.hpp"
 
 namespace tunx {
-class Graph;
 
 class GraphExecutor {
 public:
   explicit GraphExecutor(Graph &graph);
 
+  Graph &graph() { return graph_; }
+  const Graph &graph() const { return graph_; }
+
   TensorBundle forward(TensorBundle &input_map);
   TensorBundle backward(TensorBundle &output_grad_map);
-  void clear_grads();
 
   std::map<Edge, EdgeProfile> profile_forward(TensorBundle &input_map);
   ExecutionPlanStats profile_plan(TensorBundle &input_map, const ExecutionPlan &plan);
 
   ExecutionPlan &active_plan() { return active_plan_; }
   const ExecutionPlan &active_plan() const { return active_plan_; }
+
+  std::map<Edge, Residuals> &residuals() { return residuals_; }
+  const std::map<Edge, Residuals> &residuals() const { return residuals_; }
 
 private:
   struct PlanKey {

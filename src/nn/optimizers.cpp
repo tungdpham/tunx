@@ -42,7 +42,9 @@ void Optimizer::zero_grads() {
   if (!graph_) {
     throw std::runtime_error("Optimizer not attached to any graph or graph has been destroyed");
   }
-  graph_->zero_grads();
+  for (Param &param : params_) {
+    param.zero_grad();
+  }
 }
 
 void SGD::on_attach() {

@@ -40,10 +40,7 @@ struct Result {
 
 Result validate_model(Graph &graph, std::unique_ptr<Dataset> &val_dataset,
                       const std::unique_ptr<Loss> &criterion, const TrainingConfig &config,
-                      MetricsLogger &logger, int epoch);
-
-Result validate_model(Graph &graph, std::unique_ptr<Dataset> &val_dataset,
-                      const std::unique_ptr<Loss> &criterion, const TrainingConfig &config);
+                      MetricsLogger *logger = nullptr, int epoch = 1);
 
 void train_model(Graph &graph, std::unique_ptr<Dataset> &train_dataset,
                  std::unique_ptr<Dataset> &val_dataset, std::unique_ptr<Optimizer> &optimizer,

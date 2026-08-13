@@ -5,8 +5,8 @@
   "progress_print_interval": 10,
   "num_threads": 8,
   "profiler_type": "NONE",
-  "print_layer_profiling": false,
-  "print_layer_memory_usage": false,
+  "print_layer_profiling": true,
+  "print_layer_memory_usage": true,
   "num_microbatches": 2,
   "device": "CUDA:0",
   "model_name": "gpt2_small",
@@ -34,5 +34,17 @@
   },
   "loss": {
     "type": "logsoftmax_cross_entropy"
+  },
+  "log_mode": {
+    "log_loss": true,
+    "log_accuracy": true,
+    "log_precision": false,
+    "log_recall": false,
+    "log_f1_score": false,
+    "log_perplexity": true,
+    "log_top_k_accuracy": false,
+    "log_mae": false,
+    "log_mse": false,
+    "log_rmse": false
   }
 }

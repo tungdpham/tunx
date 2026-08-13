@@ -25,9 +25,11 @@
 #include "device/stream.hpp"
 #include "nn/edge_profile.hpp"
 #include "nn/execution_plan.hpp"
+#include "nn/graph_executor.hpp"
 #include "nn/macro_solver.hpp"
 #include "nn/metrics_computer.hpp"
 #include "nn/metrics_logger.hpp"
+#include "nn/tensor_bundle.hpp"
 #include "threading/thread_wrapper.hpp"
 #include "type/type.hpp"
 
@@ -56,7 +58,8 @@ void print_timing_table(const std::vector<std::pair<std::string, double>> &timin
   }
 }
 
-static void log_edge_profiles(GraphExecutor &executor, TensorBundle &inputs) {
+static void log_edge_profiles(GraphExecutor &executor, TensorBundle &inputs,
+                              std::unique_ptr<CsvLogger> &csv_logger) {
   std::map<Edge, EdgeProfile> profiles = executor.profile_forward(inputs);
   fmt::print("\n{:=^80}\n", " Edge Profiles ");
   fmt::print("{:<30} | {:>10} | {:>12} | {:>12}\n", "Layer Name", "Time (ms)", "Peak Mem (B)",
@@ -67,15 +70,27 @@ static void log_edge_profiles(GraphExecutor &executor, TensorBundle &inputs) {
                profile.total_mem, profile.net_mem);
   }
   fmt::print("{:=^80}\n\n", "");
+
+  if (csv_logger) {
+    for (const auto &[edge, profile] : profiles) {
+      std::unordered_map<std::string, std::string> row = {
+          {"layer_name", edge->layer()->name()},
+          {"time_ms", std::to_string(profile.exec_time)},
+          {"peak_mem_b", std::to_string(profile.total_mem)},
+          {"net_mem_b", std::to_string(profile.net_mem)}};
+      csv_logger->log(row);
+    }
+  }
 }
 
-static void log_execution_plan_stats(GraphExecutor &executor, Graph &graph, TensorBundle &inputs) {
+static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inputs,
+                                     std::unique_ptr<CsvLogger> &csv_logger) {
   ExecutionPlan naive_plan;
-  naive_plan.order = graph.edges();
+  naive_plan.order = executor.graph().edges();
   auto naive_stats = executor.profile_plan(inputs, naive_plan);
 
   std::map<Edge, EdgeProfile> profiles = executor.profile_forward(inputs);
-  tunx::MacroSolver solver(graph);
+  tunx::MacroSolver solver(executor.graph());
   ExecutionPlan macro_plan = solver.find_order(profiles);
   auto macro_stats = executor.profile_plan(inputs, macro_plan);
 
@@ -97,31 +112,38 @@ static void log_execution_plan_stats(GraphExecutor &executor, Graph &graph, Tens
   fmt::print("\n");
   fmt::print("{:=^80}\n\n", "");
 
-  // log to csv
-  std::ofstream csv_file("execution_plan_stats.csv");
-  if (csv_file.is_open()) {
-    csv_file << "plan,step,layer_name,allocated_mem,reserved_mem,unused_mem\n";
+  if (csv_logger) {
     for (size_t i = 0; i < naive_stats.edge_stats.size(); ++i) {
       const auto &s = naive_stats.edge_stats[i];
-      csv_file << "naive," << i << "," << s.layer_name << "," << s.allocated_mem << ","
-               << s.reserved_mem << "," << s.unused_mem << "\n";
+      std::unordered_map<std::string, std::string> row = {
+          {"plan", "naive"},
+          {"step", std::to_string(i)},
+          {"layer_name", s.layer_name},
+          {"allocated_mem", std::to_string(s.allocated_mem)},
+          {"reserved_mem", std::to_string(s.reserved_mem)},
+          {"unused_mem", std::to_string(s.unused_mem)}};
+      csv_logger->log(row);
     }
     for (size_t i = 0; i < macro_stats.edge_stats.size(); ++i) {
       const auto &s = macro_stats.edge_stats[i];
-      csv_file << "macro," << i << "," << s.layer_name << "," << s.allocated_mem << ","
-               << s.reserved_mem << "," << s.unused_mem << "\n";
+      std::unordered_map<std::string, std::string> row = {
+          {"plan", "macro"},
+          {"step", std::to_string(i)},
+          {"layer_name", s.layer_name},
+          {"allocated_mem", std::to_string(s.allocated_mem)},
+          {"reserved_mem", std::to_string(s.reserved_mem)},
+          {"unused_mem", std::to_string(s.unused_mem)}};
+      csv_logger->log(row);
     }
-    csv_file.close();
-  } else {
-    std::cerr << "Failed to open execution_plan_stats.csv for writing.\n";
   }
 }
 
 static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
                           unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
                           unique_ptr<Scheduler> &scheduler, const TrainingConfig &config,
-                          MetricsLogger &logger, int epoch,
-                          std::unique_ptr<CsvLogger> &mem_logger) {
+                          MetricsLogger &logger, int epoch, std::unique_ptr<CsvLogger> &mem_logger,
+                          std::unique_ptr<CsvLogger> &profiles_logger,
+                          std::unique_ptr<CsvLogger> &plan_logger) {
   auto train_start = chrono::high_resolution_clock::now();
   Tensor batch_data, batch_labels;
   Device &model_device = graph.device();
@@ -155,7 +177,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
   graph.save_dot("current_graph.dot");
 
-  auto &executor = graph.executor(0);
+  GraphExecutor executor(graph);
 
   cout << "Training batches: " << train_dataset->size() << endl;
   while (get_next(batch_data, batch_labels) &&
@@ -168,8 +190,8 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     TensorBundle inputs{{"input", device_input}};
 
     if (config.print_layer_profiling && epoch == 1 && num_batches == 1) {
-      log_edge_profiles(executor, inputs);
-      log_execution_plan_stats(executor, graph, inputs);
+      log_edge_profiles(executor, inputs, profiles_logger);
+      log_execution_plan_stats(executor, inputs, plan_logger);
     }
 
     TensorBundle outputs = executor.forward(inputs);
@@ -200,7 +222,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     }
 
     TensorBundle output_grads{{"output", loss_gradient}};
-    graph.backward(output_grads);
+    executor.backward(output_grads);
 
     if (++grad_accum_counter == config.gradient_accumulation_steps) {
       grad_accum_counter = 0;
@@ -251,12 +273,13 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 static void train_val(Graph &graph, unique_ptr<Dataset> &train_dataset,
                       unique_ptr<Dataset> &val_dataset, unique_ptr<Optimizer> &optimizer,
                       const unique_ptr<Loss> &criterion, unique_ptr<Scheduler> &scheduler,
-                      const TrainingConfig &config, std::unique_ptr<CsvLogger> &mem_logger) {
+                      const TrainingConfig &config, std::unique_ptr<CsvLogger> &mem_logger,
+                      MetricsLogger &logger, std::unique_ptr<CsvLogger> &profiles_logger,
+                      std::unique_ptr<CsvLogger> &plan_logger) {
   ThreadWrapper thread_wrapper({config.num_threads});
 
   double best_val_accuracy = 0.0;
   const std::string artifact_name = training_artifact_name(config);
-  MetricsLogger logger("tunx_" + artifact_name, config.log_dir, config.log_mode);
 
   thread_wrapper.execute([&]() -> void {
     for (int epoch = 0; epoch < config.epochs; ++epoch) {
@@ -265,11 +288,11 @@ static void train_val(Graph &graph, unique_ptr<Dataset> &train_dataset,
       // train phrase
       auto [avg_train_loss, avg_train_accuracy] =
           train_epoch(graph, train_dataset, optimizer, criterion, scheduler, config, logger,
-                      epoch + 1, mem_logger);
+                      epoch + 1, mem_logger, profiles_logger, plan_logger);
 
       // validation phrase
       auto [avg_val_loss, avg_val_accuracy] =
-          validate_model(graph, val_dataset, criterion, config, logger, epoch + 1);
+          validate_model(graph, val_dataset, criterion, config, &logger, epoch + 1);
 
       if (avg_val_accuracy > best_val_accuracy) {
         best_val_accuracy = avg_val_accuracy;
@@ -320,7 +343,9 @@ static void train_val(Graph &graph, unique_ptr<Dataset> &train_dataset,
 static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
                        const unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
                        const unique_ptr<Scheduler> &scheduler, const TrainingConfig &config,
-                       std::unique_ptr<CsvLogger> &mem_logger) {
+                       std::unique_ptr<CsvLogger> &mem_logger, MetricsLogger &logger,
+                       std::unique_ptr<CsvLogger> &profiles_logger,
+                       std::unique_ptr<CsvLogger> &plan_logger) {
   ThreadWrapper thread_wrapper({config.num_threads});
 
   Tensor batch_data, batch_labels;
@@ -334,7 +359,6 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
   int grad_accum_counter = 0;
   const std::string artifact_name = training_artifact_name(config);
-  MetricsLogger logger("tunx_" + artifact_name, config.log_dir, config.log_mode);
 
   train_dataset->reset();
   auto start_time = chrono::high_resolution_clock::now();
@@ -360,6 +384,7 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
     return train_dataset->get_batch(config.batch_size, data, labels);
   };
 
+  GraphExecutor executor(graph);
   thread_wrapper.execute([&]() -> void {
     for (int steps = 0; steps < config.max_steps; ++steps) {
       if (!get_next(batch_data, batch_labels)) {
@@ -379,12 +404,11 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
       TensorBundle inputs{{"input", device_input}};
 
       if (config.print_layer_profiling && steps == 0) {
-        auto &executor = graph.executor(0);
-        log_edge_profiles(executor, inputs);
-        log_execution_plan_stats(executor, graph, inputs);
+        log_edge_profiles(executor, inputs, profiles_logger);
+        log_execution_plan_stats(executor, inputs, plan_logger);
       }
 
-      TensorBundle outputs = graph.forward(inputs);
+      TensorBundle outputs = executor.forward(inputs);
 
       Tensor predictions = outputs.get("output");
       float loss;
@@ -401,7 +425,7 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
         loss_gradient *= (1.0f / static_cast<float>(config.gradient_accumulation_steps));
       }
       TensorBundle output_grads{{"output", loss_gradient}};
-      graph.backward(output_grads);
+      executor.backward(output_grads);
 
       auto batch_end = chrono::high_resolution_clock::now();
       auto batch_duration = chrono::duration_cast<chrono::milliseconds>(batch_end - batch_start);
@@ -451,7 +475,7 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
       if (!file.is_open()) {
         throw runtime_error("Failed to open file: " + filepath);
       }
-      graph.save_state(file);
+      executor.graph().save_state(file);
       file.close();
       cout << "Model saved to " << filepath << endl;
     } catch (const exception &e) {
@@ -473,29 +497,55 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
 
   bool is_val = config.max_steps == -1;
 
+  std::string timestamp = csv_timestamp();
+  std::string artifact_name = training_artifact_name(config);
   std::unique_ptr<CsvLogger> mem_logger;
   if (config.print_layer_memory_usage) {
-    std::string artifact_name = training_artifact_name(config);
     std::vector<std::string> headers = {"layer",        "peak_usage_bytes", "retained_bytes",
                                         "unused_bytes", "reserved_bytes",   "allocated"};
-    std::string mem_csv_path = "tunx_" + artifact_name + "_" + csv_timestamp() + "_memory.csv";
+    std::string mem_csv_path = "tunx_" + artifact_name + "_" + timestamp + "_memory.csv";
     if (!config.log_dir.empty()) {
       mem_csv_path = config.log_dir + "/" + mem_csv_path;
     }
     mem_logger = std::make_unique<CsvLogger>("memory", mem_csv_path, headers);
   }
 
+  std::unique_ptr<CsvLogger> profiles_logger;
+  std::unique_ptr<CsvLogger> plan_logger;
+  if (config.print_layer_profiling) {
+    std::vector<std::string> profile_headers = {"layer_name", "time_ms", "peak_mem_b", "net_mem_b"};
+    std::string profile_csv_path = "tunx_" + artifact_name + "_" + timestamp + "_edge_profiles.csv";
+    if (!config.log_dir.empty()) {
+      profile_csv_path = config.log_dir + "/" + profile_csv_path;
+    }
+    profiles_logger =
+        std::make_unique<CsvLogger>("edge_profiles", profile_csv_path, profile_headers);
+
+    std::vector<std::string> plan_headers = {"plan",          "step",         "layer_name",
+                                             "allocated_mem", "reserved_mem", "unused_mem"};
+    std::string plan_csv_path =
+        "tunx_" + artifact_name + "_" + timestamp + "_execution_plan_stats.csv";
+    if (!config.log_dir.empty()) {
+      plan_csv_path = config.log_dir + "/" + plan_csv_path;
+    }
+    plan_logger = std::make_unique<CsvLogger>("execution_plan_stats", plan_csv_path, plan_headers);
+  }
+
+  MetricsLogger metrics_logger("tunx_" + artifact_name + "_" + timestamp, config.log_dir,
+                               config.log_mode);
+
   if (is_val) {
     train_val(graph, train_dataset, val_dataset, optimizer, criterion, scheduler, config,
-              mem_logger);
+              mem_logger, metrics_logger, profiles_logger, plan_logger);
   } else {
-    train_step(graph, train_dataset, optimizer, criterion, scheduler, config, mem_logger);
+    train_step(graph, train_dataset, optimizer, criterion, scheduler, config, mem_logger,
+               metrics_logger, profiles_logger, plan_logger);
   }
 }
 
-static Result validate_model_impl(Graph &graph, unique_ptr<Dataset> &val_dataset,
-                                  const unique_ptr<Loss> &criterion, const TrainingConfig &config,
-                                  MetricsLogger *logger, int epoch) {
+Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
+                      const unique_ptr<Loss> &criterion, const TrainingConfig &config,
+                      MetricsLogger *logger, int epoch) {
   Tensor batch_data, batch_labels;
 
   graph.set_mode(ExecutionMode::EVAL);
@@ -507,10 +557,11 @@ static Result validate_model_impl(Graph &graph, unique_ptr<Dataset> &val_dataset
   int val_batches = 0;
   sref<Device> model_device = graph.device();
 
+  GraphExecutor executor(graph);
   while (val_dataset->get_batch(config.batch_size, batch_data, batch_labels)) {
     Tensor device_input = to_device(batch_data, model_device);
     TensorBundle inputs{{"input", device_input}};
-    TensorBundle outputs = graph.forward(inputs);
+    TensorBundle outputs = executor.forward(inputs);
     Tensor predictions = outputs.get("output");
 
     Tensor device_labels = to_device(batch_labels, model_device);
@@ -533,17 +584,6 @@ static Result validate_model_impl(Graph &graph, unique_ptr<Dataset> &val_dataset
   double avg_val_accuracy = val_corrects / val_dataset->size();
 
   return {avg_val_loss, avg_val_accuracy};
-}
-
-Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
-                      const unique_ptr<Loss> &criterion, const TrainingConfig &config,
-                      MetricsLogger &logger, int epoch) {
-  return validate_model_impl(graph, val_dataset, criterion, config, &logger, epoch);
-}
-
-Result validate_model(Graph &graph, unique_ptr<Dataset> &val_dataset,
-                      const unique_ptr<Loss> &criterion, const TrainingConfig &config) {
-  return validate_model_impl(graph, val_dataset, criterion, config, nullptr, 0);
 }
 
 }  // namespace tunx

@@ -7,6 +7,7 @@
 #include "device/stream.hpp"
 #include "nn/example_graphs.hpp"
 #include "nn/graph.hpp"
+#include "nn/graph_executor.hpp"
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/batchnorm.hpp"
 #include "nn/layers_impl/conv2d.hpp"
@@ -15,6 +16,7 @@
 #include "nn/loss.hpp"
 #include "nn/metrics.hpp"
 #include "nn/optimizers.hpp"
+#include "nn/tensor_bundle.hpp"
 #include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
@@ -113,6 +115,7 @@ signed main() {
   auto optimizer = OptimizerFactory::create_adam(0.01f, 0.9f, 0.999f);
 
   optimizer->attach(graph);
+  GraphExecutor executor(graph);
 
   int epochs = 20;
   for (int i = 0; i < epochs; ++i) {
@@ -130,7 +133,7 @@ signed main() {
           {"input", data},
       });
 
-      auto output_map = graph.forward(input_map);
+      auto output_map = executor.forward(input_map);
 
       Tensor output = output_map.get("output");
 
@@ -144,7 +147,7 @@ signed main() {
           {"output", grad_output},
       });
 
-      auto grad_input_map = graph.backward(output_grad_map);
+      auto grad_input_map = executor.backward(output_grad_map);
 
       // DEBUGGING
       // for (auto& edges : graph.edges()) {
@@ -183,7 +186,7 @@ signed main() {
           {"input", data},
       });
 
-      auto output_map = graph.forward(input_map);
+      auto output_map = executor.forward(input_map);
       Tensor output = output_map.get("output");
       float val_loss;
       criterion->compute_loss(output, labels, val_loss);

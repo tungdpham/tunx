@@ -36,7 +36,7 @@ public:
 
 protected:
   float learning_rate_;
-  Graph *graph_{nullptr};
+  Graph *graph_;
   Vec<Param> params_;
 
   virtual void on_attach() {}

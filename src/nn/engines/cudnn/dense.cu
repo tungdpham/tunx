@@ -267,9 +267,11 @@ void CuDNNEngine::dense_fwd(engine_handle backend_handle, const DenseStats& stat
   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = {
       {graph_struct.x, const_cast<void*>(input)},
       {graph_struct.w, const_cast<void*>(weight)},
-      {graph_struct.b, const_cast<void*>(bias)},
       {graph_struct.y, output},
   };
+  if (stats.use_bias) {
+    variant_pack[graph_struct.b] = const_cast<void*>(bias);
+  }
   auto status = graph_struct.graph->execute(handle, variant_pack, workspace);
   ensure_ok(status, "dense_fwd execute");
 }

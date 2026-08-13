@@ -28,6 +28,7 @@
 #include "message.hpp"
 #include "nn/blocks_impl/sequential.hpp"
 #include "nn/graph.hpp"
+#include "nn/graph_executor.hpp"
 #include "nn/layer_factory.hpp"
 #include "nn/optimizers.hpp"
 #include "nn/schedulers.hpp"
@@ -147,7 +148,8 @@ protected:
       case CommandType::FORWARD_JOB: {
         const Job &forward_job = message.get<Job>();
         TensorBundle inputs = forward_job.data;
-        auto outputs = graph_->forward(inputs, forward_job.pid);
+        GraphExecutor &executor = get_executor(forward_job.pid);
+        auto outputs = executor.forward(inputs);
         Job output_job(outputs, forward_job.pid);
         message = Message(CommandType::FORWARD_JOB, std::move(output_job));
         communicator_->send_message(std::move(message), next_stage_endpoint_);
@@ -155,7 +157,8 @@ protected:
       case CommandType::BACKWARD_JOB: {
         const Job &backward_job = message.get<Job>();
         TensorBundle output_grads = backward_job.data;
-        auto outputs = graph_->backward(output_grads, backward_job.pid);
+        GraphExecutor &executor = get_executor(backward_job.pid);
+        auto outputs = executor.backward(output_grads);
         if (prev_stage_endpoint_ == Endpoint::empty()) {
           // only send backward complete if there is no previous stage
           Message complete_msg(CommandType::BACKWARD_COMPLETE);
@@ -318,8 +321,16 @@ protected:
     }
   }
 
+  GraphExecutor &get_executor(size_t pid) {
+    if (executors_.find(pid) == executors_.end()) {
+      executors_[pid] = std::make_unique<GraphExecutor>(*graph_);
+    }
+    return *executors_[pid];
+  }
+
   DeviceID device_id_;
   std::unique_ptr<Graph> graph_;
+  std::map<size_t, std::unique_ptr<GraphExecutor>> executors_;
   std::unique_ptr<Optimizer> optimizer_;
   std::unique_ptr<Scheduler> scheduler_;
   std::unique_ptr<Communicator> communicator_;

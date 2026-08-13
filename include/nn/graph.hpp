@@ -4,7 +4,6 @@
 #include <initializer_list>
 #include <iosfwd>
 #include <iostream>
-#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -14,10 +13,8 @@
 #include "device/stream.hpp"
 #include "nn/edge.hpp"
 #include "nn/engines/engine_handle.hpp"
-#include "nn/graph_executor.hpp"
 #include "nn/node.hpp"
 #include "nn/param.hpp"
-#include "nn/tensor_bundle.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -56,8 +53,10 @@ public:
   engine_handle &handle() { return engine_handle_; }
   const engine_handle &handle() const { return engine_handle_; }
 
-  Vec<Node> nodes() const { return nodes_; }
-  Vec<Edge> edges() const { return edges_; }
+  const Vec<Node> &nodes() const { return nodes_; }
+  const Vec<Edge> &edges() const { return edges_; }
+  const std::set<Node> &outputs() const { return output_nodes_; }
+  const std::set<Node> &inputs() const { return input_nodes_; }
 
   Vec<std::string> input_uids() const;
   Vec<std::string> output_uids() const;
@@ -76,9 +75,6 @@ public:
   void sort();
   void save_dot(const std::string &filename) const;
 
-  TensorBundle forward(TensorBundle &input_map, size_t pid = 0);
-  TensorBundle backward(TensorBundle &output_grad_map, size_t pid = 0);
-
   Node make_node(std::string uid = "");
 
   void set_mode(ExecutionMode mode);
@@ -95,17 +91,9 @@ public:
     return {make_node(uids)...};
   }
 
-  void zero_grads();
-
   Vec<Param> params();
 
-  GraphExecutor &executor(size_t pid);
-  void clear_executors();
-
 private:
-  friend class GraphExecutor;
-  friend class MacroSolver;
-
   // backend
   IAllocator *param_allocator_;
   std::shared_ptr<DELAllocatorV2> workspace_allocator_;
@@ -122,13 +110,9 @@ private:
   size_t edge_count_ = 0;
   std::set<std::string> used_node_uids_;
   std::set<std::string> used_edge_uids_;
-  std::map<size_t, std::unique_ptr<GraphExecutor>> executors_;
 
   std::string generate_node_uid();
   std::string generate_edge_uid();
-
-  Vec<Node> inputs();
-  Vec<Node> outputs();
 };
 
 }  // namespace tunx

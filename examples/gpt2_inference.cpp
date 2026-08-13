@@ -8,6 +8,8 @@
 #include "device/device_manager.hpp"
 #include "nn/example_graphs.hpp"
 #include "nn/graph.hpp"
+#include "nn/graph_executor.hpp"
+#include "nn/tensor_bundle.hpp"
 #include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "tokenizer/tokenizer.hpp"
@@ -65,6 +67,7 @@ int main(int argc, char **argv) {
   cout << "\n[GENERATED]: " << flush;
 
   size_t num_to_generate = 50;
+  GraphExecutor executor(graph);
   for (size_t i = 0; i < num_to_generate; ++i) {
     Tensor model_input = Tensor({1, seq_len}, DType_t::FP32);
     std::fill(model_input.data_as<float>(), model_input.data_as<float>() + model_input.size(),
@@ -78,7 +81,7 @@ int main(int argc, char **argv) {
     }
 
     TensorBundle inputs{{"input", model_input}};
-    TensorBundle outputs = graph.forward(inputs);
+    TensorBundle outputs = executor.forward(inputs);
     Tensor output = outputs.get("output");
 
     // Transfer output to CPU for sampling

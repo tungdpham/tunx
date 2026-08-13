@@ -30,7 +30,7 @@ bool operator<(const MacroNode &left, const MacroNode &right) { return rank(left
 }  // namespace
 
 ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_profiles) {
-  const auto &edges = graph_.edges_;
+  const auto &edges = graph_.edges();
 
   std::map<Node, int> out_deg;
   for (const Edge &edge : edges) {
