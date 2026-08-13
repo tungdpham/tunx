@@ -865,23 +865,30 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
         step_start = time.time()
         inputs, targets = inputs.to(device), targets.to(device)
         
+        if inputs.is_floating_point():
+            inputs = inputs.to(cfg.get("io_dtype", torch.float32))
+            
         optimizer.zero_grad()
-        outputs = model(inputs)
         
-        if is_lm:
-            # GPT-2: outputs (B, T, vocab_size), targets (B, T)
-            B, T, V = outputs.shape
-            loss = criterion(outputs.view(B * T, V), targets.view(B * T))
-            # For accuracy, use the predictions
-            _, predicted = outputs.view(B * T, V).max(1)
-            correct = predicted.eq(targets.view(B * T)).sum().item()
-            total = B * T
-        else:
-            # Classification: outputs (B, num_classes), targets (B,)
-            loss = criterion(outputs, targets)
-            _, predicted = outputs.max(1)
-            correct = predicted.eq(targets).sum().item()
-            total = targets.size(0)
+        compute_dtype = cfg.get("compute_dtype", torch.float32)
+        with torch.autocast(device_type=device.type, dtype=compute_dtype, enabled=(compute_dtype != torch.float32)):
+            outputs = model(inputs)
+            
+            if is_lm:
+                # GPT-2: outputs (B, T, vocab_size), targets (B, T)
+                B, T, V = outputs.shape
+                loss = criterion(outputs.view(B * T, V), targets.view(B * T))
+                # For accuracy, use the predictions
+                _, predicted = outputs.view(B * T, V).max(1)
+                correct = predicted.eq(targets.view(B * T)).sum().item()
+                total = B * T
+            else:
+                # Classification: outputs (B, num_classes), targets (B,)
+                loss = criterion(outputs, targets)
+                _, predicted = outputs.max(1)
+                correct = predicted.eq(targets).sum().item()
+                total = targets.size(0)
+
         
         loss.backward()
         optimizer.step()
@@ -926,19 +933,26 @@ def validate(model, test_loader, criterion, device, cfg, epoch, val_writer):
     with torch.no_grad():
         for val_step, (inputs, targets) in enumerate(test_loader):
             inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
             
-            if is_lm:
-                B, T, V = outputs.shape
-                loss = criterion(outputs.view(B * T, V), targets.view(B * T))
-                _, predicted = outputs.view(B * T, V).max(1)
-                correct = predicted.eq(targets.view(B * T)).sum().item()
-                total = B * T
-            else:
-                loss = criterion(outputs, targets)
-                _, predicted = outputs.max(1)
-                correct = predicted.eq(targets).sum().item()
-                total = targets.size(0)
+            if inputs.is_floating_point():
+                inputs = inputs.to(cfg.get("io_dtype", torch.float32))
+                
+            compute_dtype = cfg.get("compute_dtype", torch.float32)
+            with torch.autocast(device_type=device.type, dtype=compute_dtype, enabled=(compute_dtype != torch.float32)):
+                outputs = model(inputs)
+                
+                if is_lm:
+                    B, T, V = outputs.shape
+                    loss = criterion(outputs.view(B * T, V), targets.view(B * T))
+                    _, predicted = outputs.view(B * T, V).max(1)
+                    correct = predicted.eq(targets.view(B * T)).sum().item()
+                    total = B * T
+                else:
+                    loss = criterion(outputs, targets)
+                    _, predicted = outputs.max(1)
+                    correct = predicted.eq(targets).sum().item()
+                    total = targets.size(0)
+
             
             val_loss_sum += loss.item() * total
             val_correct += correct
@@ -952,6 +966,21 @@ def validate(model, test_loader, criterion, device, cfg, epoch, val_writer):
     val_acc = 100.0 * val_correct / val_total
     return val_loss, val_acc
 
+
+def str_to_dtype(dtype_str: str):
+    if not dtype_str:
+        return torch.float32
+    dtype_str = str(dtype_str).upper()
+    if dtype_str in ("FP32", "FLOAT32"):
+        return torch.float32
+    elif dtype_str in ("FP16", "FLOAT16"):
+        return torch.float16
+    elif dtype_str in ("BF16", "BFLOAT16"):
+        return torch.bfloat16
+    elif dtype_str == "INT8":
+        return torch.int8
+    else:
+        return torch.float32
 
 def load_jsonc(path):
     with open(path, "r") as f:
@@ -1003,6 +1032,10 @@ def main():
     device_str = json_cfg.get("device", "cuda:0").lower()
     device = torch.device(device_str if torch.cuda.is_available() else "cpu")
     
+    cfg["io_dtype"] = str_to_dtype(json_cfg.get("io_dtype", "FP32"))
+    cfg["param_dtype"] = str_to_dtype(json_cfg.get("param_dtype", "FP32"))
+    cfg["compute_dtype"] = str_to_dtype(json_cfg.get("compute_dtype", "FP32"))
+    
     args.model = internal_model_name
     
     print(f">>> Running on device: {device}")
@@ -1036,15 +1069,15 @@ def main():
     
     # Create model
     print(">>> Creating model...")
-    model = cfg["model_cls"]().to(device)
+    model = cfg["model_cls"]().to(device).to(cfg["param_dtype"])
     total_params = sum(p.numel() for p in model.parameters())
     print(f">>> Parameters: {total_params:,}")
 
-    if hasattr(torch, "compile"):
-        print(">>> Compiling model with torch.compile...")
-        model = torch.compile(model, mode="reduce-overhead")
-    else:
-        print(">>> torch.compile is not supported in this PyTorch version.")
+    # if hasattr(torch, "compile"):
+    #     print(">>> Compiling model with torch.compile...")
+    #     model = torch.compile(model, mode="reduce-overhead")
+    # else:
+    #     print(">>> torch.compile is not supported in this PyTorch version.")
     
     # Loss function
     criterion = cfg["criterion"]
