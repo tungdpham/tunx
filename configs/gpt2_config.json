@@ -9,7 +9,7 @@
   "print_layer_memory_usage": false,
   "num_microbatches": 2,
   "device": "CUDA:0",
-  "model_name": "flash_gpt2_small",
+  "model_name": "gpt2_small",
   "model_path": "",
   "dataset_name": "open-web-text",
   "dataset_path": "../data/open-web-text",

@@ -631,7 +631,7 @@ Graph create_tiny_imagenet_flash_vit_graph(IAllocator &allocator, GraphOpts opts
 }
 
 Graph create_gpt2_graph(IAllocator &allocator, size_t embed_dim, size_t num_heads,
-                        size_t num_layers, bool use_flash, const std::string &name,
+                        size_t num_layers, const std::string &name,
                         GraphOpts opts) {
   constexpr size_t seq_len = 1024;
   constexpr size_t vocab_size = 50257;
@@ -823,22 +823,13 @@ void ExampleGraphs::register_defaults() {
   register_graph("imagenet100_resnet50", create_imagenet100_resnet50_graph);
 
   register_graph("gpt2_small", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 768, 12, 12, false, "gpt2_small", opts);
-  });
-  register_graph("flash_gpt2_small", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 768, 12, 12, true, "flash_gpt2_small", opts);
+    return create_gpt2_graph(allocator, 768, 12, 12, "gpt2_small", opts);
   });
   register_graph("gpt2_medium", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 1024, 16, 24, false, "gpt2_medium", opts);
-  });
-  register_graph("flash_gpt2_medium", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 1024, 16, 24, true, "flash_gpt2_medium", opts);
+    return create_gpt2_graph(allocator, 1024, 16, 24, "gpt2_medium", opts);
   });
   register_graph("gpt2_large", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 1280, 20, 36, false, "gpt2_large", opts);
-  });
-  register_graph("flash_gpt2_large", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 1280, 20, 36, true, "flash_gpt2_large", opts);
+    return create_gpt2_graph(allocator, 1280, 20, 36, "gpt2_large", opts);
   });
 }
 
