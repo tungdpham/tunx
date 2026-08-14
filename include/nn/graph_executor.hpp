@@ -22,8 +22,8 @@ public:
   TensorBundle forward(TensorBundle &input_map);
   TensorBundle backward(TensorBundle &output_grad_map);
 
-  std::map<Edge, EdgeProfile> profile_forward(TensorBundle &input_map);
-  ExecutionPlanStats profile_plan(TensorBundle &input_map, const ExecutionPlan &plan);
+  std::map<Edge, EdgeProfile> profile_edge_forward(TensorBundle &input_map);
+  ExecutionPlanStats profile_forward_plan(TensorBundle &input_map, const ExecutionPlan &plan);
 
   ExecutionPlan &active_plan() { return active_plan_; }
   const ExecutionPlan &active_plan() const { return active_plan_; }

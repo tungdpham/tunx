@@ -14,10 +14,10 @@ inline size_t random_act_size() {
 
 inline size_t random_ws_size() {
   int rand_val = rand() % 100;
-  if (rand_val < 30) return 512;
-  if (rand_val < 60) return 1024;
-  if (rand_val < 80) return 2048;
-  return 4096;
+  if (rand_val < 30) return 256;
+  if (rand_val < 60) return 512;
+  if (rand_val < 80) return 1024;
+  return 2048;
 }
 
 inline ActivationNode* build_random_diamond_dag(Graph& g, ActivationNode* input, int depth,
@@ -307,16 +307,16 @@ inline Graph tunx_v1_graph() {
   Graph g;
 
   // --- Activation sizes (BF16 = 2 bytes per element, batch=64) ---
-  constexpr size_t input_size = 19267584;        // 64 * 224 * 224 * 3 * 2
-  constexpr size_t stem_112 = 102760448;          // 64 * 112 * 112 * 64 * 2
-  constexpr size_t stem_56 = 25690112;            // 64 * 56 * 56 * 64 * 2
-  constexpr size_t asym_256 = 102760448;          // 64 * 56 * 56 * 256 * 2
-  constexpr size_t asym_512 = 205520896;          // 64 * 56 * 56 * 512 * 2
-  constexpr size_t asym_2048 = 822083584;         // 64 * 56 * 56 * 2048 * 2
-  constexpr size_t concat_size = 1130364928;      // 64 * 56 * 56 * 2816 * 2
-  constexpr size_t pool2_size = 282591232;        // 64 * 28 * 28 * 2816 * 2
-  constexpr size_t global_avg = 360448;           // 64 * 1 * 1 * 2816 * 2
-  constexpr size_t output_size = 12800;           // 64 * 100 * 2
+  constexpr size_t input_size = 19267584;     // 64 * 224 * 224 * 3 * 2
+  constexpr size_t stem_112 = 102760448;      // 64 * 112 * 112 * 64 * 2
+  constexpr size_t stem_56 = 25690112;        // 64 * 56 * 56 * 64 * 2
+  constexpr size_t asym_256 = 102760448;      // 64 * 56 * 56 * 256 * 2
+  constexpr size_t asym_512 = 205520896;      // 64 * 56 * 56 * 512 * 2
+  constexpr size_t asym_2048 = 822083584;     // 64 * 56 * 56 * 2048 * 2
+  constexpr size_t concat_size = 1130364928;  // 64 * 56 * 56 * 2816 * 2
+  constexpr size_t pool2_size = 282591232;    // 64 * 28 * 28 * 2816 * 2
+  constexpr size_t global_avg = 360448;       // 64 * 1 * 1 * 2816 * 2
+  constexpr size_t output_size = 12800;       // 64 * 100 * 2
 
   // --- Activations ---
   auto* a_input = g.add_act("input", input_size);

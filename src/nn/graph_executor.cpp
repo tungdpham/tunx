@@ -92,7 +92,7 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
   auto it = plans_.find(key);
   if (it == plans_.end()) {
     MacroSolver planner(graph_, os_);
-    std::map<Edge, EdgeProfile> edge_profiles = profile_forward(input_map);
+    std::map<Edge, EdgeProfile> edge_profiles = profile_edge_forward(input_map);
     ExecutionPlan plan = planner.find_order(edge_profiles);
     it = plans_.emplace(key, plan).first;
   }
@@ -161,7 +161,7 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
   return grad_input_map;
 }
 
-std::map<Edge, EdgeProfile> GraphExecutor::profile_forward(TensorBundle &input_map) {
+std::map<Edge, EdgeProfile> GraphExecutor::profile_edge_forward(TensorBundle &input_map) {
   std::map<Edge, EdgeProfile> edge_profiles;
   std::map<std::string, Node> uid_to_node;
   for (const auto &node : graph_.nodes()) {
@@ -198,7 +198,8 @@ std::map<Edge, EdgeProfile> GraphExecutor::profile_forward(TensorBundle &input_m
   return edge_profiles;
 }
 
-ExecutionPlanStats GraphExecutor::profile_plan(TensorBundle &input_map, const ExecutionPlan &plan) {
+ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,
+                                                       const ExecutionPlan &plan) {
   std::map<std::string, Node> uid_to_node;
   for (const auto &node : graph_.nodes()) {
     uid_to_node[node->uid()] = node;

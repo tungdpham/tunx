@@ -60,7 +60,7 @@ void print_timing_table(const std::vector<std::pair<std::string, double>> &timin
 
 static void log_edge_profiles(GraphExecutor &executor, TensorBundle &inputs,
                               std::unique_ptr<CsvLogger> &csv_logger) {
-  std::map<Edge, EdgeProfile> profiles = executor.profile_forward(inputs);
+  std::map<Edge, EdgeProfile> profiles = executor.profile_edge_forward(inputs);
   fmt::print("\n{:=^80}\n", " Edge Profiles ");
   fmt::print("{:<30} | {:>10} | {:>12} | {:>12}\n", "Layer Name", "Time (ms)", "Peak Mem (B)",
              "Net Mem (B)");
@@ -87,14 +87,14 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
                                      std::unique_ptr<CsvLogger> &csv_logger) {
   ExecutionPlan naive_plan;
   naive_plan.order = executor.graph().edges();
-  auto naive_stats = executor.profile_plan(inputs, naive_plan);
+  auto naive_stats = executor.profile_forward_plan(inputs, naive_plan);
 
   std::ofstream debug_stream("debug_macro_solver.txt");
 
-  std::map<Edge, EdgeProfile> profiles = executor.profile_forward(inputs);
+  std::map<Edge, EdgeProfile> profiles = executor.profile_edge_forward(inputs);
   tunx::MacroSolver solver(executor.graph(), &debug_stream);
   ExecutionPlan macro_plan = solver.find_order(profiles);
-  auto macro_stats = executor.profile_plan(inputs, macro_plan);
+  auto macro_stats = executor.profile_forward_plan(inputs, macro_plan);
 
   fmt::print("\n{:=^80}\n", " Execution Plan Stats ");
   fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
