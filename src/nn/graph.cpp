@@ -14,7 +14,6 @@
 #include <fstream>
 #include <istream>
 #include <ostream>
-
 #include <unordered_map>
 
 #include "device/device_type.hpp"
@@ -112,7 +111,11 @@ Vec<std::string> Graph::output_uids() const {
 void Graph::add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producers,
                      const Vec<Node> &consumers) {
   Edge edge = std::make_shared<EdgeImpl>(layer, producers, consumers);
-  edge->set_uid(generate_edge_uid());
+  std::string uid = edge->layer()->name();
+  if (used_edge_uids_.count(uid) > 0) {
+    uid = generate_edge_uid();
+  }
+  edge->set_uid(uid);
   edges_.push_back(edge);
 }
 

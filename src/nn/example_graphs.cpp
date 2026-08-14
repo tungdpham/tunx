@@ -265,30 +265,34 @@ Node asymmetric_block(Node input, Shape &shape, size_t out_channels, const std::
   Shape b1_shape = shape;
   Node b1 = conv2d(input, b1_shape, out_channels * 2, 1, 1, 1, 1, 0, 0, false, name + "_b1_conv_1");
   Shape b1_main_shape = b1_shape;
-  Node b1_main = conv2d(b1, b1_main_shape, out_channels * 8, 3, 3, 1, 1, 1, 1, false,
+  Node b1_main = conv2d(b1, b1_main_shape, out_channels * 4, 3, 3, 1, 1, 1, 1, false,
                         name + "_b1_conv_2_main");
   Shape b1_shortcut_shape = b1_shape;
-  Node b1_shortcut = conv2d(b1, b1_shortcut_shape, out_channels * 8, 3, 3, 1, 1, 1, 1, false,
+  Node b1_shortcut = conv2d(b1, b1_shortcut_shape, out_channels * 4, 3, 3, 1, 1, 1, 1, false,
                             name + "_b1_conv2_shortcut");
   b1 = b1_main + b1_shortcut;
   b1_shape = b1_main_shape;
+  b1 = maxpool2d(b1, b1_shape, 2, 2, 2, 2, 0, 0, name + "_b1_pool");
 
   Shape b2_shape = shape;
   Node b2 = conv2d(input, b2_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b2_conv1");
   b2 = batchnorm(b2, b2_shape, true, name + "_b2_bn1");
-  b2 = conv2d(b2, b2_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b2_conv1");
-  b2 = batchnorm(b2, b2_shape, true, name + "_b2_bn1");
+  b2 = conv2d(b2, b2_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b2_conv2");
+  b2 = batchnorm(b2, b2_shape, true, name + "_b2_bn2");
+  b2 = maxpool2d(b2, b2_shape, 2, 2, 2, 2, 0, 0, name + "_b2_pool");
 
   Shape b3_shape = shape;
   Node b3 = conv2d(input, b3_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b3_conv1");
   b3 = batchnorm(b3, b3_shape, true, name + "_b3_bn1");
   b3 = conv2d(b3, b3_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b3_conv2");
   b3 = batchnorm(b3, b3_shape, true, name + "_b3_bn2");
+  b3 = maxpool2d(b3, b3_shape, 2, 2, 2, 2, 0, 0, name + "_b3_pool");
 
   Shape b4_shape = shape;
-  Node b4 = maxpool2d(input, b4_shape, 3, 3, 1, 1, 1, 1, name + "_b4_pool");
+  Node b4 = avgpool2d(input, b4_shape, 3, 3, 1, 1, 1, 1, name + "_b4_avg_pool");
   b4 = conv2d(b4, b4_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b4_conv");
   b4 = batchnorm(b4, b4_shape, true, name + "_b4_bn");
+  b4 = maxpool2d(b4, b4_shape, 2, 2, 2, 2, 0, 0, name + "_b4_pool");
 
   auto [out, out_shape] =
       concat({b1, b2, b3, b4}, {b1_shape, b2_shape, b3_shape, b4_shape}, 3, name + "_concat");

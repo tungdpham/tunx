@@ -26,6 +26,7 @@ class OperationNode {
 private:
   std::string uuid_;
   size_t workspace_req_;
+  size_t residual_mem_;
   std::vector<ActivationNode*> inputs_;
   std::vector<ActivationNode*> outputs_;
   std::vector<ActivationNode*> cache_;
@@ -33,9 +34,10 @@ private:
 public:
   OperationNode(std::string uuid, size_t workspace_req, const std::vector<ActivationNode*>& inputs,
                 const std::vector<ActivationNode*>& outputs,
-                const std::vector<ActivationNode*>& cache)
+                const std::vector<ActivationNode*>& cache = {}, size_t residual_mem = 0)
       : uuid_(uuid),
         workspace_req_(workspace_req),
+        residual_mem_(residual_mem),
         inputs_(inputs),
         outputs_(outputs),
         cache_(cache) {}
@@ -43,6 +45,8 @@ public:
   const std::string& uuid() const { return uuid_; }
 
   size_t workspace_req() const { return workspace_req_; }
+
+  size_t residual_mem() const { return residual_mem_; }
 
   const std::vector<ActivationNode*>& inputs() const { return inputs_; }
 
@@ -69,9 +73,10 @@ public:
   OperationNode* add_op(std::string uuid, size_t workspace_req,
                         const std::vector<ActivationNode*>& inputs,
                         const std::vector<ActivationNode*>& outputs,
-                        const std::vector<ActivationNode*>& cache = {}) {
+                        const std::vector<ActivationNode*>& cache = {},
+                        size_t residual_mem = 0) {
     auto [op, inserted] =
-        ops_.insert({uuid, OperationNode(uuid, workspace_req, inputs, outputs, cache)});
+        ops_.insert({uuid, OperationNode(uuid, workspace_req, inputs, outputs, cache, residual_mem)});
     return inserted ? &op->second : nullptr;
   }
 

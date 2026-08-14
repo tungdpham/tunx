@@ -91,7 +91,7 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
 
   auto it = plans_.find(key);
   if (it == plans_.end()) {
-    MacroSolver planner(graph_);
+    MacroSolver planner(graph_, os_);
     std::map<Edge, EdgeProfile> edge_profiles = profile_forward(input_map);
     ExecutionPlan plan = planner.find_order(edge_profiles);
     it = plans_.emplace(key, plan).first;
@@ -283,8 +283,15 @@ EdgeProfile GraphExecutor::forward_edge(const Edge &edge) {
     profile.output_mem += output.num_bytes();
   }
   profile.input_mem = 0;
-  for (const Tensor &input : inputs) {
+  for (size_t i = 0; i < inputs.size(); ++i) {
+    const Tensor &input = inputs[i];
     profile.input_mem += input.num_bytes();
+    for (const auto &[name, residual] : residuals.tensors()) {
+      if (input.data_as<void>() == residual.data_as<void>()) {
+        profile.cached_inputs.push_back(edge->producers()[i]->uid());
+        break;
+      }
+    }
   }
   for (const auto &[name, residual] : residuals.tensors()) {
     bool is_input_or_output = false;

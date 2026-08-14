@@ -4,6 +4,7 @@
 #include <deque>
 #include <limits>
 #include <map>
+#include <ostream>
 #include <queue>
 #include <set>
 #include <stdexcept>
@@ -38,6 +39,14 @@ ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_pr
       out_deg[producer]++;
     }
   }
+
+  std::set<std::string> cached_tensors;
+  for (const auto &[edge, profile] : edge_profiles) {
+    for (const std::string &uid : profile.cached_inputs) {
+      cached_tensors.insert(uid);
+    }
+  }
+
 
   std::map<std::string, MacroNode> macros;
   std::map<std::string, std::set<std::string>> deps;
@@ -93,6 +102,7 @@ ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_pr
     for (const Edge &edge : macros.at(macro_id).edges) {
       for (const Node &input : edge->producers()) {
         if (out_deg[input] <= 1) continue;
+        if (cached_tensors.count(input->uid())) continue;
         int internal_consumers = 0;
         for (const Edge &inner_edge : macros.at(macro_id).edges) {
           for (const Node &inner_input : inner_edge->producers()) {
@@ -114,10 +124,12 @@ ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_pr
                      std::max(parent_macro.a, parent_macro.b + child_macro.a),
                      parent_macro.b + child_macro.b};
     merged.edges.insert(merged.edges.end(), child_macro.edges.begin(), child_macro.edges.end());
-    if (log_stream_)
-      *log_stream_ << "Merging " << reason << " " << parent << " with " << child << " into " << id
-                   << '\n';
-
+    if (log_stream_) {
+      *log_stream_ << "Merging parent " << parent << " [a: " << parent_macro.a
+                   << " b: " << parent_macro.b << "] with child " << child
+                   << " [a: " << child_macro.a << " b: " << child_macro.b << "] into " << id
+                   << " [a: " << merged.a << " b: " << merged.b << "] (reason: " << reason << ")\n";
+    }
     std::set<std::string> merged_deps = deps.at(parent);
     for (const std::string &dependency : deps.at(child)) {
       if (dependency != parent) merged_deps.insert(dependency);
@@ -287,6 +299,19 @@ ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_pr
 
   std::vector<Edge> final_order;
   std::set<std::string> executed;
+
+  if (log_stream_) {
+    *log_stream_ << "--- Macros before Kahn's ---\n";
+    for (const auto &[id, macro] : macros) {
+      *log_stream_ << "Macro " << id << " [rank " << rank(macro).first << ", " << rank(macro).second << "]:\n  Deps: ";
+      for (const auto &dep : deps.at(id)) *log_stream_ << dep << " ";
+      *log_stream_ << "\n  Dependents: ";
+      for (const auto &dep : dependents.at(id)) *log_stream_ << dep << " ";
+      *log_stream_ << "\n";
+    }
+    *log_stream_ << "----------------------------\n";
+  }
+
   const auto compare_ready = [&](const std::string &left, const std::string &right) {
     return macros.at(right) < macros.at(left);
   };

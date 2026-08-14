@@ -1,6 +1,7 @@
 #pragma once
 
 #include <map>
+#include <ostream>
 
 #include "nn/edge.hpp"
 #include "nn/edge_profile.hpp"
@@ -30,6 +31,8 @@ public:
   std::map<Edge, Residuals> &residuals() { return residuals_; }
   const std::map<Edge, Residuals> &residuals() const { return residuals_; }
 
+  void set_log_stream(std::ostream *os) { os_ = os; }
+
 private:
   struct PlanKey {
     std::map<Node, Vec<size_t>> input_shapes;
@@ -42,6 +45,7 @@ private:
   };
 
   Graph &graph_;
+  std::ostream *os_ = nullptr;
   ExecutionPlan active_plan_;
   std::map<PlanKey, ExecutionPlan> plans_;
   std::map<Node, Entry> data_;

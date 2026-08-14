@@ -89,8 +89,10 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
   naive_plan.order = executor.graph().edges();
   auto naive_stats = executor.profile_plan(inputs, naive_plan);
 
+  std::ofstream debug_stream("debug_macro_solver.txt");
+
   std::map<Edge, EdgeProfile> profiles = executor.profile_forward(inputs);
-  tunx::MacroSolver solver(executor.graph());
+  tunx::MacroSolver solver(executor.graph(), &debug_stream);
   ExecutionPlan macro_plan = solver.find_order(profiles);
   auto macro_stats = executor.profile_plan(inputs, macro_plan);
 

@@ -1,8 +1,6 @@
 #pragma once
 
-#include <cstddef>
 #include <ostream>
-#include <vector>
 
 #include "nn/edge_profile.hpp"
 #include "nn/execution_plan.hpp"

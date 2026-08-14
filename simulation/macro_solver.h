@@ -49,11 +49,12 @@ private:
   std::map<std::string, std::set<std::string>> macro_deps_;
   std::map<std::string, std::set<std::string>> macro_dependents_;
 
-  bool has_peers(const std::string& macro_id, const std::map<std::string, int>& out_deg) const {
+  bool has_peers(const std::string& macro_id, const std::map<std::string, int>& out_deg, const std::set<std::string>& cached_tensors) const {
     for (const auto& op_id : macros_.at(macro_id).ops) {
       const auto& op_node = graph_.get_op(op_id);
       for (auto* tensor : op_node.inputs()) {
         if (out_deg.at(tensor->uuid()) <= 1) continue;
+        if (cached_tensors.count(tensor->uuid())) continue;
 
         int internal_consumers = 0;
         for (const auto& inner_op_id : macros_.at(macro_id).ops) {
@@ -219,10 +220,11 @@ private:
   }
 
   std::string merge_join_parent(const std::string& join, const std::map<std::string, int>& out_deg,
+                                const std::set<std::string>& cached_tensors,
                                 int& next_macro_id) {
     std::string worst_parent;
     for (const auto& parent : macro_deps_.at(join)) {
-      if (macro_dependents_.at(parent).size() != 1 || has_peers(parent, out_deg) ||
+      if (macro_dependents_.at(parent).size() != 1 || has_peers(parent, out_deg, cached_tensors) ||
           !(macros_.at(join) < macros_.at(parent))) {
         continue;
       }
@@ -232,6 +234,7 @@ private:
     }
     return worst_parent.empty() ? join : merge_macros(worst_parent, join, next_macro_id, "join");
   }
+
 
 public:
   MacroSolver(Graph& graph, std::ostream* os = nullptr)
@@ -247,6 +250,13 @@ public:
     auto out_deg = get_out_deg(graph_);
     auto [deps, dependents] = get_dependencies(graph_);
 
+    std::set<std::string> cached_tensors;
+    for (auto& [uuid, node] : graph_.op_nodes()) {
+      for (auto* t : node.cache()) {
+        cached_tensors.insert(t->uuid());
+      }
+    }
+
     for (auto& id : op_ids) {
       auto& node = graph_.get_op(id);
       long long all_outputs = 0;
@@ -257,7 +267,7 @@ public:
       long long workspace = node.workspace_req();
       long long total_memory_for_execution = all_outputs + workspace;
 
-      long long memory_generate = all_outputs;
+      long long memory_generate = all_outputs + static_cast<long long>(node.residual_mem());
       long long memory_consumes = 0;
       for (auto* t : node.inputs()) {
         if (out_deg[t->uuid()] == 1) {
@@ -327,7 +337,7 @@ public:
           pending.push_front(prepared);
           continue;
         }
-        const std::string merged = merge_join_parent(prepared, out_deg, next_macro_id);
+        const std::string merged = merge_join_parent(prepared, out_deg, cached_tensors, next_macro_id);
         if (merged != prepared) pending.push_front(merged);
       }
     }

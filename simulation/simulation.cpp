@@ -307,6 +307,33 @@ void print_stats(std::map<std::string, std::vector<double>>& effs_by_name) {
 int main() {
   srand(static_cast<unsigned int>(time(nullptr)));
 
+  {
+    Graph g = tunx_v1_graph();
+    auto best_order = find_minimum_memory_execution_order(g);
+    auto macro_order = find_macro_candidate_execution_order(g);
+    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
+
+    std::cout << "=== Tunx V1 Graph Efficiency ===\n";
+    for (const auto& [name, eff] : effs) {
+      std::cout << "  " << name << " Efficiency: " << std::fixed << std::setprecision(2) << eff
+                << "%\n";
+      if (name == "MACRO") {
+        save_graph_to_dot(g, "./logs/tunx_v1_graph.dot");
+        std::ofstream log("./logs/tunx_v1_bad_macro.log", std::ios_base::app);
+        log << "--- Tunx V1 Graph Failure ---\n";
+        log << name << " Efficiency: " << eff << "%\n";
+        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
+          log << p_name << " Path: ";
+          for (const auto& op : path) log << op << " ";
+          log << "\n";
+        };
+        print_path("BEST", best_order);
+        print_path(name, macro_order);
+        find_macro_candidate_execution_order(g, &log);
+        log << "\n";
+      }
+    }
+  }
   int trials;
   std::cin >> trials;
   int original_trials = trials;

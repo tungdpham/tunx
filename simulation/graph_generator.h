@@ -298,3 +298,104 @@ inline Graph sample_branch_graph() {
 
   return g;
 }
+
+// Tunx V1 graph with exact topology and profiled memory values.
+// Architecture: conv1 -> bn1 -> pool1 -> asymmetric_block(256ch) -> pool2 -> avgpool -> flatten ->
+// output Batch=64, BF16, ImageNet-100 (224x224x3).
+// Activation sizes, workspace, and residual_mem derived from real edge profile traces.
+inline Graph tunx_v1_graph() {
+  Graph g;
+
+  // --- Activation sizes (BF16 = 2 bytes per element, batch=64) ---
+  constexpr size_t input_size = 19267584;        // 64 * 224 * 224 * 3 * 2
+  constexpr size_t stem_112 = 102760448;          // 64 * 112 * 112 * 64 * 2
+  constexpr size_t stem_56 = 25690112;            // 64 * 56 * 56 * 64 * 2
+  constexpr size_t asym_256 = 102760448;          // 64 * 56 * 56 * 256 * 2
+  constexpr size_t asym_512 = 205520896;          // 64 * 56 * 56 * 512 * 2
+  constexpr size_t asym_2048 = 822083584;         // 64 * 56 * 56 * 2048 * 2
+  constexpr size_t concat_size = 1130364928;      // 64 * 56 * 56 * 2816 * 2
+  constexpr size_t pool2_size = 282591232;        // 64 * 28 * 28 * 2816 * 2
+  constexpr size_t global_avg = 360448;           // 64 * 1 * 1 * 2816 * 2
+  constexpr size_t output_size = 12800;           // 64 * 100 * 2
+
+  // --- Activations ---
+  auto* a_input = g.add_act("input", input_size);
+
+  // Stem
+  auto* a_conv1 = g.add_act("conv1_out", stem_112);
+  auto* a_bn1 = g.add_act("bn1_out", stem_112);
+  auto* a_pool1 = g.add_act("pool1_out", stem_56);
+
+  // Branch 1: 1x1 conv -> fork(3x3 main, 3x3 shortcut) -> add
+  auto* a_b1c1 = g.add_act("b1_conv_1_out", asym_512);
+  auto* a_b1c2m = g.add_act("b1_conv_2_main_out", asym_2048);
+  auto* a_b1c2s = g.add_act("b1_conv2_shortcut_out", asym_2048);
+  auto* a_add = g.add_act("add_out", asym_2048);
+
+  // Branch 2: conv1->bn1->conv1->bn1
+  auto* a_b2c1a = g.add_act("b2_conv1_a_out", asym_256);
+  auto* a_b2bn1a = g.add_act("b2_bn1_a_out", asym_256);
+  auto* a_b2c1b = g.add_act("b2_conv1_b_out", asym_256);
+  auto* a_b2bn1b = g.add_act("b2_bn1_b_out", asym_256);
+
+  // Branch 3: conv1->bn1->conv2->bn2
+  auto* a_b3c1 = g.add_act("b3_conv1_out", asym_256);
+  auto* a_b3bn1 = g.add_act("b3_bn1_out", asym_256);
+  auto* a_b3c2 = g.add_act("b3_conv2_out", asym_256);
+  auto* a_b3bn2 = g.add_act("b3_bn2_out", asym_256);
+
+  // Branch 4: maxpool->conv->bn
+  auto* a_b4pool = g.add_act("b4_pool_out", stem_56);
+  auto* a_b4conv = g.add_act("b4_conv_out", asym_256);
+  auto* a_b4bn = g.add_act("b4_bn_out", asym_256);
+
+  // Tail: concat -> relu -> pool2 -> avgpool -> flatten -> output
+  auto* a_concat = g.add_act("concat_out", concat_size);
+  auto* a_relu = g.add_act("relu_out", concat_size);
+  auto* a_pool2 = g.add_act("pool2_out", pool2_size);
+  auto* a_avgpool = g.add_act("avgpool_out", global_avg);
+  auto* a_flatten = g.add_act("flatten_out", global_avg);
+  auto* a_output = g.add_act("output_out", output_size);
+
+  // --- Operations (name, workspace, inputs, outputs, cache, residual_mem) ---
+  // Stem
+  g.add_op("conv1", 51430656, {a_input}, {a_conv1}, {a_input}, 19267584);
+  g.add_op("bn1", 51393792, {a_conv1}, {a_bn1}, {a_conv1}, 154141184);
+  g.add_op("pool1", 51380224, {a_bn1}, {a_pool1}, {}, 51380224);
+
+  // Branch 1
+  g.add_op("asym1_b1_conv_1", 0, {a_pool1}, {a_b1c1}, {a_pool1});
+  g.add_op("asym1_b1_conv_2_main", 0, {a_b1c1}, {a_b1c2m}, {a_b1c1});
+  g.add_op("asym1_b1_conv2_shortcut", 0, {a_b1c1}, {a_b1c2s}, {a_b1c1});
+  g.add_op("add", 0, {a_b1c2m, a_b1c2s}, {a_add});
+
+  // Branch 2
+  g.add_op("asym1_b2_conv1", 0, {a_pool1}, {a_b2c1a}, {a_pool1});
+  g.add_op("asym1_b2_bn1", 51433984, {a_b2c1a}, {a_b2bn1a}, {a_b2c1a}, 154142720);
+  g.add_op("asym1_b2_conv1_b", 0, {a_b2bn1a}, {a_b2c1b}, {a_b2bn1a}, 102760448);
+  g.add_op("asym1_b2_bn1_b", 51433984, {a_b2c1b}, {a_b2bn1b}, {a_b2c1b}, 154142720);
+
+  // Branch 3
+  g.add_op("asym1_b3_conv1", 0, {a_pool1}, {a_b3c1}, {a_pool1});
+  g.add_op("asym1_b3_bn1", 51433984, {a_b3c1}, {a_b3bn1}, {a_b3c1}, 154142720);
+  g.add_op("asym1_b3_conv2", 0, {a_b3bn1}, {a_b3c2}, {a_b3bn1}, 102760448);
+  g.add_op("asym1_b3_bn2", 51433984, {a_b3c2}, {a_b3bn2}, {a_b3c2}, 154142720);
+
+  // Branch 4
+  g.add_op("asym1_b4_pool", 51380224, {a_pool1}, {a_b4pool}, {}, 51380224);
+  g.add_op("asym1_b4_conv", 0, {a_b4pool}, {a_b4conv}, {a_b4pool}, 25690112);
+  g.add_op("asym1_b4_bn", 51433984, {a_b4conv}, {a_b4bn}, {a_b4conv}, 154142720);
+
+  // Tail
+  g.add_op("asym1_concat", 256, {a_add, a_b2bn1b, a_b3bn2, a_b4bn}, {a_concat});
+  g.add_op("asym1_relu", 0, {a_concat}, {a_relu});
+  g.add_op("pool2", 565182464, {a_relu}, {a_pool2}, {}, 1695547392);
+  g.add_op("avgpool", 0, {a_pool2}, {a_avgpool});
+  g.add_op("flatten", 0, {a_avgpool}, {a_flatten});
+  g.add_op("output", 66048, {a_flatten}, {a_output}, {a_flatten}, 360448);
+
+  g.set_inputs({a_input});
+  g.set_outputs({a_output});
+
+  return g;
+}
