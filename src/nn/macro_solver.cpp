@@ -204,7 +204,7 @@ ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_pr
     }
   };
 
-  const auto prepare_join = [&](const std::string &join) {
+  const auto prepare_join = [&](const std::string &join) -> std::string {
     const std::vector<std::string> parents(deps.at(join).begin(), deps.at(join).end());
     std::set<std::string> ancestors;
     for (size_t first = 0; first < parents.size(); ++first) {
@@ -222,8 +222,10 @@ ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_pr
               });
     for (const std::string &ancestor : ordered) {
       if (!macros.contains(ancestor)) continue;
-      merge_branch(ancestor);
+      const std::string merged_ancestor = merge_branch(ancestor);
+      if (!macros.contains(join)) return merged_ancestor;
     }
+    return join;
   };
 
   const std::string virtual_join_id = "__virtual_join__";
@@ -254,8 +256,11 @@ ExecutionPlan MacroSolver::find_order(const std::map<Edge, EdgeProfile> &edge_pr
       }
     }
     if (deps.at(current).size() > 1) {
-      prepare_join(current);
-      if (!macros.contains(current)) continue;
+      const std::string prepared = prepare_join(current);
+      if (prepared != current) {
+        pending.push_front(prepared);
+        continue;
+      }
       std::string worst_parent;
       for (const std::string &parent : deps.at(current)) {
         if (dependents.at(parent).size() != 1 || has_peers(parent) ||

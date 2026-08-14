@@ -1,7 +1,7 @@
 #pragma once
 
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "nn/edge.hpp"
 namespace tunx {
@@ -13,12 +13,11 @@ struct ExecutionPlan {
 struct EdgeMemStats {
   std::string layer_name;
   size_t allocated_mem;
-  size_t reserved_mem;
-  size_t unused_mem;
+  size_t peak_mem;
 };
 
 struct ExecutionPlanStats {
-  size_t peak_mem;
+  size_t peak_mem;  // should just be the last peak mem in edge stats.
   std::vector<EdgeMemStats> edge_stats;
 };
 

@@ -110,13 +110,15 @@ public:
                      this->ws_allocator_};
   }
 
-  template <typename... Args>
+  template <typename... Args,
+            typename = std::enable_if_t<(std::is_same_v<std::decay_t<Args>, Node> && ...)>>
   Node operator()(Args&&... args) {
-    static_assert((std::is_same_v<std::decay_t<Args>, Node> && ...),
-                  "All arguments to operator() must be Node");
-
-    Graph* graph = nullptr;
     std::vector<Node> inputs = {std::forward<Args>(args)...};
+    return operator()(inputs);
+  }
+
+  Node operator()(const std::vector<Node>& inputs) {
+    Graph* graph = nullptr;
     for (const auto& node : inputs) {
       if (!node)
         throw std::runtime_error(std::string(Op::TYPE_NAME) + ": input nodes cannot be null");
@@ -273,9 +275,14 @@ public:
                            config.name.empty() ? Op::TYPE_NAME : config.name);
   }
 
-  template <typename... Args>
+  template <typename... Args,
+            typename = std::enable_if_t<(std::is_same_v<std::decay_t<Args>, Node> && ...)>>
   Node operator()(Args&&... args) {
     return (*this->impl_)(std::forward<Args>(args)...);
+  }
+
+  Node operator()(const std::vector<Node>& inputs) {
+    return (*this->impl_)(inputs);
   }
 };
 

@@ -12,9 +12,11 @@
 
 #include <string>
 
+#include "device/iallocator.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/concat.hpp"
+#include "nn/layers_impl/transpose.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -61,6 +63,12 @@ Node avgpool2d(Node input, Shape &shape, size_t pool_h, size_t pool_w, size_t st
 
 Node flatten(Node input, Shape &shape, int start_dim, int end_dim, const std::string &name) {
   auto layer = Flatten(start_dim, end_dim, name);
+  shape = layer.output_shapes({shape})[0];
+  return layer(input);
+}
+
+Node transpose(Node input, Shape &shape, int dim0, int dim1, const std::string &name) {
+  auto layer = Transpose(dim0, dim1, name);
   shape = layer.output_shapes({shape})[0];
   return layer(input);
 }
@@ -218,10 +226,11 @@ Node gpt_block(Node input, Shape &shape, size_t embed_dim, size_t num_heads, siz
   return x + ffn;
 }
 
-Node concat(const Vec<Node> &inputs, size_t axis, const std::string &name) {
+std::pair<Node, Shape> concat(const Vec<Node> &inputs, const Vec<Shape> &shapes, size_t axis,
+                              const std::string &name) {
   auto layer = Concat(axis, name);
-  return layer(inputs[0], inputs[1], inputs[2],
-               inputs[3]);  // Currently supporting 4 inputs since inception uses 4
+  Shape out_shape = layer.output_shapes(shapes)[0];
+  return {layer(inputs), out_shape};
 }
 
 Node inception_block(Node input, Shape &shape, size_t out_channels, const std::string &name) {
@@ -246,16 +255,44 @@ Node inception_block(Node input, Shape &shape, size_t out_channels, const std::s
   b4 = conv2d(b4, b4_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b4_conv");
   b4 = batchnorm(b4, b4_shape, true, name + "_b4_bn");
 
-  shape = b1_shape;
-  shape[3] = b1_shape[3] + b2_shape[3] + b3_shape[3] + b4_shape[3];
-  std::cout << "Inception block " + name + " shape: ";
-  for (size_t i = 0; i < shape.size(); i++) {
-    std::cout << shape[i] << " ";
-  }
-  std::cout << std::endl;
+  auto [out, out_shape] =
+      concat({b1, b2, b3, b4}, {b1_shape, b2_shape, b3_shape, b4_shape}, 3, name + "_concat");
+  shape = out_shape;
+  return relu(out, shape, name + "_relu");
+}
 
-  Node out = concat({b1, b2, b3, b4}, 3, name + "_concat");
-  // Node out = b1 + b2 + b3 + b4;
+Node asymmetric_block(Node input, Shape &shape, size_t out_channels, const std::string &name) {
+  Shape b1_shape = shape;
+  Node b1 = conv2d(input, b1_shape, out_channels * 2, 1, 1, 1, 1, 0, 0, false, name + "_b1_conv_1");
+  Shape b1_main_shape = b1_shape;
+  Node b1_main = conv2d(b1, b1_main_shape, out_channels * 8, 3, 3, 1, 1, 1, 1, false,
+                        name + "_b1_conv_2_main");
+  Shape b1_shortcut_shape = b1_shape;
+  Node b1_shortcut = conv2d(b1, b1_shortcut_shape, out_channels * 8, 3, 3, 1, 1, 1, 1, false,
+                            name + "_b1_conv2_shortcut");
+  b1 = b1_main + b1_shortcut;
+  b1_shape = b1_main_shape;
+
+  Shape b2_shape = shape;
+  Node b2 = conv2d(input, b2_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b2_conv1");
+  b2 = batchnorm(b2, b2_shape, true, name + "_b2_bn1");
+  b2 = conv2d(b2, b2_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b2_conv1");
+  b2 = batchnorm(b2, b2_shape, true, name + "_b2_bn1");
+
+  Shape b3_shape = shape;
+  Node b3 = conv2d(input, b3_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b3_conv1");
+  b3 = batchnorm(b3, b3_shape, true, name + "_b3_bn1");
+  b3 = conv2d(b3, b3_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b3_conv2");
+  b3 = batchnorm(b3, b3_shape, true, name + "_b3_bn2");
+
+  Shape b4_shape = shape;
+  Node b4 = maxpool2d(input, b4_shape, 3, 3, 1, 1, 1, 1, name + "_b4_pool");
+  b4 = conv2d(b4, b4_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b4_conv");
+  b4 = batchnorm(b4, b4_shape, true, name + "_b4_bn");
+
+  auto [out, out_shape] =
+      concat({b1, b2, b3, b4}, {b1_shape, b2_shape, b3_shape, b4_shape}, 3, name + "_concat");
+  shape = out_shape;
   return relu(out, shape, name + "_relu");
 }
 
@@ -631,8 +668,7 @@ Graph create_tiny_imagenet_flash_vit_graph(IAllocator &allocator, GraphOpts opts
 }
 
 Graph create_gpt2_graph(IAllocator &allocator, size_t embed_dim, size_t num_heads,
-                        size_t num_layers, const std::string &name,
-                        GraphOpts opts) {
+                        size_t num_layers, const std::string &name, GraphOpts opts) {
   constexpr size_t seq_len = 1024;
   constexpr size_t vocab_size = 50257;
   constexpr float dropout_rate = 0.1f;
@@ -794,6 +830,26 @@ Graph create_fpn_topology_graph(IAllocator &allocator, GraphOpts opts) {
   return graph;
 }
 
+Graph create_tunx_v1_graph(IAllocator &allocator, GraphOpts opts) {
+  Graph graph;
+  Node input = graph.input("input");
+  Shape shape = {1, 224, 224, 3};
+
+  Node x = conv2d(input, shape, 64, 7, 7, 2, 2, 3, 3, false, "conv1");  // -> {112, 112, 64}
+  x = batchnorm(x, shape, true, "bn1");
+  x = maxpool2d(x, shape, 3, 3, 2, 2, 1, 1, "pool1");  // -> {56, 56, 64}
+
+  x = asymmetric_block(x, shape, 256, "asym1");        // -> {56, 56, 256}
+  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool2");  // -> {28, 28, 256}
+
+  x = avgpool2d(x, shape, 28, 28, 1, 1, 0, 0, "avgpool");
+  x = flatten(x, shape, 1, -1, "flatten");
+  Node output = dense(x, shape, 100, true, "output");
+
+  finalize_graph(graph, allocator, output, opts);
+  return graph;
+}
+
 }  // namespace
 
 std::unordered_map<std::string, std::function<Graph(IAllocator &, GraphOpts)>>
@@ -831,6 +887,9 @@ void ExampleGraphs::register_defaults() {
   register_graph("gpt2_large", [](IAllocator &allocator, GraphOpts opts) {
     return create_gpt2_graph(allocator, 1280, 20, 36, "gpt2_large", opts);
   });
+
+  // graphs for benchmarking
+  register_graph("tunx_v1", create_tunx_v1_graph);
 }
 
 }  // namespace tunx

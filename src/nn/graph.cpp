@@ -14,7 +14,7 @@
 #include <fstream>
 #include <istream>
 #include <ostream>
-#include <queue>
+
 #include <unordered_map>
 
 #include "device/device_type.hpp"
@@ -138,7 +138,7 @@ void Graph::sort() {
   }
 
   std::map<Edge, int> pending;
-  std::queue<Edge> ready;
+  Vec<Edge> ready;
 
   for (const auto &edge : edges_) {
     int count = 0;
@@ -149,7 +149,7 @@ void Graph::sort() {
     }
     pending[edge] = count;
     if (count == 0) {
-      ready.push(edge);
+      ready.push_back(edge);
     }
   }
 
@@ -157,8 +157,8 @@ void Graph::sort() {
   sorted.reserve(edges_.size());
 
   while (!ready.empty()) {
-    Edge e = ready.front();
-    ready.pop();
+    Edge e = ready.back();
+    ready.pop_back();
     sorted.push_back(e);
 
     for (const auto &consumer : e->consumers()) {
@@ -166,7 +166,7 @@ void Graph::sort() {
       if (it != node_to_dependent_edges.end()) {
         for (const auto &dep_edge : it->second) {
           if (--pending[dep_edge] == 0) {
-            ready.push(dep_edge);
+            ready.push_back(dep_edge);
           }
         }
       }

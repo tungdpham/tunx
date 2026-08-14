@@ -231,8 +231,7 @@ ExecutionPlanStats GraphExecutor::profile_plan(TensorBundle &input_map, const Ex
     EdgeMemStats edge_stat;
     edge_stat.layer_name = edge->layer()->name();
     edge_stat.allocated_mem = allocator->allocated();
-    edge_stat.reserved_mem = allocator->reserved();
-    edge_stat.unused_mem = allocator->unused();
+    edge_stat.peak_mem = peak_usage;
     stats.edge_stats.push_back(edge_stat);
 
     for (const Node &consumer : edge->consumers()) {
@@ -247,7 +246,8 @@ ExecutionPlanStats GraphExecutor::profile_plan(TensorBundle &input_map, const Ex
   // free memory for residuals since this is just profiling
   residuals_.clear();
 
-  stats.peak_mem = peak_usage;
+  stats.peak_mem = stats.edge_stats.size() > 0 ? stats.edge_stats.back().peak_mem : 0;
+
   return stats;
 }
 

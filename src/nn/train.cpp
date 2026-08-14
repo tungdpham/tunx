@@ -120,8 +120,8 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
           {"step", std::to_string(i)},
           {"layer_name", s.layer_name},
           {"allocated_mem", std::to_string(s.allocated_mem)},
-          {"reserved_mem", std::to_string(s.reserved_mem)},
-          {"unused_mem", std::to_string(s.unused_mem)}};
+          {"peak_mem", std::to_string(s.peak_mem)},
+      };
       csv_logger->log(row);
     }
     for (size_t i = 0; i < macro_stats.edge_stats.size(); ++i) {
@@ -131,8 +131,8 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
           {"step", std::to_string(i)},
           {"layer_name", s.layer_name},
           {"allocated_mem", std::to_string(s.allocated_mem)},
-          {"reserved_mem", std::to_string(s.reserved_mem)},
-          {"unused_mem", std::to_string(s.unused_mem)}};
+          {"peak_mem", std::to_string(s.peak_mem)},
+      };
       csv_logger->log(row);
     }
   }
@@ -521,8 +521,8 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
     profiles_logger =
         std::make_unique<CsvLogger>("edge_profiles", profile_csv_path, profile_headers);
 
-    std::vector<std::string> plan_headers = {"plan",          "step",         "layer_name",
-                                             "allocated_mem", "reserved_mem", "unused_mem"};
+    std::vector<std::string> plan_headers = {"plan", "step", "layer_name", "allocated_mem",
+                                             "peak_mem"};
     std::string plan_csv_path =
         "tunx_" + artifact_name + "_" + timestamp + "_execution_plan_stats.csv";
     if (!config.log_dir.empty()) {

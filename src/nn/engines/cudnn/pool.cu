@@ -54,7 +54,7 @@ struct avgpool2d_fwd_graph {
     auto resample_options =
         fe::graph::Resample_attributes()
             .set_name("AvgPool")
-            .set_resampling_mode(fe::ResampleMode_t::AVGPOOL_INCLUDE_PADDING)
+            .set_resampling_mode(fe::ResampleMode_t::AVGPOOL_EXCLUDE_PADDING)
             .set_padding_mode(fe::PaddingMode_t::ZERO_PAD)
             .set_window({static_cast<int64>(stats.pool_h), static_cast<int64>(stats.pool_w)})
             .set_pre_padding({static_cast<int64>(stats.pad_h), static_cast<int64>(stats.pad_w)})
@@ -220,26 +220,7 @@ struct maxpool2d_fwd_graph {
 
 WorkspaceReq CuDNNEngine::query_avgpool_graph(engine_handle backend_handle,
                                               const AvgPool2DStats& stats, DTypeDesc type_desc) {
-  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
-
-  GraphCacheKey fwd_key{
-      .op_type = OpType::AVG_POOL_FWD,
-      .dtype_desc = type_desc,
-      .dims = {stats.batch_size, stats.channels, stats.height, stats.width},
-      .attributes = {{"pool_h", stats.pool_h},
-                     {"pool_w", stats.pool_w},
-                     {"stride_h", stats.stride_h},
-                     {"stride_w", stats.stride_w},
-                     {"pad_h", stats.pad_h},
-                     {"pad_w", stats.pad_w}},
-  };
-  auto it_fwd = graph_cache_.find(fwd_key);
-  if (it_fwd == graph_cache_.end()) {
-    it_fwd = graph_cache_.emplace(fwd_key, avgpool2d_fwd_graph(handle, stats, type_desc)).first;
-  }
-  auto& fwd_graph = std::any_cast<avgpool2d_fwd_graph&>(it_fwd->second);
-
-  return {fwd_graph.workspace_size, 0, fwd_graph.workspace_size};
+  return cuda_engine_.query_avgpool_graph(backend_handle, stats, type_desc);
 }
 
 WorkspaceReq CuDNNEngine::query_maxpool2d_graph(engine_handle backend_handle,
@@ -287,27 +268,7 @@ WorkspaceReq CuDNNEngine::query_maxpool2d_graph(engine_handle backend_handle,
 void CuDNNEngine::avgpool_fwd(engine_handle backend_handle, const AvgPool2DStats& stats,
                               const void* input, void* output, void* workspace,
                               DTypeDesc type_desc) {
-  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
-  GraphCacheKey key{
-      .op_type = OpType::AVG_POOL_FWD,
-      .dtype_desc = type_desc,
-      .dims = {stats.batch_size, stats.channels, stats.height, stats.width},
-      .attributes = {{"pool_h", stats.pool_h},
-                     {"pool_w", stats.pool_w},
-                     {"stride_h", stats.stride_h},
-                     {"stride_w", stats.stride_w},
-                     {"pad_h", stats.pad_h},
-                     {"pad_w", stats.pad_w}},
-  };
-  auto it = graph_cache_.find(key);
-  if (it == graph_cache_.end()) {
-    throw std::runtime_error("cuDNN Graph not found for avgpool fwd.");
-  }
-  auto& graph_struct = std::any_cast<avgpool2d_fwd_graph&>(it->second);
-  std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = {
-      {graph_struct.x, const_cast<void*>(input)}, {graph_struct.y, output}};
-  auto status = graph_struct.graph->execute(handle, variant_pack, workspace);
-  ensure_ok(status, "avgpool fwd execute");
+  cuda_engine_.avgpool_fwd(backend_handle, stats, input, output, workspace, type_desc);
 }
 
 void CuDNNEngine::avgpool_bwd(engine_handle backend_handle, const AvgPool2DStats& stats,
