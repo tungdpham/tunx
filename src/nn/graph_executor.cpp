@@ -93,7 +93,7 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
   if (it == plans_.end()) {
     MacroSolver planner(graph_, os_);
     std::map<Edge, EdgeProfile> edge_profiles = profile_edge_forward(input_map);
-    ExecutionPlan plan = planner.find_order(edge_profiles);
+    ExecutionPlan plan = planner.find_forward_order(edge_profiles);
     it = plans_.emplace(key, plan).first;
   }
   active_plan_ = it->second;
