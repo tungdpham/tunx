@@ -114,6 +114,8 @@ void Graph::add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producer
   std::string uid = edge->layer()->name();
   if (used_edge_uids_.count(uid) > 0) {
     uid = generate_edge_uid();
+  } else {
+    used_edge_uids_.insert(uid);
   }
   edge->set_uid(uid);
   edges_.push_back(edge);

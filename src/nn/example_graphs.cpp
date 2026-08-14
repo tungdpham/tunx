@@ -16,6 +16,7 @@
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/concat.hpp"
+#include "nn/layers_impl/conv2d_transpose.hpp"
 #include "nn/layers_impl/transpose.hpp"
 #include "type/type.hpp"
 
@@ -30,6 +31,12 @@ size_t channels(const Shape &shape) {
     throw std::runtime_error("Shape is empty");
   }
   return shape.back();
+}
+
+Node add(const Vec<Node> &inputs, Shape &shape, const std::string &name) {
+  auto layer = Add();
+  shape = layer.output_shapes({shape})[0];
+  return layer(inputs);
 }
 
 Node conv2d(Node input, Shape &shape, size_t out_channels, size_t kernel_h, size_t kernel_w,
@@ -69,6 +76,15 @@ Node flatten(Node input, Shape &shape, int start_dim, int end_dim, const std::st
 
 Node transpose(Node input, Shape &shape, int dim0, int dim1, const std::string &name) {
   auto layer = Transpose(dim0, dim1, name);
+  shape = layer.output_shapes({shape})[0];
+  return layer(input);
+}
+
+Node convtranspose2d(Node input, Shape &shape, size_t out_channels, size_t kernel_h,
+                     size_t kernel_w, size_t stride_h, size_t stride_w, size_t pad_h, size_t pad_w,
+                     bool use_bias, const std::string &name) {
+  auto layer = ConvTranspose2D(channels(shape), out_channels, kernel_h, kernel_w, stride_h,
+                               stride_w, pad_h, pad_w, use_bias, name);
   shape = layer.output_shapes({shape})[0];
   return layer(input);
 }
@@ -261,7 +277,7 @@ Node inception_block(Node input, Shape &shape, size_t out_channels, const std::s
   return relu(out, shape, name + "_relu");
 }
 
-Node asymmetric_block(Node input, Shape &shape, size_t out_channels, const std::string &name) {
+Node v1_residual_block(Node input, Shape &shape, size_t out_channels, const std::string &name) {
   Shape b1_shape = shape;
   Node b1 = conv2d(input, b1_shape, out_channels * 2, 1, 1, 1, 1, 0, 0, false, name + "_b1_conv_1");
   Shape b1_main_shape = b1_shape;
@@ -843,7 +859,7 @@ Graph create_tunx_v1_graph(IAllocator &allocator, GraphOpts opts) {
   x = batchnorm(x, shape, true, "bn1");
   x = maxpool2d(x, shape, 3, 3, 2, 2, 1, 1, "pool1");  // -> {56, 56, 64}
 
-  x = asymmetric_block(x, shape, 256, "asym1");        // -> {56, 56, 256}
+  x = v1_residual_block(x, shape, 256, "asym1");       // -> {56, 56, 256}
   x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool2");  // -> {28, 28, 256}
 
   x = avgpool2d(x, shape, 28, 28, 1, 1, 0, 0, "avgpool");

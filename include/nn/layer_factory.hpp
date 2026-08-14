@@ -8,6 +8,7 @@
 #include "layers_impl/class_token.hpp"
 #include "layers_impl/concat.hpp"
 #include "layers_impl/conv2d.hpp"
+#include "layers_impl/conv2d_transpose.hpp"
 #include "layers_impl/dense.hpp"
 #include "layers_impl/dropout.hpp"
 #include "layers_impl/elu.hpp"
@@ -101,6 +102,7 @@ public:
     register_layer_type<Sigmoid>();
     register_layer_type<Tanh>();
     register_layer_type<Conv2D>();
+    register_layer_type<ConvTranspose2D>();
     register_layer_type<MaxPool2D>();
     register_layer_type<AvgPool2D>();
     register_layer_type<BatchNorm>();

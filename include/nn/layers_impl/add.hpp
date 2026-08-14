@@ -18,7 +18,7 @@ struct AddOp {
 
   struct Config {};
 
-  static Tensor forward(OpContext &ctx, const Tensor &a, const Tensor &b);
+  static Tensor forward(OpContext &ctx, const Vec<Tensor> &inputs);
   static Vec<Tensor> backward(OpContext &ctx, const Tensor &grad_out);
 
   static LayerConfig get_config(const Config &config, const std::string &name);
