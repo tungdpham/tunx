@@ -225,6 +225,31 @@ std::vector<std::string> find_diamond_execution_order(Graph& graph, size_t max_s
   return result.order;
 }
 
+std::vector<std::string> find_naive_dfs_execution_order(Graph& graph) {
+  auto [dependencies, dependents] = get_dependencies(graph);
+  std::set<std::string> visited;
+  std::vector<std::string> order;
+
+  std::vector<std::string> op_ids;
+  for (const auto& [uuid, op] : graph.op_nodes()) op_ids.push_back(uuid);
+  std::sort(op_ids.begin(), op_ids.end());
+
+  std::function<void(const std::string&)> dfs = [&](const std::string& op_id) {
+    if (visited.count(op_id)) return;
+    visited.insert(op_id);
+
+    std::vector<std::string> deps(dependencies[op_id].begin(), dependencies[op_id].end());
+    std::sort(deps.begin(), deps.end());
+    for (const auto& dep : deps) dfs(dep);
+
+    order.push_back(op_id);
+  };
+
+  for (const auto& uuid : op_ids) dfs(uuid);
+
+  return order;
+}
+
 std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
   return find_diamond_execution_order(graph);
 }
@@ -311,7 +336,8 @@ int main() {
     Graph g = tunx_v1_graph();
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
-    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
+    auto dfs_order = find_naive_dfs_execution_order(g);
+    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}, {"DFS", dfs_order}});
 
     std::cout << "=== Tunx V1 Graph Efficiency ===\n";
     for (const auto& [name, eff] : effs) {
@@ -352,10 +378,12 @@ int main() {
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
+    auto dfs_order = find_naive_dfs_execution_order(g);
 
     auto effs = rank_execution_orders(g, {
                                              {"BEST", best_order},
                                              {"MACRO", macro_order},
+                                             {"DFS", dfs_order},
                                          });
 
     for (const auto& [name, eff] : effs) {
@@ -386,8 +414,9 @@ int main() {
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
+    auto dfs_order = find_naive_dfs_execution_order(g);
 
-    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
+    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}, {"DFS", dfs_order}});
 
     for (const auto& [name, eff] : effs) {
       all_join_efficiencies[name].push_back(eff);
@@ -418,8 +447,9 @@ int main() {
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
+    auto dfs_order = find_naive_dfs_execution_order(g);
 
-    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
+    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}, {"DFS", dfs_order}});
 
     for (const auto& [name, eff] : effs) {
       all_branch_efficiencies[name].push_back(eff);
@@ -450,8 +480,9 @@ int main() {
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
+    auto dfs_order = find_naive_dfs_execution_order(g);
 
-    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
+    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}, {"DFS", dfs_order}});
 
     for (const auto& [name, eff] : effs) {
       all_static_branch_efficiencies[name].push_back(eff);
@@ -482,8 +513,9 @@ int main() {
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
+    auto dfs_order = find_naive_dfs_execution_order(g);
 
-    auto effs = rank_execution_orders(g, {{"MACRO", macro_order}, {"BEST", best_order}});
+    auto effs = rank_execution_orders(g, {{"MACRO", macro_order}, {"BEST", best_order}, {"DFS", dfs_order}});
 
     for (const auto& [name, eff] : effs) {
       all_diamond_efficiencies[name].push_back(eff);
@@ -514,8 +546,9 @@ int main() {
 
     auto best_order = find_minimum_memory_execution_order(g);
     auto macro_order = find_macro_candidate_execution_order(g);
+    auto dfs_order = find_naive_dfs_execution_order(g);
 
-    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}});
+    auto effs = rank_execution_orders(g, {{"BEST", best_order}, {"MACRO", macro_order}, {"DFS", dfs_order}});
 
     for (const auto& [name, eff] : effs) {
       all_static_diamond_efficiencies[name].push_back(eff);
