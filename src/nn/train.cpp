@@ -26,7 +26,6 @@
 #include "nn/edge_profile.hpp"
 #include "nn/execution_plan.hpp"
 #include "nn/graph_executor.hpp"
-#include "nn/macro_solver.hpp"
 #include "nn/metrics_computer.hpp"
 #include "nn/metrics_logger.hpp"
 #include "nn/tensor_bundle.hpp"
@@ -58,9 +57,8 @@ void print_timing_table(const std::vector<std::pair<std::string, double>> &timin
   }
 }
 
-static void log_edge_profiles(GraphExecutor &executor, TensorBundle &inputs,
+static void log_edge_profiles(const std::map<Edge, EdgeProfile> &profiles,
                               std::unique_ptr<CsvLogger> &csv_logger) {
-  std::map<Edge, EdgeProfile> profiles = executor.profile_edge_forward(inputs);
   fmt::print("\n{:=^80}\n", " Edge Profiles ");
   fmt::print("{:<30} | {:>10} | {:>12} | {:>12}\n", "Layer Name", "Time (ms)", "Peak Mem (B)",
              "Net Mem (B)");
@@ -91,9 +89,8 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
 
   std::ofstream debug_stream("debug_macro_solver.txt");
 
-  std::map<Edge, EdgeProfile> profiles = executor.profile_edge_forward(inputs);
-  tunx::MacroSolver solver(executor.graph(), &debug_stream);
-  ExecutionPlan macro_plan = solver.find_forward_order(profiles);
+  auto &built_plan = executor.build_plans(inputs);
+  auto &macro_plan = built_plan.forward_plan;
   auto macro_stats = executor.profile_forward_plan(inputs, macro_plan);
 
   fmt::print("\n{:=^80}\n", " Execution Plan Stats ");
@@ -140,51 +137,19 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
   }
 }
 
-static void log_edge_profiles_backward(GraphExecutor &executor, TensorBundle &inputs, TensorBundle &output_grads,
-                                       std::unique_ptr<CsvLogger> &csv_logger) {
-  std::map<Edge, EdgeProfile> profiles = executor.profile_edge_backward(output_grads);
-  fmt::print("\n{:=^80}\n", " Backward Edge Profiles ");
-  fmt::print("{:<30} | {:>10} | {:>12} | {:>12}\n", "Layer Name", "Time (ms)", "Peak Mem (B)",
-             "Net Mem (B)");
-  fmt::print("{:-<30}-+-{:-<10}-+-{:-<12}-+-{:-<12}\n", "", "", "", "");
-  for (const auto &[edge, profile] : profiles) {
-    fmt::print("{:<30} | {:>10.3f} | {:>12} | {:>12}\n", edge->layer()->name(), profile.exec_time,
-               profile.total_mem, profile.net_mem);
-  }
-  fmt::print("{:=^80}\n\n", "");
-
-  if (csv_logger) {
-    for (const auto &[edge, profile] : profiles) {
-      std::unordered_map<std::string, std::string> row = {
-          {"layer_name", edge->layer()->name()},
-          {"time_ms", std::to_string(profile.exec_time)},
-          {"peak_mem_b", std::to_string(profile.total_mem)},
-          {"net_mem_b", std::to_string(profile.net_mem)}};
-      csv_logger->log(row);
-    }
-  }
-}
-
-static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBundle &inputs, TensorBundle &output_grads,
+static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBundle &inputs,
+                                              TensorBundle &output_grads,
                                               std::unique_ptr<CsvLogger> &csv_logger) {
   ExecutionPlan naive_plan;
   for (auto it = executor.graph().edges().rbegin(); it != executor.graph().edges().rend(); ++it) {
     naive_plan.order.push_back(*it);
   }
 
-  executor.forward(inputs);
-  auto naive_stats = executor.profile_backward_plan(output_grads, naive_plan);
+  auto naive_stats = executor.profile_backward_plan(inputs, output_grads, naive_plan);
 
-  std::ofstream debug_stream("debug_macro_solver_backward.txt");
-
-  executor.forward(inputs);
-  std::map<Edge, EdgeProfile> profiles = executor.profile_edge_backward(output_grads);
-  
-  tunx::MacroSolver solver(executor.graph(), &debug_stream);
-  ExecutionPlan macro_plan = solver.find_backward_order(profiles);
-
-  executor.forward(inputs);
-  auto macro_stats = executor.profile_backward_plan(output_grads, macro_plan);
+  auto &built_plan = executor.build_plans(inputs);
+  auto &macro_plan = built_plan.backward_plan;
+  auto macro_stats = executor.profile_backward_plan(inputs, output_grads, macro_plan);
 
   fmt::print("\n{:=^80}\n", " Backward Execution Plan Stats ");
   fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
@@ -233,7 +198,7 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
 static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
                           unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
                           unique_ptr<Scheduler> &scheduler, const TrainingConfig &config,
-                          MetricsLogger &logger, int epoch, 
+                          MetricsLogger &logger, int epoch,
                           std::unique_ptr<CsvLogger> &forward_profiles_logger,
                           std::unique_ptr<CsvLogger> &forward_plan_logger,
                           std::unique_ptr<CsvLogger> &backward_profiles_logger,
@@ -273,6 +238,31 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
   GraphExecutor executor(graph);
 
+  // profiling
+  if (config.print_layer_profiling) {
+    get_next(batch_data, batch_labels);
+    Tensor device_input = to_device(batch_data, model_device);
+    Tensor device_labels = to_device(batch_labels, model_device);
+    TensorBundle inputs{{"input", device_input}};
+    auto &built_plan = executor.build_plans(inputs);
+    log_edge_profiles(built_plan.forward_edge_profiles, forward_profiles_logger);
+    log_execution_plan_stats(executor, inputs, forward_plan_logger);
+
+    TensorBundle outputs = executor.forward(inputs);
+
+    TensorBundle grad_outputs{
+        {"output", Tensor(outputs.get("output").shape(), outputs.get("output").dtype(), mem_pool)}};
+
+    outputs.clear();
+    executor.clear_residuals();
+
+    log_edge_profiles(built_plan.backward_edge_profiles, backward_profiles_logger);
+    log_execution_plan_stats_backward(executor, inputs, grad_outputs, backward_plan_logger);
+
+    // avoid affecting training
+    train_dataset->reset();
+  }
+
   cout << "Training batches: " << train_dataset->size() << endl;
   while (get_next(batch_data, batch_labels) &&
          (config.max_steps == -1 || num_batches < config.max_steps)) {
@@ -283,14 +273,9 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
     TensorBundle inputs{{"input", device_input}};
 
-    if (config.print_layer_profiling && epoch == 1 && num_batches == 1) {
-      log_edge_profiles(executor, inputs, forward_profiles_logger);
-      log_execution_plan_stats(executor, inputs, forward_plan_logger);
-    }
-
     TensorBundle outputs = executor.forward(inputs);
 
-    Tensor predictions = outputs.get("output");
+    Tensor &predictions = outputs.get("output");
 
     size_t batch_size = 1;
     for (size_t i = 0; i < predictions.dims() - 1; ++i) {
@@ -316,12 +301,6 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     }
 
     TensorBundle output_grads{{"output", loss_gradient}};
-
-    if (config.print_layer_profiling && epoch == 1 && num_batches == 1) {
-      log_edge_profiles_backward(executor, inputs, output_grads, backward_profiles_logger);
-      log_execution_plan_stats_backward(executor, inputs, output_grads, backward_plan_logger);
-      executor.forward(inputs); // Regenerate residuals for the actual backward pass
-    }
 
     executor.backward(output_grads);
 
@@ -374,8 +353,8 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
 static void train_val(Graph &graph, unique_ptr<Dataset> &train_dataset,
                       unique_ptr<Dataset> &val_dataset, unique_ptr<Optimizer> &optimizer,
                       const unique_ptr<Loss> &criterion, unique_ptr<Scheduler> &scheduler,
-                      const TrainingConfig &config,
-                      MetricsLogger &logger, std::unique_ptr<CsvLogger> &forward_profiles_logger,
+                      const TrainingConfig &config, MetricsLogger &logger,
+                      std::unique_ptr<CsvLogger> &forward_profiles_logger,
                       std::unique_ptr<CsvLogger> &forward_plan_logger,
                       std::unique_ptr<CsvLogger> &backward_profiles_logger,
                       std::unique_ptr<CsvLogger> &backward_plan_logger) {
@@ -447,8 +426,7 @@ static void train_val(Graph &graph, unique_ptr<Dataset> &train_dataset,
 static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
                        const unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
                        const unique_ptr<Scheduler> &scheduler, const TrainingConfig &config,
-                       MetricsLogger &logger,
-                       std::unique_ptr<CsvLogger> &forward_profiles_logger,
+                       MetricsLogger &logger, std::unique_ptr<CsvLogger> &forward_profiles_logger,
                        std::unique_ptr<CsvLogger> &forward_plan_logger,
                        std::unique_ptr<CsvLogger> &backward_profiles_logger,
                        std::unique_ptr<CsvLogger> &backward_plan_logger) {
@@ -509,11 +487,6 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
       Tensor device_labels = to_device(batch_labels, model_device);
       TensorBundle inputs{{"input", device_input}};
 
-      if (config.print_layer_profiling && steps == 0) {
-        log_edge_profiles(executor, inputs, forward_profiles_logger);
-        log_execution_plan_stats(executor, inputs, forward_plan_logger);
-      }
-
       TensorBundle outputs = executor.forward(inputs);
 
       Tensor predictions = outputs.get("output");
@@ -531,12 +504,6 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
         loss_gradient *= (1.0f / static_cast<float>(config.gradient_accumulation_steps));
       }
       TensorBundle output_grads{{"output", loss_gradient}};
-
-      if (config.print_layer_profiling && steps == 0) {
-        log_edge_profiles_backward(executor, inputs, output_grads, backward_profiles_logger);
-        log_execution_plan_stats_backward(executor, inputs, output_grads, backward_plan_logger);
-        executor.forward(inputs); // Regenerate residuals for the actual backward pass
-      }
 
       executor.backward(output_grads);
 
@@ -620,24 +587,33 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
 
   if (config.print_layer_profiling) {
     std::vector<std::string> profile_headers = {"layer_name", "time_ms", "peak_mem_b", "net_mem_b"};
-    
-    std::string fw_profile_csv_path = "tunx_" + artifact_name + "_" + timestamp + "_forward_edge_profiles.csv";
+
+    std::string fw_profile_csv_path =
+        "tunx_" + artifact_name + "_" + timestamp + "_forward_edge_profiles.csv";
     if (!config.log_dir.empty()) fw_profile_csv_path = config.log_dir + "/" + fw_profile_csv_path;
-    forward_profiles_logger = std::make_unique<CsvLogger>("forward_edge_profiles", fw_profile_csv_path, profile_headers);
+    forward_profiles_logger =
+        std::make_unique<CsvLogger>("forward_edge_profiles", fw_profile_csv_path, profile_headers);
 
-    std::string bw_profile_csv_path = "tunx_" + artifact_name + "_" + timestamp + "_backward_edge_profiles.csv";
+    std::string bw_profile_csv_path =
+        "tunx_" + artifact_name + "_" + timestamp + "_backward_edge_profiles.csv";
     if (!config.log_dir.empty()) bw_profile_csv_path = config.log_dir + "/" + bw_profile_csv_path;
-    backward_profiles_logger = std::make_unique<CsvLogger>("backward_edge_profiles", bw_profile_csv_path, profile_headers);
+    backward_profiles_logger =
+        std::make_unique<CsvLogger>("backward_edge_profiles", bw_profile_csv_path, profile_headers);
 
-    std::vector<std::string> plan_headers = {"plan", "step", "layer_name", "allocated_mem", "peak_mem"};
-    
-    std::string fw_plan_csv_path = "tunx_" + artifact_name + "_" + timestamp + "_forward_execution_plan_stats.csv";
+    std::vector<std::string> plan_headers = {"plan", "step", "layer_name", "allocated_mem",
+                                             "peak_mem"};
+
+    std::string fw_plan_csv_path =
+        "tunx_" + artifact_name + "_" + timestamp + "_forward_execution_plan_stats.csv";
     if (!config.log_dir.empty()) fw_plan_csv_path = config.log_dir + "/" + fw_plan_csv_path;
-    forward_plan_logger = std::make_unique<CsvLogger>("forward_execution_plan_stats", fw_plan_csv_path, plan_headers);
+    forward_plan_logger =
+        std::make_unique<CsvLogger>("forward_execution_plan_stats", fw_plan_csv_path, plan_headers);
 
-    std::string bw_plan_csv_path = "tunx_" + artifact_name + "_" + timestamp + "_backward_execution_plan_stats.csv";
+    std::string bw_plan_csv_path =
+        "tunx_" + artifact_name + "_" + timestamp + "_backward_execution_plan_stats.csv";
     if (!config.log_dir.empty()) bw_plan_csv_path = config.log_dir + "/" + bw_plan_csv_path;
-    backward_plan_logger = std::make_unique<CsvLogger>("backward_execution_plan_stats", bw_plan_csv_path, plan_headers);
+    backward_plan_logger = std::make_unique<CsvLogger>("backward_execution_plan_stats",
+                                                       bw_plan_csv_path, plan_headers);
   }
 
   MetricsLogger metrics_logger("tunx_" + artifact_name + "_" + timestamp, config.log_dir,
@@ -648,9 +624,9 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
               metrics_logger, forward_profiles_logger, forward_plan_logger,
               backward_profiles_logger, backward_plan_logger);
   } else {
-    train_step(graph, train_dataset, optimizer, criterion, scheduler, config,
-               metrics_logger, forward_profiles_logger, forward_plan_logger,
-               backward_profiles_logger, backward_plan_logger);
+    train_step(graph, train_dataset, optimizer, criterion, scheduler, config, metrics_logger,
+               forward_profiles_logger, forward_plan_logger, backward_profiles_logger,
+               backward_plan_logger);
   }
 }
 

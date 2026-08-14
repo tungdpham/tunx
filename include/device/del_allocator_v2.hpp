@@ -216,6 +216,22 @@ public:
     allocated_ = 0;
   }
 
+  void evict_unused() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto it = slabs_.begin(); it != slabs_.end();) {
+      if (it->active_allocations == 0) {
+        for (const auto &[block_offset, block_size] : it->free_by_offset) {
+          remove_from_free_map(block_size, {&*it, block_offset, block_size});
+        }
+        device_.deallocate_aligned_memory(it->ptr);
+        reserved_ -= it->size;
+        it = slabs_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
   // ensure that we have at least `size` free space
   void ensure(size_t size) override {
     std::lock_guard<std::mutex> lock(mutex_);

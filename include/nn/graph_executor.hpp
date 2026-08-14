@@ -12,6 +12,13 @@
 
 namespace tunx {
 
+struct BuiltPlan {
+  ExecutionPlan forward_plan;
+  ExecutionPlan backward_plan;
+  std::map<Edge, EdgeProfile> forward_edge_profiles;
+  std::map<Edge, EdgeProfile> backward_edge_profiles;
+};
+
 class GraphExecutor {
 public:
   explicit GraphExecutor(Graph &graph);
@@ -22,19 +29,20 @@ public:
   TensorBundle forward(TensorBundle &input_map);
   TensorBundle backward(TensorBundle &output_grad_map);
 
-  std::map<Edge, EdgeProfile> profile_edge_forward(TensorBundle &input_map);
+  const BuiltPlan &build_plans(TensorBundle &input_map);
+
   ExecutionPlanStats profile_forward_plan(TensorBundle &input_map, const ExecutionPlan &plan);
-  std::map<Edge, EdgeProfile> profile_edge_backward(TensorBundle &output_grad_map);
-  ExecutionPlanStats profile_backward_plan(TensorBundle &output_grad_map,
+  ExecutionPlanStats profile_backward_plan(TensorBundle &input_map, TensorBundle &output_grad_map,
                                            const ExecutionPlan &plan);
 
-  ExecutionPlan &active_forward_plan() { return active_forward_plan_; }
-  const ExecutionPlan &active_forward_plan() const { return active_forward_plan_; }
-  ExecutionPlan &active_backward_plan() { return active_backward_plan_; }
-  const ExecutionPlan &active_backward_plan() const { return active_backward_plan_; }
+  ExecutionPlan &active_forward_plan() { return active_built_plan_.forward_plan; }
+  const ExecutionPlan &active_forward_plan() const { return active_built_plan_.forward_plan; }
+  ExecutionPlan &active_backward_plan() { return active_built_plan_.backward_plan; }
+  const ExecutionPlan &active_backward_plan() const { return active_built_plan_.backward_plan; }
 
   std::map<Edge, Residuals> &residuals() { return residuals_; }
   const std::map<Edge, Residuals> &residuals() const { return residuals_; }
+  void clear_residuals() { residuals_.clear(); }
 
   void set_log_stream(std::ostream *os) { os_ = os; }
 
@@ -51,10 +59,8 @@ private:
 
   Graph &graph_;
   std::ostream *os_ = nullptr;
-  ExecutionPlan active_forward_plan_;
-  std::map<PlanKey, ExecutionPlan> forward_plans_;
-  ExecutionPlan active_backward_plan_;
-  std::map<PlanKey, ExecutionPlan> backward_plans_;
+  BuiltPlan active_built_plan_;
+  std::map<PlanKey, BuiltPlan> built_plans_;
   std::map<Node, Entry> data_;
   std::map<Node, Entry> grads_;
   std::map<Edge, Residuals> residuals_;
@@ -68,9 +74,12 @@ private:
   void set_grad(const Node &node, const Tensor &tensor, int ref_count);
   void accumulate_grad(const Node &node, const Tensor &tensor, int ref_count);
   void release_grad(const Node &node);
-  EdgeProfile forward_edge(const Edge &edge);
-  EdgeProfile backward_edge(const Edge &edge);
+  void forward_edge(const Edge &edge);
+  void backward_edge(const Edge &edge);
   void cleanup_released(std::map<Node, Entry> &entries);
+
+  std::map<Edge, EdgeProfile> profile_edge_forward(TensorBundle &input_map);
+  std::map<Edge, EdgeProfile> profile_edge_backward(TensorBundle &output_grad_map);
 };
 
 }  // namespace tunx

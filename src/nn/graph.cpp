@@ -145,7 +145,8 @@ void Graph::sort() {
   std::map<Edge, int> pending;
   Vec<Edge> ready;
 
-  for (const auto &edge : edges_) {
+  for (auto it = edges_.rbegin(); it != edges_.rend(); ++it) {
+    const auto &edge = *it;
     int count = 0;
     for (const auto &producer : edge->producers()) {
       if (produced_nodes.count(producer)) {
@@ -166,10 +167,12 @@ void Graph::sort() {
     ready.pop_back();
     sorted.push_back(e);
 
-    for (const auto &consumer : e->consumers()) {
+    for (auto consumer_it = e->consumers().rbegin(); consumer_it != e->consumers().rend(); ++consumer_it) {
+      const auto &consumer = *consumer_it;
       auto it = node_to_dependent_edges.find(consumer);
       if (it != node_to_dependent_edges.end()) {
-        for (const auto &dep_edge : it->second) {
+        for (auto dep_it = it->second.rbegin(); dep_it != it->second.rend(); ++dep_it) {
+          const auto &dep_edge = *dep_it;
           if (--pending[dep_edge] == 0) {
             ready.push_back(dep_edge);
           }

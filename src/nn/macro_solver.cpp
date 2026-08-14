@@ -198,7 +198,7 @@ ExecutionPlan MacroSolver::find_forward_order(const std::map<Edge, EdgeProfile> 
 
   std::set<std::string> cached_tensors;
   for (const auto &[edge, profile] : edge_profiles) {
-    for (const std::string &uid : profile.cached_inputs) {
+    for (const std::string &uid : profile.cached_nodes) {
       cached_tensors.insert(uid);
     }
   }
@@ -370,7 +370,7 @@ ExecutionPlan MacroSolver::find_backward_order(const std::map<Edge, EdgeProfile>
 
   std::set<std::string> cached_tensors;
   for (const auto &[edge, profile] : edge_profiles) {
-    for (const std::string &uid : profile.cached_inputs) {
+    for (const std::string &uid : profile.cached_nodes) {
       cached_tensors.insert(uid);
     }
   }

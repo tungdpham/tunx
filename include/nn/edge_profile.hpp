@@ -13,6 +13,6 @@ struct EdgeProfile {
   int64_t workspace_mem;  // memory for temporal workspace
   int64_t input_mem;      // memory for input tensors
   int64_t output_mem;     // memory for output tensors
-  std::vector<std::string> cached_inputs; // uid of inputs that are cached in residuals
+  std::vector<std::string> cached_nodes;  // uid of nodes that are cached in residuals
 };
 }  // namespace tunx

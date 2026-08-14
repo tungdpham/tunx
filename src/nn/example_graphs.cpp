@@ -279,15 +279,9 @@ Node inception_block(Node input, Shape &shape, size_t out_channels, const std::s
 
 Node v1_residual_block(Node input, Shape &shape, size_t out_channels, const std::string &name) {
   Shape b1_shape = shape;
-  Node b1 = conv2d(input, b1_shape, out_channels * 2, 1, 1, 1, 1, 0, 0, false, name + "_b1_conv_1");
-  Shape b1_main_shape = b1_shape;
-  Node b1_main = conv2d(b1, b1_main_shape, out_channels * 4, 3, 3, 1, 1, 1, 1, false,
-                        name + "_b1_conv_2_main");
-  Shape b1_shortcut_shape = b1_shape;
-  Node b1_shortcut = conv2d(b1, b1_shortcut_shape, out_channels * 4, 3, 3, 1, 1, 1, 1, false,
-                            name + "_b1_conv2_shortcut");
-  b1 = b1_main + b1_shortcut;
-  b1_shape = b1_main_shape;
+  Node b1 = avgpool2d(input, b1_shape, 3, 3, 1, 1, 1, 1, name + "_b1_avg_pool");
+  b1 = conv2d(b1, b1_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b1_conv");
+  b1 = batchnorm(b1, b1_shape, true, name + "_b1_bn");
   b1 = maxpool2d(b1, b1_shape, 2, 2, 2, 2, 0, 0, name + "_b1_pool");
 
   Shape b2_shape = shape;
@@ -305,9 +299,15 @@ Node v1_residual_block(Node input, Shape &shape, size_t out_channels, const std:
   b3 = maxpool2d(b3, b3_shape, 2, 2, 2, 2, 0, 0, name + "_b3_pool");
 
   Shape b4_shape = shape;
-  Node b4 = avgpool2d(input, b4_shape, 3, 3, 1, 1, 1, 1, name + "_b4_avg_pool");
-  b4 = conv2d(b4, b4_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b4_conv");
-  b4 = batchnorm(b4, b4_shape, true, name + "_b4_bn");
+  Node b4 = conv2d(input, b4_shape, out_channels * 2, 1, 1, 1, 1, 0, 0, false, name + "_b4_conv_1");
+  Shape b4_main_shape = b4_shape;
+  Node b4_main = conv2d(b4, b4_main_shape, out_channels * 4, 3, 3, 1, 1, 1, 1, false,
+                        name + "_b4_conv_2_main");
+  Shape b4_shortcut_shape = b4_shape;
+  Node b4_shortcut = conv2d(b4, b4_shortcut_shape, out_channels * 4, 3, 3, 1, 1, 1, 1, false,
+                            name + "_b4_conv2_shortcut");
+  b4 = b4_main + b4_shortcut;
+  b4_shape = b4_main_shape;
   b4 = maxpool2d(b4, b4_shape, 2, 2, 2, 2, 0, 0, name + "_b4_pool");
 
   auto [out, out_shape] =
@@ -736,120 +736,6 @@ Graph create_inception_v1_graph(IAllocator &allocator, GraphOpts opts) {
   return graph;
 }
 
-Graph create_unet_topology_graph(IAllocator &allocator, GraphOpts opts) {
-  Graph graph;
-  Node input = graph.input("input");
-  Shape shape = {1, 32, 32, 3};
-
-  // Encoder
-  Shape e1_shape = shape;
-  Node e1 = conv2d(input, e1_shape, 64, 3, 3, 1, 1, 1, 1, false, "e1_conv1");
-  e1 = batchnorm(e1, e1_shape, true, "e1_bn1");
-  e1 = conv2d(e1, e1_shape, 64, 3, 3, 1, 1, 1, 1, false, "e1_conv2");
-  e1 = batchnorm(e1, e1_shape, true, "e1_bn2");
-
-  Shape e2_shape = e1_shape;
-  Node e2 = conv2d(e1, e2_shape, 128, 3, 3, 1, 1, 1, 1, false, "e2_conv1");
-  e2 = batchnorm(e2, e2_shape, true, "e2_bn1");
-  e2 = conv2d(e2, e2_shape, 128, 3, 3, 1, 1, 1, 1, false, "e2_conv2");
-  e2 = batchnorm(e2, e2_shape, true, "e2_bn2");
-
-  Shape e3_shape = e2_shape;
-  Node e3 = conv2d(e2, e3_shape, 256, 3, 3, 1, 1, 1, 1, false, "e3_conv1");
-  e3 = batchnorm(e3, e3_shape, true, "e3_bn1");
-  e3 = conv2d(e3, e3_shape, 256, 3, 3, 1, 1, 1, 1, false, "e3_conv2");
-  e3 = batchnorm(e3, e3_shape, true, "e3_bn2");
-
-  // Bottleneck
-  Shape b_shape = e3_shape;
-  Node b = conv2d(e3, b_shape, 256, 3, 3, 1, 1, 1, 1, false, "b_conv1");
-  b = batchnorm(b, b_shape, true, "b_bn1");
-  b = conv2d(b, b_shape, 256, 3, 3, 1, 1, 1, 1, false, "b_conv2");
-  b = batchnorm(b, b_shape, true, "b_bn2");
-
-  // Decoder
-  Shape d3_shape = b_shape;
-  Node d3 = b + e3;
-  d3 = conv2d(d3, d3_shape, 128, 3, 3, 1, 1, 1, 1, false, "d3_conv1");
-  d3 = batchnorm(d3, d3_shape, true, "d3_bn1");
-  d3 = conv2d(d3, d3_shape, 128, 3, 3, 1, 1, 1, 1, false, "d3_conv2");
-  d3 = batchnorm(d3, d3_shape, true, "d3_bn2");
-
-  Shape d2_shape = d3_shape;
-  Node d2 = d3 + e2;
-  d2 = conv2d(d2, d2_shape, 64, 3, 3, 1, 1, 1, 1, false, "d2_conv1");
-  d2 = batchnorm(d2, d2_shape, true, "d2_bn1");
-  d2 = conv2d(d2, d2_shape, 64, 3, 3, 1, 1, 1, 1, false, "d2_conv2");
-  d2 = batchnorm(d2, d2_shape, true, "d2_bn2");
-
-  Shape d1_shape = d2_shape;
-  Node d1 = d2 + e1;
-  d1 = conv2d(d1, d1_shape, 32, 3, 3, 1, 1, 1, 1, false, "d1_conv1");
-  d1 = batchnorm(d1, d1_shape, true, "d1_bn1");
-  d1 = conv2d(d1, d1_shape, 32, 3, 3, 1, 1, 1, 1, false, "d1_conv2");
-  d1 = batchnorm(d1, d1_shape, true, "d1_bn2");
-
-  shape = d1_shape;
-  Node x = avgpool2d(d1, shape, 32, 32, 1, 1, 0, 0, "avgpool");
-  x = flatten(x, shape, 1, -1, "flatten");
-  Node output = dense(x, shape, 10, true, "output");
-
-  finalize_graph(graph, allocator, output, opts);
-  return graph;
-}
-
-Graph create_fpn_topology_graph(IAllocator &allocator, GraphOpts opts) {
-  Graph graph;
-  Node input = graph.input("input");
-  Shape shape = {1, 32, 32, 3};
-
-  Shape c1_shape = shape;
-  Node c1 = conv2d(input, c1_shape, 64, 3, 3, 1, 1, 1, 1, false, "c1_conv");
-  c1 = batchnorm(c1, c1_shape, true, "c1_bn");
-
-  Shape c2_shape = c1_shape;
-  Node c2 = conv2d(c1, c2_shape, 128, 3, 3, 1, 1, 1, 1, false, "c2_conv");
-  c2 = batchnorm(c2, c2_shape, true, "c2_bn");
-
-  Shape c3_shape = c2_shape;
-  Node c3 = conv2d(c2, c3_shape, 256, 3, 3, 1, 1, 1, 1, false, "c3_conv");
-  c3 = batchnorm(c3, c3_shape, true, "c3_bn");
-
-  Shape c4_shape = c3_shape;
-  Node c4 = conv2d(c3, c4_shape, 512, 3, 3, 1, 1, 1, 1, false, "c4_conv");
-  c4 = batchnorm(c4, c4_shape, true, "c4_bn");
-
-  Shape p4_shape = c4_shape;
-  Node p4 = conv2d(c4, p4_shape, 256, 1, 1, 1, 1, 0, 0, false, "p4_lat");
-
-  Shape p3_shape = c3_shape;
-  Node p3_lat = conv2d(c3, p3_shape, 256, 1, 1, 1, 1, 0, 0, false, "p3_lat");
-  Node p3 = p4 + p3_lat;
-  p3 = conv2d(p3, p3_shape, 256, 3, 3, 1, 1, 1, 1, false, "p3_out");
-
-  Shape p2_shape = c2_shape;
-  Node p2_lat = conv2d(c2, p2_shape, 256, 1, 1, 1, 1, 0, 0, false, "p2_lat");
-  Node p2 = p3 + p2_lat;
-  p2 = conv2d(p2, p2_shape, 256, 3, 3, 1, 1, 1, 1, false, "p2_out");
-
-  Shape p1_shape = c1_shape;
-  Node p1_lat = conv2d(c1, p1_shape, 256, 1, 1, 1, 1, 0, 0, false, "p1_lat");
-  Node p1 = p2 + p1_lat;
-  p1 = conv2d(p1, p1_shape, 256, 3, 3, 1, 1, 1, 1, false, "p1_out");
-
-  Node out = p1 + p2;
-  out = out + p3;
-  out = out + p4;
-  shape = p1_shape;
-
-  out = avgpool2d(out, shape, 32, 32, 1, 1, 0, 0, "avgpool");
-  out = flatten(out, shape, 1, -1, "flatten");
-  Node output = dense(out, shape, 10, true, "output");
-
-  finalize_graph(graph, allocator, output, opts);
-  return graph;
-}
-
 Graph create_tunx_v1_graph(IAllocator &allocator, GraphOpts opts) {
   Graph graph;
   Node input = graph.input("input");
@@ -879,8 +765,6 @@ void ExampleGraphs::register_defaults() {
   register_graph("mnist_cnn", create_mnist_graph);
 
   register_graph("inception_v1", create_inception_v1_graph);
-  register_graph("unet_topology", create_unet_topology_graph);
-  register_graph("fpn_topology", create_fpn_topology_graph);
 
   register_graph("cifar10_vgg", create_cifar10_vgg_graph);
   register_graph("cifar10_test", create_cifar10_test_graph);
