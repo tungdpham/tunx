@@ -89,14 +89,14 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
     key.input_shapes[node] = tensor.shape();
   }
 
-  auto it = plans_.find(key);
-  if (it == plans_.end()) {
+  auto it = forward_plans_.find(key);
+  if (it == forward_plans_.end()) {
     MacroSolver planner(graph_, os_);
     std::map<Edge, EdgeProfile> edge_profiles = profile_edge_forward(input_map);
     ExecutionPlan plan = planner.find_forward_order(edge_profiles);
-    it = plans_.emplace(key, plan).first;
+    it = forward_plans_.emplace(key, plan).first;
   }
-  active_plan_ = it->second;
+  active_forward_plan_ = it->second;
 
   for (const auto &[uid, tensor] : input_map) {
     auto it = uid_to_node.find(uid);
@@ -111,7 +111,7 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
   }
 
   TensorBundle output_map;
-  for (Edge &edge : active_plan_.order) {
+  for (Edge &edge : active_forward_plan_.order) {
     forward_edge(edge);
 
     for (const Node &consumer : edge->consumers()) {
@@ -131,6 +131,25 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
   for (const auto &node : graph_.nodes()) {
     uid_to_node[node->uid()] = node;
   }
+  PlanKey key;
+  for (const auto &[uid, tensor] : output_grad_map) {
+    auto &node = uid_to_node.at(uid);
+    key.input_shapes[node] = tensor.shape();
+  }
+
+  auto it = backward_plans_.find(key);
+  if (it == backward_plans_.end()) {
+    auto backup = residuals_;  // backup residuals
+
+    MacroSolver planner(graph_, os_);
+    std::map<Edge, EdgeProfile> edge_profiles = profile_edge_backward(output_grad_map);
+    ExecutionPlan plan = planner.find_backward_order(edge_profiles);
+    it = backward_plans_.emplace(key, plan).first;
+
+    residuals_ = std::move(backup);  // restore residuals
+  }
+  active_backward_plan_ = it->second;
+
   for (const auto &[uid, tensor] : output_grad_map) {
     auto it = uid_to_node.find(uid);
     if (it == uid_to_node.end()) {
@@ -145,8 +164,7 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
 
   TensorBundle grad_input_map;
 
-  for (auto it = active_plan_.order.rbegin(); it != active_plan_.order.rend(); ++it) {
-    Edge &edge = *it;
+  for (Edge &edge : active_backward_plan_.order) {
     backward_edge(edge);
 
     for (const auto &producer : edge->producers()) {
@@ -246,6 +264,91 @@ ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,
 
   // free memory for residuals since this is just profiling
   residuals_.clear();
+
+  stats.peak_mem = stats.edge_stats.size() > 0 ? stats.edge_stats.back().peak_mem : 0;
+
+  return stats;
+}
+
+std::map<Edge, EdgeProfile> GraphExecutor::profile_edge_backward(TensorBundle &output_grad_map) {
+  std::map<Edge, EdgeProfile> edge_profiles;
+  std::map<std::string, Node> uid_to_node;
+  for (const auto &node : graph_.nodes()) {
+    uid_to_node[node->uid()] = node;
+  }
+  for (const auto &[uid, tensor] : output_grad_map) {
+    auto it = uid_to_node.find(uid);
+    if (it == uid_to_node.end()) {
+      throw std::runtime_error("Output UID not found in graph: " + uid);
+    }
+    Tensor device_tensor = tensor;
+    if (tensor.device() != graph_.device()) {
+      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+    }
+    set_grad(it->second, device_tensor, grad_ref_counts_[it->second]);
+  }
+
+  TensorBundle grad_input_map;
+
+  for (auto it = graph_.edges().rbegin(); it != graph_.edges().rend(); ++it) {
+    const Edge &edge = *it;
+    EdgeProfile profile = backward_edge(edge);
+    edge_profiles[edge] = profile;
+
+    for (const auto &producer : edge->producers()) {
+      if (graph_.is_input(producer)) {
+        grad_input_map.set(producer->uid(), grad(producer));
+      }
+    }
+  }
+
+  return edge_profiles;
+}
+
+ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &output_grad_map,
+                                                        const ExecutionPlan &plan) {
+  std::map<std::string, Node> uid_to_node;
+  for (const auto &node : graph_.nodes()) {
+    uid_to_node[node->uid()] = node;
+  }
+  for (const auto &[uid, tensor] : output_grad_map) {
+    auto it = uid_to_node.find(uid);
+    if (it == uid_to_node.end()) {
+      throw std::runtime_error("Output UID not found in graph: " + uid);
+    }
+    Tensor device_tensor = tensor;
+    if (tensor.device() != graph_.device()) {
+      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+    }
+    set_grad(it->second, device_tensor, grad_ref_counts_[it->second]);
+  }
+
+  TensorBundle grad_input_map;
+
+  auto *allocator = graph_.workspace_allocator();
+  size_t peak_usage = 0;
+  const size_t hook_id = allocator->add_allocation_hook(
+      [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
+
+  ExecutionPlanStats stats;
+
+  for (const Edge &edge : plan.order) {
+    backward_edge(edge);
+
+    EdgeMemStats edge_stat;
+    edge_stat.layer_name = edge->layer()->name();
+    edge_stat.allocated_mem = allocator->allocated();
+    edge_stat.peak_mem = peak_usage;
+    stats.edge_stats.push_back(edge_stat);
+
+    for (const auto &producer : edge->producers()) {
+      if (graph_.is_input(producer)) {
+        grad_input_map.set(producer->uid(), grad(producer));
+      }
+    }
+  }
+
+  allocator->remove_allocation_hook(hook_id);
 
   stats.peak_mem = stats.edge_stats.size() > 0 ? stats.edge_stats.back().peak_mem : 0;
 

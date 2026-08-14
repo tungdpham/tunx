@@ -24,9 +24,14 @@ public:
 
   std::map<Edge, EdgeProfile> profile_edge_forward(TensorBundle &input_map);
   ExecutionPlanStats profile_forward_plan(TensorBundle &input_map, const ExecutionPlan &plan);
+  std::map<Edge, EdgeProfile> profile_edge_backward(TensorBundle &output_grad_map);
+  ExecutionPlanStats profile_backward_plan(TensorBundle &output_grad_map,
+                                           const ExecutionPlan &plan);
 
-  ExecutionPlan &active_plan() { return active_plan_; }
-  const ExecutionPlan &active_plan() const { return active_plan_; }
+  ExecutionPlan &active_forward_plan() { return active_forward_plan_; }
+  const ExecutionPlan &active_forward_plan() const { return active_forward_plan_; }
+  ExecutionPlan &active_backward_plan() { return active_backward_plan_; }
+  const ExecutionPlan &active_backward_plan() const { return active_backward_plan_; }
 
   std::map<Edge, Residuals> &residuals() { return residuals_; }
   const std::map<Edge, Residuals> &residuals() const { return residuals_; }
@@ -46,8 +51,10 @@ private:
 
   Graph &graph_;
   std::ostream *os_ = nullptr;
-  ExecutionPlan active_plan_;
-  std::map<PlanKey, ExecutionPlan> plans_;
+  ExecutionPlan active_forward_plan_;
+  std::map<PlanKey, ExecutionPlan> forward_plans_;
+  ExecutionPlan active_backward_plan_;
+  std::map<PlanKey, ExecutionPlan> backward_plans_;
   std::map<Node, Entry> data_;
   std::map<Node, Entry> grads_;
   std::map<Edge, Residuals> residuals_;

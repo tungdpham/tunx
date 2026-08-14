@@ -21,7 +21,7 @@
 std::vector<std::string> find_macro_candidate_execution_order(Graph& graph,
                                                               std::ostream* os = nullptr) {
   MacroSolver solver(graph, os);
-  return solver.find_forward_order();
+  return solver.find_order();
 }
 
 std::vector<std::string> find_fork_join_optimal_execution_order(Graph& graph);

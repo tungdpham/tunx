@@ -29,8 +29,10 @@ private:
   std::map<std::string, std::set<std::string>> macro_deps_;
   std::map<std::string, std::set<std::string>> macro_dependents_;
 
-  bool has_peers(const std::string &macro_id, const std::map<Node, int> &out_deg,
-                 const std::set<std::string> &cached_tensors) const;
+  bool has_peers_forward(const std::string &macro_id, const std::map<Node, int> &out_deg,
+                         const std::set<std::string> &cached_tensors) const;
+  bool has_peers_backward(const std::string &macro_id, const std::map<Node, int> &out_deg,
+                          const std::set<std::string> &cached_tensors) const;
   std::string merge_macros(const std::string &parent, const std::string &child, int &next_macro_id,
                            const char *reason);
   std::map<std::string, int> ancestor_distances(const std::string &macro_id) const;
@@ -46,5 +48,6 @@ public:
         log_stream_(log_stream) {}
 
   ExecutionPlan find_forward_order(const std::map<Edge, EdgeProfile> &edge_profiles);
+  ExecutionPlan find_backward_order(const std::map<Edge, EdgeProfile> &edge_profiles);
 };
 }  // namespace tunx
