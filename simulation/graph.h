@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <fstream>
 #include <map>
 #include <set>
@@ -144,21 +145,78 @@ inline std::map<std::string, int> get_out_deg(Graph& graph) {
   return out_deg;
 }
 
-inline void save_graph_to_dot(Graph& graph, const std::string& filename) {
+inline void save_graph_to_dot(Graph& graph, const std::string& filename, bool is_backward = false) {
   std::ofstream out(filename);
   out << "digraph G {\n";
   for (auto& [uuid, act] : graph.act_nodes()) {
     out << "  \"" << act.uuid() << "\" [shape=ellipse, label=\"" << act.uuid() << "\\n("
         << act.size() << ")\"];\n";
   }
+
+  std::map<std::string, int> out_deg;
+  std::map<std::string, int> in_deg;
+  if (!is_backward) {
+    out_deg = get_out_deg(graph);
+  } else {
+    for (auto& [uuid, node] : graph.op_nodes()) {
+      for (auto* t : node.outputs()) {
+        in_deg[t->uuid()]++;
+      }
+    }
+    for (auto* t : graph.inputs()) {
+      in_deg[t->uuid()]++;
+    }
+  }
+
   for (auto& [uuid, op] : graph.op_nodes()) {
-    out << "  \"" << op.uuid() << "\" [shape=box, label=\"" << op.uuid() << "\\n("
-        << op.workspace_req() << ")\"];\n";
+    long long all_outputs = 0;
+    for (auto* t : op.outputs()) all_outputs += t->size();
+    long long all_inputs = 0;
+    for (auto* t : op.inputs()) all_inputs += t->size();
+    long long workspace = op.workspace_req();
+    long long residual = op.residual_mem();
+
+    long long a = 0;
+    long long b = 0;
+
+    if (!is_backward) {
+      a = all_outputs + workspace + residual;
+      long long memory_consumes = 0;
+      for (auto* t : op.inputs()) {
+        if (out_deg[t->uuid()] == 1 &&
+            std::find(op.cache().begin(), op.cache().end(), t) == op.cache().end()) {
+          memory_consumes += t->size();
+        }
+      }
+      b = all_outputs + residual - memory_consumes;
+    } else {
+      a = all_outputs + workspace;
+      long long memory_consumes = residual;
+      for (auto* t : op.outputs()) {
+        if (in_deg[t->uuid()] == 1) {
+          memory_consumes += t->size();
+        }
+      }
+      b = all_inputs - memory_consumes;
+    }
+
+    out << "  \"" << op.uuid() << "\" [shape=box, label=\"" << op.uuid() << "\\n"
+        << "ws: " << workspace << ", res: " << residual << "\\n"
+        << "a: " << a << ", b: " << b << "\"];\n";
+
     for (auto* in : op.inputs()) {
-      out << "  \"" << in->uuid() << "\" -> \"" << op.uuid() << "\";\n";
+      if (!is_backward) {
+        out << "  \"" << in->uuid() << "\" -> \"" << op.uuid() << "\";\n";
+      } else {
+        out << "  \"" << op.uuid() << "\" -> \"" << in->uuid() << "\";\n";
+      }
     }
     for (auto* out_act : op.outputs()) {
-      out << "  \"" << op.uuid() << "\" -> \"" << out_act->uuid() << "\";\n";
+      if (!is_backward) {
+        out << "  \"" << op.uuid() << "\" -> \"" << out_act->uuid() << "\";\n";
+      } else {
+        out << "  \"" << out_act->uuid() << "\" -> \"" << op.uuid() << "\";\n";
+      }
     }
   }
   out << "}\n";

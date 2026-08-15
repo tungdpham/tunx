@@ -17,16 +17,19 @@
 #include "graph_executor.h"
 #include "graph_generator.h"
 #include "macro_solver.h"
+#include "memory_packer.h"
 
-std::vector<std::string> find_macro_candidate_execution_order(Graph& graph,
-                                                              std::ostream* os = nullptr) {
+std::vector<std::string> find_fw_macro_candidate_execution_order(Graph& graph,
+                                                                 std::ostream* os = nullptr) {
   MacroSolver solver(graph, os);
-  return solver.find_order();
+  return solver.find_forward_order();
 }
 
-std::vector<std::string> find_fork_join_optimal_execution_order(Graph& graph);
-
-std::vector<std::string> find_diamond_execution_order(Graph& graph, size_t max_states = 1000000);
+std::vector<std::string> find_bw_macro_candidate_execution_order(Graph& graph,
+                                                                 std::ostream* os = nullptr) {
+  MacroSolver solver(graph, os);
+  return solver.find_backward_order();
+}
 
 std::vector<std::string> find_fork_join_optimal_execution_order(Graph& graph) {
   if (graph.inputs().size() != 1 || graph.outputs().size() != 1) return {};
@@ -148,11 +151,12 @@ std::vector<std::string> find_fork_join_optimal_execution_order(Graph& graph) {
   return solve(completed).order;
 }
 
-std::vector<std::string> find_diamond_execution_order(Graph& graph, size_t max_states) {
+std::vector<std::string> find_fw_diamond_execution_order(Graph& graph,
+                                                         size_t max_states = 1000000) {
   std::vector<std::string> op_ids;
   std::map<std::string, int> op_index;
   for (const auto& [uuid, op] : graph.op_nodes()) {
-    if (op_ids.size() == 256) return find_macro_candidate_execution_order(graph);
+    if (op_ids.size() == 256) return find_fw_macro_candidate_execution_order(graph);
     op_index[op.uuid()] = static_cast<int>(op_ids.size());
     op_ids.push_back(op.uuid());
   }
@@ -225,7 +229,7 @@ std::vector<std::string> find_diamond_execution_order(Graph& graph, size_t max_s
   return result.order;
 }
 
-std::vector<std::string> find_naive_dfs_execution_order(Graph& graph) {
+std::vector<std::string> find_fw_naive_dfs_execution_order(Graph& graph) {
   auto [dependencies, dependents] = get_dependencies(graph);
   std::set<std::string> visited;
   std::vector<std::string> order;
@@ -250,8 +254,127 @@ std::vector<std::string> find_naive_dfs_execution_order(Graph& graph) {
   return order;
 }
 
-std::vector<std::string> find_minimum_memory_execution_order(Graph& graph) {
-  return find_diamond_execution_order(graph);
+std::vector<std::string> find_bw_diamond_execution_order(Graph& graph,
+                                                         size_t max_states = 1000000) {
+  std::vector<std::string> op_ids;
+  std::map<std::string, int> op_index;
+  for (const auto& [uuid, op] : graph.op_nodes()) {
+    if (op_ids.size() == 256) {
+      MacroSolver solver(graph);
+      return solver.find_backward_order();
+    }
+    op_index[op.uuid()] = static_cast<int>(op_ids.size());
+    op_ids.push_back(op.uuid());
+  }
+
+  auto deps_and_dependents = get_dependencies(graph);
+  auto dependencies = deps_and_dependents.second;
+
+  struct Schedule {
+    size_t peak;
+    std::vector<std::string> order;
+  };
+
+  Allocator allocator;
+  GraphExecutor executor(graph);
+  
+  executor.init_boundaries(&allocator);
+  std::vector<std::string> fw_order = find_fw_naive_dfs_execution_order(graph);
+  for (const auto& op_id : fw_order) {
+    OperationNode* op_node = nullptr;
+    for (auto& [uuid, node] : graph.op_nodes()) {
+      if (node.uuid() == op_id) {
+        op_node = &node;
+        break;
+      }
+    }
+    if (op_node) executor.run_op_node(op_node, &allocator);
+  }
+
+  size_t initial_peak = 0;
+  allocator.subscribe("diamond_dp_init",
+                      [&](size_t memory) { initial_peak = std::max(initial_peak, memory); });
+  executor.transition_to_backward(&allocator);
+  allocator.unsubscribe("diamond_dp_init");
+
+  std::unordered_map<std::bitset<256>, Schedule> memo;
+  bool state_limit_reached = false;
+  std::function<Schedule(std::bitset<256>&)> solve = [&](std::bitset<256>& completed) {
+    if (const auto it = memo.find(completed); it != memo.end()) return it->second;
+    if (memo.size() >= max_states) {
+      state_limit_reached = true;
+      return Schedule{std::numeric_limits<size_t>::max(), {}};
+    }
+
+    if (completed.count() == op_ids.size()) {
+      return memo.emplace(completed, Schedule{allocator.allocated(), {}}).first->second;
+    }
+
+    Schedule best{std::numeric_limits<size_t>::max(), {}};
+    for (const auto& op_id : op_ids) {
+      const int index = op_index[op_id];
+      if (completed.test(index)) continue;
+
+      bool ready = true;
+      for (const auto& dependency : dependencies[op_id]) {
+        if (!completed.test(op_index[dependency])) {
+          ready = false;
+          break;
+        }
+      }
+      if (!ready) continue;
+
+      const auto& op = graph.get_op(op_id);
+      size_t op_peak = allocator.allocated();
+      allocator.subscribe("diamond_dp",
+                          [&](size_t memory) { op_peak = std::max(op_peak, memory); });
+      executor.run_backward_op_node(&op, &allocator);
+      allocator.unsubscribe("diamond_dp");
+      completed.set(index);
+
+      Schedule suffix = solve(completed);
+      const size_t candidate_peak = std::max(op_peak, suffix.peak);
+      if (candidate_peak < best.peak) {
+        best.peak = candidate_peak;
+        best.order = {op_id};
+        best.order.insert(best.order.end(), suffix.order.begin(), suffix.order.end());
+      }
+
+      completed.reset(index);
+      executor.undo_run_backward_op_node(&op, &allocator);
+    }
+    return memo.emplace(completed, std::move(best)).first->second;
+  };
+
+  std::bitset<256> completed;
+  Schedule result = solve(completed);
+  return result.order;
+}
+
+std::vector<std::string> find_bw_naive_dfs_execution_order(Graph& graph) {
+  auto deps_and_dependents = get_dependencies(graph);
+  auto dependencies = deps_and_dependents.second;
+  std::set<std::string> visited;
+  std::vector<std::string> order;
+
+  std::vector<std::string> op_ids;
+  for (const auto& [uuid, op] : graph.op_nodes()) op_ids.push_back(uuid);
+  std::sort(op_ids.begin(), op_ids.end());
+
+  std::function<void(const std::string&)> dfs = [&](const std::string& op_id) {
+    if (visited.count(op_id)) return;
+    visited.insert(op_id);
+
+    std::vector<std::string> deps(dependencies[op_id].begin(), dependencies[op_id].end());
+    std::sort(deps.begin(), deps.end());
+    for (const auto& dep : deps) dfs(dep);
+
+    order.push_back(op_id);
+  };
+
+  for (const auto& uuid : op_ids) dfs(uuid);
+
+  return order;
 }
 
 inline bool near(double a, double b) { return std::abs(a - b) < 1e-15; }
@@ -301,6 +424,127 @@ std::map<std::string, double> rank_execution_orders(
   return efficiencies;
 }
 
+std::map<std::string, double> rank_backward_execution_orders(
+    Graph& g, const std::map<std::string, std::vector<std::string>>& orders) {
+  std::map<std::string, size_t> peaks;
+  size_t best_peak = std::numeric_limits<size_t>::max();
+
+  for (const auto& [name, order] : orders) {
+    if (order.empty()) {
+      peaks[name] = std::numeric_limits<size_t>::max();
+      continue;
+    }
+    Allocator allocator;
+    GraphExecutor executor(g);
+    
+    executor.init_boundaries(&allocator);
+    std::vector<std::string> fw_order = find_fw_naive_dfs_execution_order(g);
+    for (const auto& op_id : fw_order) {
+      OperationNode* op_node = nullptr;
+      for (auto& [uuid, node] : g.op_nodes()) {
+        if (node.uuid() == op_id) {
+          op_node = &node;
+          break;
+        }
+      }
+      if (op_node) executor.run_op_node(op_node, &allocator);
+    }
+
+    size_t peak = 0;
+    allocator.subscribe("rank", [&](size_t new_mem) {
+      if (new_mem > peak) peak = new_mem;
+    });
+    executor.transition_to_backward(&allocator);
+    for (const auto& op_id : order) {
+      OperationNode* op_node = nullptr;
+      for (auto& [uuid, node] : g.op_nodes()) {
+        if (node.uuid() == op_id) {
+          op_node = &node;
+          break;
+        }
+      }
+      if (op_node) executor.run_backward_op_node(op_node, &allocator);
+    }
+    allocator.unsubscribe("rank");
+    peaks[name] = peak;
+    if (peaks[name] < best_peak) {
+      best_peak = peaks[name];
+    }
+  }
+
+  std::map<std::string, double> efficiencies;
+  for (const auto& [name, peak] : peaks) {
+    if (peak == std::numeric_limits<size_t>::max()) {
+      efficiencies[name] = 0.0;
+    } else {
+      efficiencies[name] = (static_cast<double>(best_peak) / static_cast<double>(peak)) * 100.0;
+    }
+  }
+  return efficiencies;
+}
+
+std::map<std::string, double> rank_packing_efficiencies(
+    Graph& g, const std::map<std::string, std::vector<std::string>>& orders, bool training) {
+  std::map<std::string, double> efficiencies;
+
+  for (const auto& [name, order] : orders) {
+    if (order.empty()) {
+      efficiencies[name] = 0.0;
+      continue;
+    }
+    size_t packed_peak = compute_ffd_peak_memory(g, order, training);
+
+    Allocator allocator;
+    GraphExecutor executor(g);
+    size_t idealized_peak = 0;
+    allocator.subscribe("rank", [&](size_t new_mem) {
+      if (new_mem > idealized_peak) idealized_peak = new_mem;
+    });
+    if (training) {
+      executor.init_boundaries(&allocator);
+      std::vector<std::string> fw_order = order;
+      std::reverse(fw_order.begin(), fw_order.end());
+      for (const auto& op_id : fw_order) {
+        OperationNode* op_node = nullptr;
+        for (auto& [uuid, node] : g.op_nodes()) {
+          if (node.uuid() == op_id) {
+            op_node = &node;
+            break;
+          }
+        }
+        executor.run_op_node(op_node, &allocator);
+      }
+      executor.transition_to_backward(&allocator);
+    } else {
+      executor.init_boundaries(&allocator);
+    }
+    for (const auto& op_id : order) {
+      OperationNode* op_node = nullptr;
+      for (auto& [uuid, node] : g.op_nodes()) {
+        if (node.uuid() == op_id) {
+          op_node = &node;
+          break;
+        }
+      }
+      if (op_node) {
+        if (training)
+          executor.run_backward_op_node(op_node, &allocator);
+        else
+          executor.run_op_node(op_node, &allocator, false);
+      }
+    }
+    allocator.unsubscribe("rank");
+
+    if (packed_peak == 0 || packed_peak == std::numeric_limits<size_t>::max()) {
+      efficiencies[name] = 0.0;
+    } else {
+      efficiencies[name] =
+          (static_cast<double>(idealized_peak) / static_cast<double>(packed_peak)) * 100.0;
+    }
+  }
+  return efficiencies;
+}
+
 template <typename T>
 bool contains(const std::vector<T>& vec, const T& val) {
   return std::find(vec.begin(), vec.end(), val) != vec.end();
@@ -315,269 +559,128 @@ void print_stats(std::map<std::string, std::vector<double>>& effs_by_name) {
     double avg = sum / effs.size();
     double worst = effs.front();
     double best = effs.back();
-    double p10 = effs[effs.size() * 10 / 100];
+    double p25 = effs[effs.size() * 25 / 100];
     double p50 = effs[effs.size() * 50 / 100];
-    double p90 = effs[effs.size() * 90 / 100];
+    double p75 = effs[effs.size() * 75 / 100];
 
     std::cout << "Order: " << name << "\n";
     std::cout << "  Average: " << std::fixed << std::setprecision(2) << avg << "%\n";
     std::cout << "  Worst:   " << std::fixed << std::setprecision(2) << worst << "%\n";
-    std::cout << "  p10:     " << std::fixed << std::setprecision(2) << p10 << "%\n";
+    std::cout << "  p25:     " << std::fixed << std::setprecision(2) << p25 << "%\n";
     std::cout << "  Median:  " << std::fixed << std::setprecision(2) << p50 << "%\n";
-    std::cout << "  p90:     " << std::fixed << std::setprecision(2) << p90 << "%\n";
-    std::cout << "  Best:    " << std::fixed << std::setprecision(2) << best << "%\n\n";
+    std::cout << "  p75:     " << std::fixed << std::setprecision(2) << p75 << "%\n";
+    std::cout << "  Best:    " << std::fixed << std::setprecision(2) << best << "%\n";
   }
+}
+
+void run_simulation_trials(int original_trials, const std::string& title,
+                           const std::string& log_prefix, std::function<Graph()> graph_generator,
+                           const std::vector<std::string>& to_checks) {
+  std::map<std::string, std::vector<double>> fw_efficiencies;
+  std::map<std::string, std::vector<double>> bw_efficiencies;
+  std::map<std::string, std::vector<double>> fw_packing_efficiencies;
+  std::map<std::string, std::vector<double>> fp_packing_efficiencies;
+
+  int trials = original_trials;
+  while (trials--) {
+    Graph g = graph_generator();
+
+    auto fw_best_order = find_fw_diamond_execution_order(g);
+    auto fw_macro_order = find_fw_macro_candidate_execution_order(g);
+    auto fw_dfs_order = find_fw_naive_dfs_execution_order(g);
+
+    std::map<std::string, std::vector<std::string>> fw_orders = {
+        {"BEST", fw_best_order}, {"MACRO", fw_macro_order}, {"DFS", fw_dfs_order}};
+
+    auto fw_effs = rank_execution_orders(g, fw_orders);
+
+    auto bw_best_order = find_bw_diamond_execution_order(g);
+    auto bw_macro_order = find_bw_macro_candidate_execution_order(g);
+    auto bw_dfs_order = find_bw_naive_dfs_execution_order(g);
+    std::map<std::string, std::vector<std::string>> bw_orders = {
+        {"BEST", bw_best_order}, {"MACRO", bw_macro_order}, {"DFS", bw_dfs_order}};
+    auto bw_effs = rank_backward_execution_orders(g, bw_orders);
+    auto fw_packing_effs = rank_packing_efficiencies(g, fw_orders, false);
+    auto bw_packing_effs = rank_packing_efficiencies(g, bw_orders, true);
+
+    for (const auto& [name, eff] : fw_effs) {
+      fw_efficiencies[name].push_back(eff);
+      fw_packing_efficiencies[name].push_back(fw_packing_effs[name]);
+      if (contains(to_checks, name) && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "./logs/" + log_prefix + "_fw_graph.dot");
+        std::ofstream log("./logs/" + log_prefix + "_fw_bad_macro.log", std::ios_base::app);
+        log << "--- Trial Failure ---\n";
+        log << name << " Efficiency: " << eff << "%\n";
+        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
+          log << p_name << " Path: ";
+          for (const auto& op : path) log << op << " ";
+          log << "\n";
+        };
+        print_path("BEST", fw_best_order);
+        print_path(name, fw_macro_order);
+        find_fw_macro_candidate_execution_order(g, &log);
+        log << "\n";
+      }
+    }
+
+    for (const auto& [name, eff] : bw_effs) {
+      bw_efficiencies[name].push_back(eff);
+      fp_packing_efficiencies[name].push_back(bw_packing_effs[name]);
+      if (contains(to_checks, name) && !near(eff, 100.0)) {
+        save_graph_to_dot(g, "./logs/" + log_prefix + "_bw_graph.dot", true);
+        std::ofstream log("./logs/" + log_prefix + "_bw_bad_macro.log", std::ios_base::app);
+        log << "--- Trial Failure ---\n";
+        log << name << " Efficiency: " << eff << "%\n";
+        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
+          log << p_name << " Path: ";
+          for (const auto& op : path) log << op << " ";
+          log << "\n";
+        };
+        print_path("BEST", bw_best_order);
+        print_path(name, bw_macro_order);
+        find_bw_macro_candidate_execution_order(g, &log);
+        log << "\n";
+      }
+    }
+  }
+
+  std::cout << "=== " << title << " Forward Efficiency Overview (" << original_trials
+            << " trials) ===\n";
+  print_stats(fw_efficiencies);
+  std::cout << "=== " << title << " Forward Packing Efficiency Overview (" << original_trials
+            << " trials) ===\n";
+  print_stats(fw_packing_efficiencies);
+
+  std::cout << "=== " << title << " Backward Pass Efficiency Overview (" << original_trials
+            << " trials) ===\n";
+  print_stats(bw_efficiencies);
+  std::cout << "=== " << title << " Full Pass Packing Efficiency Overview (" << original_trials
+            << " trials) ===\n";
+  print_stats(fp_packing_efficiencies);
 }
 
 int main() {
   srand(static_cast<unsigned int>(time(nullptr)));
 
-  {
-    Graph g = tunx_v1_graph();
-    auto best_order = find_minimum_memory_execution_order(g);
-    auto macro_order = find_macro_candidate_execution_order(g);
-    auto dfs_order = find_naive_dfs_execution_order(g);
-    auto effs = rank_execution_orders(
-        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"DFS", dfs_order}});
-
-    std::cout << "=== Tunx V1 Graph Efficiency ===\n";
-    for (const auto& [name, eff] : effs) {
-      std::cout << "  " << name << " Efficiency: " << std::fixed << std::setprecision(2) << eff
-                << "%\n";
-      if (name == "MACRO") {
-        save_graph_to_dot(g, "./logs/tunx_v1_graph.dot");
-        std::ofstream log("./logs/tunx_v1_bad_macro.log", std::ios_base::app);
-        log << "--- Tunx V1 Graph Failure ---\n";
-        log << name << " Efficiency: " << eff << "%\n";
-        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
-          log << p_name << " Path: ";
-          for (const auto& op : path) log << op << " ";
-          log << "\n";
-        };
-        print_path("BEST", best_order);
-        print_path(name, macro_order);
-        find_macro_candidate_execution_order(g, &log);
-        log << "\n";
-      }
-    }
-  }
   int trials;
   std::cin >> trials;
-  int original_trials = trials;
-  std::map<std::string, std::vector<double>> all_sample_efficiencies;
-  std::map<std::string, std::vector<double>> all_branch_efficiencies;
-  std::map<std::string, std::vector<double>> all_static_branch_efficiencies;
-  std::map<std::string, std::vector<double>> all_join_efficiencies;
-  std::map<std::string, std::vector<double>> all_diamond_efficiencies;
-  std::map<std::string, std::vector<double>> all_static_diamond_efficiencies;
-
   std::vector<std::string> to_checks = {"MACRO"};
 
-  trials = original_trials;
-  while (trials--) {
-    Graph g = sample_branch_graph();
-
-    auto best_order = find_minimum_memory_execution_order(g);
-    auto macro_order = find_macro_candidate_execution_order(g);
-    auto dfs_order = find_naive_dfs_execution_order(g);
-
-    auto effs = rank_execution_orders(g, {
-                                             {"BEST", best_order},
-                                             {"MACRO", macro_order},
-                                             {"DFS", dfs_order},
-                                         });
-
-    for (const auto& [name, eff] : effs) {
-      all_sample_efficiencies[name].push_back(eff);
-      if (contains(to_checks, name) && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "./logs/sample_graph.dot");
-        std::ofstream log("./logs/sample_bad_macro.log", std::ios_base::app);
-        log << "--- Trial Failure ---\n";
-        log << name << " Efficiency: " << eff << "%\n";
-        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
-          log << p_name << " Path: ";
-          for (const auto& op : path) log << op << " ";
-          log << "\n";
-        };
-        print_path("BEST", best_order);
-        print_path(name, macro_order);
-        find_macro_candidate_execution_order(g, &log);
-        log << "\n";
-      }
-    }
-  }
-  std::cout << "=== Sample Efficiency Overview (" << original_trials << " trials) ===\n";
-  print_stats(all_sample_efficiencies);
-
-  trials = original_trials;
-  while (trials--) {
-    Graph g = random_joining_graph(4);
-
-    auto best_order = find_minimum_memory_execution_order(g);
-    auto macro_order = find_macro_candidate_execution_order(g);
-    auto dfs_order = find_naive_dfs_execution_order(g);
-
-    auto effs = rank_execution_orders(
-        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"DFS", dfs_order}});
-
-    for (const auto& [name, eff] : effs) {
-      all_join_efficiencies[name].push_back(eff);
-      if (contains(to_checks, name) && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "./logs/join_graph.dot");
-        std::ofstream log("./logs/join_bad_macro.log", std::ios_base::app);
-        log << "--- Trial Failure ---\n";
-        log << name << " Efficiency: " << eff << "%\n";
-        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
-          log << p_name << " Path: ";
-          for (const auto& op : path) log << op << " ";
-          log << "\n";
-        };
-        print_path("BEST", best_order);
-        print_path(name, macro_order);
-        find_macro_candidate_execution_order(g, &log);
-        log << "\n";
-      }
-    }
-  }
-
-  std::cout << "=== Join Efficiency Overview (" << original_trials << " trials) ===\n";
-  print_stats(all_join_efficiencies);
-
-  trials = original_trials;
-  while (trials--) {
-    Graph g = random_branching_graph(3);
-
-    auto best_order = find_minimum_memory_execution_order(g);
-    auto macro_order = find_macro_candidate_execution_order(g);
-    auto dfs_order = find_naive_dfs_execution_order(g);
-
-    auto effs = rank_execution_orders(
-        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"DFS", dfs_order}});
-
-    for (const auto& [name, eff] : effs) {
-      all_branch_efficiencies[name].push_back(eff);
-      if (contains(to_checks, name) && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "./logs/graph.dot");
-        std::ofstream log("./logs/branch_bad_macro.log", std::ios_base::app);
-        log << "--- Trial Failure ---\n";
-        log << name << " Efficiency: " << eff << "%\n";
-        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
-          log << p_name << " Path: ";
-          for (const auto& op : path) log << op << " ";
-          log << "\n";
-        };
-        print_path("BEST", best_order);
-        print_path(name, macro_order);
-        find_macro_candidate_execution_order(g, &log);
-        log << "\n";
-      }
-    }
-  }
-
-  std::cout << "=== Branch Efficiency Overview (" << original_trials << " trials) ===\n";
-  print_stats(all_branch_efficiencies);
-
-  trials = original_trials;
-  while (trials--) {
-    Graph g = random_static_branching_graph(3);
-
-    auto best_order = find_minimum_memory_execution_order(g);
-    auto macro_order = find_macro_candidate_execution_order(g);
-    auto dfs_order = find_naive_dfs_execution_order(g);
-
-    auto effs = rank_execution_orders(
-        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"DFS", dfs_order}});
-
-    for (const auto& [name, eff] : effs) {
-      all_static_branch_efficiencies[name].push_back(eff);
-      if (contains(to_checks, name) && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "./logs/static_branch_graph.dot");
-        std::ofstream log("./logs/static_branch_bad_macro.log", std::ios_base::app);
-        log << "--- Trial Failure ---\n";
-        log << name << " Efficiency: " << eff << "%\n";
-        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
-          log << p_name << " Path: ";
-          for (const auto& op : path) log << op << " ";
-          log << "\n";
-        };
-        print_path("BEST", best_order);
-        print_path(name, macro_order);
-        find_macro_candidate_execution_order(g, &log);
-        log << "\n";
-      }
-    }
-  }
-
-  std::cout << "=== Static Branch Efficiency Overview (" << original_trials << " trials) ===\n";
-  print_stats(all_static_branch_efficiencies);
-
-  trials = original_trials;
-  while (trials--) {
-    Graph g = random_diamond_graph(4);
-
-    auto best_order = find_minimum_memory_execution_order(g);
-    auto macro_order = find_macro_candidate_execution_order(g);
-    auto dfs_order = find_naive_dfs_execution_order(g);
-
-    auto effs = rank_execution_orders(
-        g, {{"MACRO", macro_order}, {"BEST", best_order}, {"DFS", dfs_order}});
-
-    for (const auto& [name, eff] : effs) {
-      all_diamond_efficiencies[name].push_back(eff);
-      if (contains(to_checks, name) && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "./logs/diamond_graph.dot");
-        std::ofstream log("./logs/diamond_bad_macro.log", std::ios_base::app);
-        log << "--- Trial Failure ---\n";
-        log << name << " Efficiency: " << eff << "%\n";
-        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
-          log << p_name << " Path: ";
-          for (const auto& op : path) log << op << " ";
-          log << "\n";
-        };
-        print_path("BEST", best_order);
-        print_path(name, macro_order);
-        find_macro_candidate_execution_order(g, &log);
-        log << "\n";
-      }
-    }
-  }
-
-  std::cout << "=== Diamond Efficiency Overview (" << original_trials << " trials) ===\n";
-  print_stats(all_diamond_efficiencies);
-
-  trials = original_trials;
-  while (trials--) {
-    Graph g = random_static_diamond_graph(4);
-
-    auto best_order = find_minimum_memory_execution_order(g);
-    auto macro_order = find_macro_candidate_execution_order(g);
-    auto dfs_order = find_naive_dfs_execution_order(g);
-
-    auto effs = rank_execution_orders(
-        g, {{"BEST", best_order}, {"MACRO", macro_order}, {"DFS", dfs_order}});
-
-    for (const auto& [name, eff] : effs) {
-      all_static_diamond_efficiencies[name].push_back(eff);
-      if (contains(to_checks, name) && !near(eff, 100.0)) {
-        save_graph_to_dot(g, "./logs/static_diamond_graph.dot");
-        std::ofstream log("./logs/static_diamond_bad_macro.log", std::ios_base::app);
-        log << "--- Trial Failure ---\n";
-        log << name << " Efficiency: " << eff << "%\n";
-        auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
-          log << p_name << " Path: ";
-          for (const auto& op : path) log << op << " ";
-          log << "\n";
-        };
-        print_path("BEST", best_order);
-        print_path(name, macro_order);
-        find_macro_candidate_execution_order(g, &log);
-        log << "\n";
-      }
-    }
-  }
-
-  std::cout << "=== Static Diamond Efficiency Overview (" << original_trials << " trials) ===\n";
-  print_stats(all_static_diamond_efficiencies);
+  run_simulation_trials(1, "Tunx V1", "tunx_v1", []() { return tunx_v1_graph(); }, to_checks);
+  run_simulation_trials(
+      trials, "Sample", "sample", []() { return sample_branch_graph(); }, to_checks);
+  run_simulation_trials(
+      trials, "Join", "join", []() { return random_joining_graph(4); }, to_checks);
+  run_simulation_trials(
+      trials, "Branch", "branch", []() { return random_branching_graph(3); }, to_checks);
+  run_simulation_trials(
+      trials, "Static Branch", "static_branch", []() { return random_static_branching_graph(3); },
+      to_checks);
+  run_simulation_trials(
+      trials, "Diamond", "diamond", []() { return random_diamond_graph(4); }, to_checks);
+  run_simulation_trials(
+      trials, "Static Diamond", "static_diamond", []() { return random_static_diamond_graph(4); },
+      to_checks);
 
   return 0;
 }
