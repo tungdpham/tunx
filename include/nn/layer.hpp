@@ -207,7 +207,7 @@ public:
 using Residuals = ResidualObject;
 
 struct InitOptions {
-  DELAllocatorV2 *ws_allocator = nullptr;
+  IAllocator *ws_allocator = nullptr;
   Engine engine = nullptr;
   engine_handle handle = nullptr;
   unsigned long long seed;
@@ -280,7 +280,7 @@ protected:
   Engine engine_ = nullptr;
   engine_handle engine_handle_ = nullptr;
   IAllocator *param_allocator_ = nullptr;
-  DELAllocatorV2 *ws_allocator_ = nullptr;
+  IAllocator *ws_allocator_ = nullptr;
   bool is_training_ = true;
   bool use_seed_ = false;
   unsigned long long srand_seed_ = 0;
@@ -389,7 +389,7 @@ public:
     return impl_->backward(grad_outputs, residuals);
   }
 
-  DELAllocatorV2 *get_allocator() const {
+  IAllocator *get_allocator() const {
     check_layer("get_allocator");
     return impl_->get_allocator();
   }

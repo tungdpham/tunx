@@ -216,7 +216,7 @@ public:
     allocated_ = 0;
   }
 
-  void evict_unused() {
+  void evict_unused() override {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto it = slabs_.begin(); it != slabs_.end();) {
       if (it->active_allocations == 0) {
@@ -252,30 +252,30 @@ public:
   }
 
   // Total memory that the allocator is holding on to.
-  size_t reserved() const {
+  size_t reserved() const override {
     std::lock_guard<std::mutex> lock(mutex_);
     return reserved_;
   }
 
-  size_t allocated() const {
+  size_t allocated() const override {
     std::lock_guard<std::mutex> lock(mutex_);
     return allocated_;
   }
 
-  size_t unused() const {
+  size_t unused() const override {
     std::lock_guard<std::mutex> lock(mutex_);
     return reserved_ - allocated_;
   }
 
   Device &device() const override { return device_; }
 
-  size_t add_allocation_hook(std::function<void(size_t)> hook) {
+  size_t add_allocation_hook(std::function<void(size_t)> hook) override {
     std::lock_guard<std::mutex> lock(mutex_);
     allocation_hooks_.push_back(hook);
     return allocation_hooks_.size() - 1;
   }
 
-  bool remove_allocation_hook(size_t hook_id) {
+  bool remove_allocation_hook(size_t hook_id) override {
     std::lock_guard<std::mutex> lock(mutex_);
     if (hook_id >= allocation_hooks_.size()) {
       return false;

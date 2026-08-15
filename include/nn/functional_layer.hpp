@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "device/iallocator.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer.hpp"
 #include "nn/param.hpp"
@@ -34,7 +35,7 @@ struct OpContext {
   DType_t compute_dtype;
   bool use_seed;
   unsigned long long srand_seed;
-  DELAllocatorV2* ws_allocator;
+  IAllocator* ws_allocator;
 
   Tensor make_tensor(const Vec<size_t>& shape, DType_t dtype) const {
     return layer->make_tensor(shape, dtype);
@@ -281,9 +282,7 @@ public:
     return (*this->impl_)(std::forward<Args>(args)...);
   }
 
-  Node operator()(const std::vector<Node>& inputs) {
-    return (*this->impl_)(inputs);
-  }
+  Node operator()(const std::vector<Node>& inputs) { return (*this->impl_)(inputs); }
 };
 
 }  // namespace tunx

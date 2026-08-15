@@ -117,6 +117,40 @@ public:
     side_ = side;
   }
 
+  size_t reserved() const override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return capacity_;
+  }
+
+  size_t allocated() const override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return allocated_;
+  }
+
+  size_t unused() const override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return capacity_ - allocated_;
+  }
+
+  void evict_unused() override {
+    // No op for DELAllocator as it uses a single master slab
+  }
+
+  size_t add_allocation_hook(std::function<void(size_t)> hook) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    allocation_hooks_.push_back(hook);
+    return allocation_hooks_.size() - 1;
+  }
+
+  bool remove_allocation_hook(size_t hook_id) override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (hook_id >= allocation_hooks_.size()) {
+      return false;
+    }
+    allocation_hooks_.erase(allocation_hooks_.begin() + hook_id);
+    return true;
+  }
+
   void clear() override {
     std::lock_guard<std::mutex> lock(mutex_);
     if (active_allocations_ > 0) {
@@ -184,6 +218,15 @@ private:
   std::map<size_t, std::set<size_t>> free_by_size_;  // size -> set of offsets
 
   int side_;
+  size_t allocated_ = 0;
+  std::vector<std::function<void(size_t)>> allocation_hooks_;
+
+  void set_allocated(size_t new_total) {
+    allocated_ = new_total;
+    for (auto &hook : allocation_hooks_) {
+      hook(allocated_);
+    }
+  }
 
   void add_block(size_t offset, size_t size) {
     free_by_offset_[offset] = size;
@@ -205,6 +248,7 @@ private:
     void *slice_ptr = static_cast<uint8_t *>(slab_ptr_) + offset;
 
     active_allocations_++;
+    set_allocated(allocated_ + size);
 
     auto self_shared = shared_from_this();
 
@@ -224,6 +268,7 @@ private:
     if (active_allocations_ > 0) {
       active_allocations_--;
     }
+    set_allocated(allocated_ - size);
 
     auto next_it = free_by_offset_.lower_bound(offset + size);
     if (next_it != free_by_offset_.end() && offset + size == next_it->first) {

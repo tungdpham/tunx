@@ -79,8 +79,6 @@ Tensor FlashAttentionBlockOp::forward(OpContext &ctx, const Tensor &input, Layer
       ctx.make_tensor({batch_size, config.num_heads, seq_len, 1}, ctx.compute_dtype);
   ctx.residuals["stats_tensor"] = stats_tensor;
 
-  ctx.ws_allocator->flip();
-
   Tensor attn_heads =
       ctx.make_tensor({batch_size, config.num_heads, seq_len, head_dim}, ctx.io_dtype);
   Tensor q_heads = ctx.make_tensor({batch_size, config.num_heads, seq_len, head_dim}, ctx.io_dtype);
@@ -131,8 +129,6 @@ Tensor FlashAttentionBlockOp::forward(OpContext &ctx, const Tensor &input, Layer
   ctx.engine->transpose(ctx.handle, t_stats_rev, attn_heads.data_as<void>(),
                         attn_out.data_as<void>(), nullptr, t_desc);
 
-  ctx.ws_allocator->flip();
-
   Tensor output = out_proj.forward({attn_out}, ctx.residuals["out_proj"])[0];
   return output;
 }
@@ -166,8 +162,6 @@ Tensor FlashAttentionBlockOp::backward(OpContext &ctx, const Tensor &grad_output
   Tensor &stats_tensor = ctx.residuals["stats_tensor"];
 
   Tensor grad_input = ctx.make_tensor({batch_size, seq_len, config.embed_dim}, ctx.io_dtype);
-
-  ctx.ws_allocator->flip();
 
   Tensor grad_q = ctx.make_tensor({batch_size, seq_len, config.embed_dim}, ctx.io_dtype);
   Tensor grad_k = ctx.make_tensor({batch_size, seq_len, config.embed_dim}, ctx.io_dtype);
@@ -249,8 +243,6 @@ Tensor FlashAttentionBlockOp::backward(OpContext &ctx, const Tensor &grad_output
                         grad_k.data_as<void>(), nullptr, t_desc);
   ctx.engine->transpose(ctx.handle, t_stats_rev, grad_v_heads.data_as<void>(),
                         grad_v.data_as<void>(), nullptr, t_desc);
-
-  ctx.ws_allocator->flip();
 
   Tensor grad_q_in = q_proj.backward({grad_q}, ctx.residuals["q_proj"])[0];
   Tensor grad_k_in = k_proj.backward({grad_k}, ctx.residuals["k_proj"])[0];

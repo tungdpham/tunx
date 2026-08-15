@@ -22,43 +22,32 @@
 #include "type/type.hpp"
 
 namespace tunx {
-Vec<Tensor> SequentialOp::forward(OpContext &ctx, const Vec<Tensor> &inputs, Vec<Layer> layers, const Config &config) {
+Vec<Tensor> SequentialOp::forward(OpContext &ctx, const Vec<Tensor> &inputs, Vec<Layer> layers,
+                                  const Config &config) {
   if (layers.empty()) {
     throw std::runtime_error("Cannot forward through empty sequential model");
   }
   Vec<Tensor> current_inputs = inputs;
   Vec<Tensor> current_outputs;
-  if (layers.size() % 2 == 0) {
-    // assuming we are on the reverse side of input, flip so output of last layer is always opposite
-    // side of input.
-    ctx.ws_allocator->flip();
-  }
   for (size_t i = 0; i < layers.size(); ++i) {
-    current_outputs = layers[i].forward(current_inputs, ctx.residuals["layer_" + std::to_string(i)]);
+    current_outputs =
+        layers[i].forward(current_inputs, ctx.residuals["layer_" + std::to_string(i)]);
     current_inputs = Vec<Tensor>(current_outputs.begin(), current_outputs.end());
-    if (i != layers.size() - 1) {
-      ctx.ws_allocator->flip();
-    }
   }
   return current_outputs;
 }
 
-Vec<Tensor> SequentialOp::backward(OpContext &ctx, const Vec<Tensor> &grad_outputs, Vec<Layer> layers, const Config &config) {
+Vec<Tensor> SequentialOp::backward(OpContext &ctx, const Vec<Tensor> &grad_outputs,
+                                   Vec<Layer> layers, const Config &config) {
   if (layers.empty()) {
     throw std::runtime_error("Cannot backward through empty sequential model");
   }
   Vec<Tensor> current_gradients = grad_outputs;
   Vec<Tensor> grad_inputs;
-  if (layers.size() % 2 == 0) {
-    // flip so grad output of last layer is always opposite side of input.
-    ctx.ws_allocator->flip();
-  }
   for (int i = static_cast<int>(layers.size()) - 1; i >= 0; --i) {
-    grad_inputs = layers[i].backward(current_gradients, ctx.residuals["layer_" + std::to_string(i)]);
+    grad_inputs =
+        layers[i].backward(current_gradients, ctx.residuals["layer_" + std::to_string(i)]);
     current_gradients = Vec<Tensor>(grad_inputs.begin(), grad_inputs.end());
-    if (i != 0) {
-      ctx.ws_allocator->flip();  // algorithm 1 definitely applies
-    }
   }
   return grad_inputs;
 }
@@ -70,10 +59,11 @@ Sequential::Sequential(Vec<Layer> layers, const std::string &name)
   }
 }
 
-Vec<Vec<size_t>> SequentialOp::output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config) {
+Vec<Vec<size_t>> SequentialOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                             const Config &config) {
   // We can't implement output_shapes statically easily without layers list.
   // Wait, FunctionalLayer overrides output_shapes, but Sequential needs it directly.
-  return input_shapes; 
+  return input_shapes;
 }
 
 Vec<Vec<size_t>> Sequential::output_shapes(const Vec<Vec<size_t>> &input_shapes) const {

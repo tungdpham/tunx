@@ -11,7 +11,6 @@
 
 #include <cstddef>
 
-
 #include "nn/layer.hpp"
 #include "nn/layer_factory.hpp"
 #include "tensor/ops.hpp"
@@ -25,20 +24,24 @@ ResidualBlock::ResidualBlock(Vec<Layer> main_path, Vec<Layer> shortcut_path,
   if (main_path.empty()) {
     throw std::runtime_error("Main path of ResidualBlock cannot be empty.");
   }
-  impl_->register_layer(static_cast<std::shared_ptr<LayerImpl>>(Layer(tunx::Sequential(std::move(main_path), name + "_main_path"))));
+  impl_->register_layer(static_cast<std::shared_ptr<LayerImpl>>(
+      Layer(tunx::Sequential(std::move(main_path), name + "_main_path"))));
 
   if (!shortcut_path.empty()) {
-    impl_->register_layer(static_cast<std::shared_ptr<LayerImpl>>(Layer(tunx::Sequential(std::move(shortcut_path), name + "_shortcut_path"))));
+    impl_->register_layer(static_cast<std::shared_ptr<LayerImpl>>(
+        Layer(tunx::Sequential(std::move(shortcut_path), name + "_shortcut_path"))));
   }
-  
+
   if (final_activation != "none" && final_activation != "linear") {
-    impl_->register_layer(static_cast<std::shared_ptr<LayerImpl>>(Layer(tunx::Activation(ActivationOp::Config{final_activation}, name + "_act"))));
+    impl_->register_layer(static_cast<std::shared_ptr<LayerImpl>>(
+        Layer(tunx::Activation(ActivationOp::Config{final_activation}, name + "_act"))));
   }
 }
 
 ResidualBlock::ResidualBlock(tunx::Layer main_path, tunx::Layer shortcut_path,
                              const std::string &final_activation, const std::string &name)
-    : FunctionalLayer(ResidualBlockOp::Config{final_activation, static_cast<bool>(shortcut_path)}, name) {
+    : FunctionalLayer(ResidualBlockOp::Config{final_activation, static_cast<bool>(shortcut_path)},
+                      name) {
   if (!main_path) {
     throw std::runtime_error("Main path of ResidualBlock cannot be null.");
   }
@@ -49,11 +52,13 @@ ResidualBlock::ResidualBlock(tunx::Layer main_path, tunx::Layer shortcut_path,
   }
 
   if (final_activation != "none" && final_activation != "linear") {
-    impl_->register_layer(static_cast<std::shared_ptr<LayerImpl>>(Layer(tunx::Activation(ActivationOp::Config{final_activation}, name + "_act"))));
+    impl_->register_layer(static_cast<std::shared_ptr<LayerImpl>>(
+        Layer(tunx::Activation(ActivationOp::Config{final_activation}, name + "_act"))));
   }
 }
 
-Vec<Tensor> ResidualBlockOp::forward(OpContext &ctx, const Vec<Tensor> &inputs, Vec<Layer> layers, const Config &config) {
+Vec<Tensor> ResidualBlockOp::forward(OpContext &ctx, const Vec<Tensor> &inputs, Vec<Layer> layers,
+                                     const Config &config) {
   // layers[0] is main_path
   Vec<Tensor> main_outputs = layers[0].forward(inputs, ctx.residuals["main_path"]);
 
@@ -70,7 +75,7 @@ Vec<Tensor> ResidualBlockOp::forward(OpContext &ctx, const Vec<Tensor> &inputs, 
 
   // Add outputs and apply final activation
   bool has_activation = config.activation != "none" && config.activation != "linear";
-  Layer* act_layer = has_activation ? &layers.back() : nullptr;
+  Layer *act_layer = has_activation ? &layers.back() : nullptr;
 
   for (size_t i = 0; i < outputs.size(); ++i) {
     if (act_layer) {
@@ -86,18 +91,19 @@ Vec<Tensor> ResidualBlockOp::forward(OpContext &ctx, const Vec<Tensor> &inputs, 
   return outputs;
 }
 
-Vec<Tensor> ResidualBlockOp::backward(OpContext &ctx, const Vec<Tensor> &grad_outputs, Vec<Layer> layers, const Config &config) {
+Vec<Tensor> ResidualBlockOp::backward(OpContext &ctx, const Vec<Tensor> &grad_outputs,
+                                      Vec<Layer> layers, const Config &config) {
   bool has_activation = config.activation != "none" && config.activation != "linear";
-  Layer* act_layer = has_activation ? &layers.back() : nullptr;
+  Layer *act_layer = has_activation ? &layers.back() : nullptr;
 
   Vec<Tensor> grads_to_propagate = grad_outputs;
   if (act_layer) {
     for (size_t i = 0; i < grad_outputs.size(); ++i) {
       std::string pre_act_key = "pre_activation_" + std::to_string(i);
-      grads_to_propagate[i] = act_layer->backward({grad_outputs[i]}, ctx.residuals[pre_act_key + "_act"])[0];
+      grads_to_propagate[i] =
+          act_layer->backward({grad_outputs[i]}, ctx.residuals[pre_act_key + "_act"])[0];
       ctx.residuals[pre_act_key] = Tensor();  // release pre-activation cache
     }
-    ctx.ws_allocator->flip();  // flip workspace allocator between main and shortcut backward
   }
 
   // Backward through main path
@@ -118,23 +124,28 @@ Vec<Tensor> ResidualBlockOp::backward(OpContext &ctx, const Vec<Tensor> &grad_ou
   return grad_inputs;
 }
 
-Vec<Vec<size_t>> ResidualBlockOp::output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config, const Vec<std::shared_ptr<LayerImpl>> &registered_layers) {
+Vec<Vec<size_t>> ResidualBlockOp::output_shapes(
+    const Vec<Vec<size_t>> &input_shapes, const Config &config,
+    const Vec<std::shared_ptr<LayerImpl>> &registered_layers) {
   return registered_layers[0]->output_shapes(input_shapes);
 }
 
 ResidualBlockOp::Config ResidualBlockOp::parse_config(const LayerConfig &config) {
   Config cfg;
   cfg.activation = config.get<std::string>("activation", "relu");
-  nlohmann::json shortcut_json = config.get<nlohmann::json>("shortcut_path", nlohmann::json::object());
+  nlohmann::json shortcut_json =
+      config.get<nlohmann::json>("shortcut_path", nlohmann::json::object());
   if (!shortcut_json.is_null() && !shortcut_json.empty()) {
     LayerConfig shortcut_config = LayerConfig::from_json(shortcut_json);
-    nlohmann::json layers_json = shortcut_config.get<nlohmann::json>("layers", nlohmann::json::array());
+    nlohmann::json layers_json =
+        shortcut_config.get<nlohmann::json>("layers", nlohmann::json::array());
     cfg.has_shortcut = (layers_json.is_array() && !layers_json.empty());
   }
   return cfg;
 }
 
-LayerConfig ResidualBlockOp::get_config(const Config &config, const std::string &name, const Vec<std::shared_ptr<LayerImpl>> &registered_layers) {
+LayerConfig ResidualBlockOp::get_config(const Config &config, const std::string &name,
+                                        const Vec<std::shared_ptr<LayerImpl>> &registered_layers) {
   LayerConfig cfg;
   cfg.name = name;
   cfg.type = TYPE_NAME;
@@ -157,7 +168,7 @@ Layer ResidualBlock::create_from_config(const LayerConfig &config) {
   nlohmann::json main_json = config.get<nlohmann::json>("main_path", nlohmann::json::object());
   LayerFactory::register_defaults();
   main_path = Sequential::create_from_config(LayerConfig::from_json(main_json));
-  
+
   nlohmann::json shortcut_json =
       config.get<nlohmann::json>("shortcut_path", nlohmann::json::object());
   if (!shortcut_json.is_null() && !shortcut_json.empty()) {
@@ -170,7 +181,8 @@ Layer ResidualBlock::create_from_config(const LayerConfig &config) {
   }
 
   std::string activation = config.get<std::string>("activation", "relu");
-  return tunx::Layer(ResidualBlock(std::move(main_path), std::move(shortcut_path), activation, config.name));
+  return tunx::Layer(
+      ResidualBlock(std::move(main_path), std::move(shortcut_path), activation, config.name));
 }
 
 }  // namespace tunx

@@ -63,8 +63,8 @@ public:
 
   Device &device() const { return param_allocator_->device(); }
 
-  const DELAllocatorV2 *workspace_allocator() const { return workspace_allocator_.get(); }
-  DELAllocatorV2 *workspace_allocator() { return workspace_allocator_.get(); }
+  const IAllocator *workspace_allocator() const { return workspace_allocator_.get(); }
+  IAllocator *workspace_allocator() { return workspace_allocator_.get(); }
 
   void add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producers,
                 const Vec<Node> &consumers);
