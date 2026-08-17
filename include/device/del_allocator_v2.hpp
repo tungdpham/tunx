@@ -321,13 +321,11 @@ private:
 
     auto self_shared = shared_from_this();
 
-    auto storage = std::shared_ptr<device_storage>(
-        new device_storage(device_, slice_ptr, size, DEFAULT_ALIGNMENT),
-        [self_shared, slab, offset, actual_size](device_storage *storage) {
+    auto storage = std::make_shared<device_storage>(
+        device_, slice_ptr, size, [self_shared, slab, offset, actual_size]() {
           std::lock_guard<std::mutex> lock(self_shared->mutex_);
           self_shared->reclaim(slab, offset, actual_size);
           self_shared->set_allocated(self_shared->allocated_ - actual_size);
-          delete storage;
         });
 
     return dptr(storage, 0, size);
@@ -374,7 +372,7 @@ private:
     }
 
     if (slab->active_allocations == 0) {
-      merge_slabs();
+      // merge_slabs(); // temporarily disable this feature
     }
   }
 

@@ -8,6 +8,7 @@
 #include "nn/execution_plan.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer.hpp"
+#include "nn/memory_packer.hpp"
 #include "nn/tensor_bundle.hpp"
 
 namespace tunx {
@@ -17,6 +18,7 @@ struct BuiltPlan {
   ExecutionPlan backward_plan;
   std::map<Edge, EdgeProfile> forward_edge_profiles;
   std::map<Edge, EdgeProfile> backward_edge_profiles;
+  std::shared_ptr<PackedAllocator> packed_allocator;
 };
 
 class GraphExecutor {
@@ -32,8 +34,7 @@ public:
   const BuiltPlan &build_plans(TensorBundle &input_map);
 
   ExecutionPlanStats profile_forward_plan(TensorBundle &input_map, const ExecutionPlan &plan);
-  ExecutionPlanStats profile_backward_plan(TensorBundle &input_map, TensorBundle &output_grad_map,
-                                           const ExecutionPlan &plan);
+  ExecutionPlanStats profile_backward_plan(TensorBundle &input_map, const ExecutionPlan &plan);
 
   ExecutionPlan &active_forward_plan() { return active_built_plan_.forward_plan; }
   const ExecutionPlan &active_forward_plan() const { return active_built_plan_.forward_plan; }
@@ -78,8 +79,12 @@ private:
   void backward_edge(const Edge &edge);
   void cleanup_released(std::map<Node, Entry> &entries);
 
-  std::map<Edge, EdgeProfile> profile_edge_forward(TensorBundle &input_map);
-  std::map<Edge, EdgeProfile> profile_edge_backward(TensorBundle &output_grad_map);
+  std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edge_forward(
+      TensorBundle &input_map);
+  std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edge_backward(
+      TensorBundle &output_grad_map);
+
+  void pack_memory(BuiltPlan &plan, TensorBundle &input_map, TensorBundle &output_grad_map);
 };
 
 }  // namespace tunx

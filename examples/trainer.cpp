@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "data_loading/dataset_factory.hpp"
+#include "device/device_allocator.hpp"
 #include "device/device_manager.hpp"
 #include "nn/example_graphs.hpp"
 #include "nn/graph.hpp"
@@ -52,7 +53,7 @@ signed main(int argc, char *argv[]) {
   train_config.print_config();
 
   Device &device = DeviceManager::instance().get(train_config.device_id);
-  auto &allocator = PoolAllocator::instance(device, device.default_stream());
+  auto &allocator = DeviceAllocator::instance(device);
 
   if (train_config.dataset_name.empty()) {
     throw std::runtime_error("DATASET_NAME environment variable is not set!");

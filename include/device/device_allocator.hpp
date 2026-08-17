@@ -35,16 +35,12 @@ public:
 
     set_allocated(allocated_ + size);
 
-    device_storage* storage_ptr = new device_storage(*device_, ptr, size, DEFAULT_ALIGNMENT);
-    auto storage =
-        std::shared_ptr<device_storage>(storage_ptr, [this, size](device_storage* storage) {
-          if (storage) {
-            device_->deallocate_aligned_memory(storage->data());
-            std::lock_guard<std::mutex> lock(mutex_);
-            set_allocated(allocated_ - size);
-            delete storage;
-          }
-        });
+    auto storage = std::make_shared<device_storage>(device_, ptr, size, [this, ptr, size]() {
+      device_->deallocate_aligned_memory(ptr);
+      std::lock_guard<std::mutex> lock(mutex_);
+      set_allocated(allocated_ - size);
+    });
+
     return dptr(storage, 0, size);
   }
 

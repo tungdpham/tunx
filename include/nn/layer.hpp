@@ -239,6 +239,8 @@ public:
   void set_training(bool training);
   bool is_training() const;
 
+  void set_workspace_allocator(IAllocator* alloc);
+
   virtual Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const = 0;
   std::string name() const { return name_; }
   void save_state(std::ostream &out) const;
@@ -418,6 +420,12 @@ public:
   bool is_training() const {
     check_layer("is_training");
     return impl_->is_training();
+  }
+
+  LayerRef &set_workspace_allocator(IAllocator *alloc) {
+    check_layer("set_workspace_allocator");
+    impl_->set_workspace_allocator(alloc);
+    return *this;
   }
 
   Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const {

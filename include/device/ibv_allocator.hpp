@@ -16,7 +16,6 @@
 #include <mutex>
 #include <stdexcept>
 
-#include "device/device_manager.hpp"
 #include "device/dptr.hpp"
 #include "device/iallocator.hpp"
 #ifndef NDEBUG
@@ -241,22 +240,12 @@ private:
   }
 
   dptr create_dptr(size_t offset, size_t size) {
-    auto *storage_info = new slab_storage_info{this, offset, size};
-
     void *slice_ptr = static_cast<uint8_t *>(slab_ptr_) + offset;
 
     set_allocated(allocated_ + size);
 
-    auto storage = std::shared_ptr<device_storage>(
-        new device_storage(getHost(), slice_ptr, size, DEFAULT_ALIGNMENT),
-        [storage_info](device_storage *storage) {
-          // custom deleter to reclaim memory back to the allocator
-          if (storage_info && storage_info->allocator) {
-            storage_info->allocator->reclaim(storage_info->offset, storage_info->size);
-          }
-          delete storage_info;
-          delete storage;
-        });
+    auto storage = std::make_shared<device_storage>(
+        device_, slice_ptr, size, [this, offset, size]() { reclaim(offset, size); });
 
     return dptr(storage, 0, size);
   }
@@ -299,12 +288,6 @@ private:
     free_blocks_by_offset_[offset] = size;
     free_blocks_by_size_.emplace(size, offset);
   }
-
-  struct slab_storage_info {
-    IbvAllocator *allocator;
-    size_t offset;
-    size_t size;
-  };
 };
 
 }  // namespace tunx

@@ -138,18 +138,17 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
 }
 
 static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBundle &inputs,
-                                              TensorBundle &output_grads,
                                               std::unique_ptr<CsvLogger> &csv_logger) {
   ExecutionPlan naive_plan;
   for (auto it = executor.graph().edges().rbegin(); it != executor.graph().edges().rend(); ++it) {
     naive_plan.order.push_back(*it);
   }
 
-  auto naive_stats = executor.profile_backward_plan(inputs, output_grads, naive_plan);
+  auto naive_stats = executor.profile_backward_plan(inputs, naive_plan);
 
   auto &built_plan = executor.build_plans(inputs);
   auto &macro_plan = built_plan.backward_plan;
-  auto macro_stats = executor.profile_backward_plan(inputs, output_grads, macro_plan);
+  auto macro_stats = executor.profile_backward_plan(inputs, macro_plan);
 
   fmt::print("\n{:=^80}\n", " Backward Execution Plan Stats ");
   fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
@@ -248,16 +247,8 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     log_edge_profiles(built_plan.forward_edge_profiles, forward_profiles_logger);
     log_execution_plan_stats(executor, inputs, forward_plan_logger);
 
-    TensorBundle outputs = executor.forward(inputs);
-
-    TensorBundle grad_outputs{
-        {"output", Tensor(outputs.get("output").shape(), outputs.get("output").dtype(), mem_pool)}};
-
-    outputs.clear();
-    executor.clear_residuals();
-
     log_edge_profiles(built_plan.backward_edge_profiles, backward_profiles_logger);
-    log_execution_plan_stats_backward(executor, inputs, grad_outputs, backward_plan_logger);
+    log_execution_plan_stats_backward(executor, inputs, backward_plan_logger);
 
     // avoid affecting training
     train_dataset->reset();

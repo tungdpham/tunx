@@ -108,6 +108,13 @@ void LayerImpl::set_training(bool training) {
 
 bool LayerImpl::is_training() const { return is_training_; }
 
+void LayerImpl::set_workspace_allocator(IAllocator* alloc) {
+  ws_allocator_ = alloc;
+  for (auto &layer : registered_layers_) {
+    layer->set_workspace_allocator(alloc);
+  }
+}
+
 Engine LayerImpl::get_engine() {
   if (!engine_) {
     throw std::runtime_error("Engine is not set");

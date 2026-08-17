@@ -252,12 +252,9 @@ private:
 
     auto self_shared = shared_from_this();
 
-    auto storage = std::shared_ptr<device_storage>(
-        new device_storage(device_, slice_ptr, size, DEFAULT_ALIGNMENT),
-        [self_shared, offset, size](device_storage *storage) {
-          self_shared->reclaim(offset, size);
-          delete storage;
-        });
+    auto storage = std::make_shared<device_storage>(
+        device_, slice_ptr, size,
+        [self_shared, offset, size]() { self_shared->reclaim(offset, size); });
 
     return dptr(storage, 0, size);
   }

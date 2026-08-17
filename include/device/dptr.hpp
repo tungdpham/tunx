@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 #include "common/blob.hpp"
@@ -24,19 +25,25 @@ private:
   sref<Device> device_;
   void *ptr_;
   size_t capacity_;
-  size_t alignment_;
+  std::function<void()> deleter_;
 
 public:
-  device_storage(sref<Device> device, void *ptr, size_t capacity, size_t alignment)
+  device_storage(sref<Device> device, void *ptr, size_t capacity, std::function<void()> deleter)
       : device_(device),
         ptr_(ptr),
         capacity_(capacity),
-        alignment_(alignment) {}
+        deleter_(deleter) {}
+
+  device_storage(const device_storage &other) = delete;
+  device_storage &operator=(const device_storage &other) = delete;
+  device_storage(device_storage &&other) = default;
+  device_storage &operator=(device_storage &&other) = default;
+
+  ~device_storage() { deleter_(); }
 
   sref<Device> device() const { return device_; }
   void *data() const { return ptr_; }
   size_t capacity() const { return capacity_; }
-  size_t alignment() const { return alignment_; }
 };
 
 // device pointer. Shares ownership of device storage. True owners have offset 0.
@@ -60,7 +67,8 @@ public:
     if (ptr == nullptr && byte_size > 0) {
       throw std::invalid_argument("Cannot create dptr with null pointer and non-zero size");
     }
-    auto storage = std::make_shared<device_storage>(device, ptr, byte_size, DEFAULT_ALIGNMENT);
+    auto storage = std::make_shared<device_storage>(
+        device, ptr, byte_size, [&device, ptr]() { device.deallocate_aligned_memory(ptr); });
     storage_ = storage;
     offset_ = 0;
     capacity_ = byte_size;
@@ -83,13 +91,6 @@ public:
   }
 
   size_t capacity() const { return capacity_; }
-
-  size_t alignment() const {
-    if (!storage_) {
-      return 0;
-    }
-    return storage_->alignment();
-  }
 
   template <typename T = void>
   T *get() {
@@ -145,11 +146,8 @@ inline dptr make_dptr(sref<Device> device, size_t byte_size, size_t alignment = 
   if (!ptr) {
     throw std::runtime_error("Bad Alloc");
   }
-  auto storage = std::shared_ptr<device_storage>(
-      new device_storage(device, ptr, byte_size, alignment), [device](device_storage *s) {
-        device->deallocate_aligned_memory(s->data());
-        delete s;
-      });
+  auto storage = std::make_shared<device_storage>(
+      device, ptr, byte_size, [&device, &ptr]() { device->deallocate_aligned_memory(ptr); });
   return dptr(storage, 0, byte_size);
 }
 

@@ -25,7 +25,9 @@ private:
     Impl(const Vec<size_t> &shape, DType_t dtype, IAllocator &allocator) {
       data_ = Tensor(shape, dtype, allocator);
       grad_ = Tensor(shape, dtype, allocator);
-      fill(grad_, 0.0);
+      if (grad_.size() > 0) {
+        fill(grad_, 0.0);
+      }
     }
   };
 
