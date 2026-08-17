@@ -151,8 +151,8 @@ std::vector<std::string> find_fork_join_optimal_execution_order(Graph& graph) {
   return solve(completed).order;
 }
 
-std::vector<std::string> find_fw_diamond_execution_order(Graph& graph,
-                                                         size_t max_states = 1000000) {
+std::vector<std::string> find_fw_fork_join_execution_order(Graph& graph,
+                                                           size_t max_states = 1000000) {
   std::vector<std::string> op_ids;
   std::map<std::string, int> op_index;
   for (const auto& [uuid, op] : graph.op_nodes()) {
@@ -170,10 +170,10 @@ std::vector<std::string> find_fw_diamond_execution_order(Graph& graph,
   Allocator allocator;
   GraphExecutor executor(graph);
   size_t initial_peak = 0;
-  allocator.subscribe("diamond_dp_init",
+  allocator.subscribe("fork_join_dp_init",
                       [&](size_t memory) { initial_peak = std::max(initial_peak, memory); });
   executor.init_boundaries(&allocator);
-  allocator.unsubscribe("diamond_dp_init");
+  allocator.unsubscribe("fork_join_dp_init");
 
   std::unordered_map<std::bitset<256>, Schedule> memo;
   bool state_limit_reached = false;
@@ -204,10 +204,10 @@ std::vector<std::string> find_fw_diamond_execution_order(Graph& graph,
 
       const auto& op = graph.get_op(op_id);
       size_t op_peak = allocator.allocated();
-      allocator.subscribe("diamond_dp",
+      allocator.subscribe("fork_join_dp",
                           [&](size_t memory) { op_peak = std::max(op_peak, memory); });
       executor.run_op_node(&op, &allocator);
-      allocator.unsubscribe("diamond_dp");
+      allocator.unsubscribe("fork_join_dp");
       completed.set(index);
 
       Schedule suffix = solve(completed);
@@ -254,8 +254,8 @@ std::vector<std::string> find_fw_naive_dfs_execution_order(Graph& graph) {
   return order;
 }
 
-std::vector<std::string> find_bw_diamond_execution_order(Graph& graph,
-                                                         size_t max_states = 1000000) {
+std::vector<std::string> find_bw_fork_join_execution_order(Graph& graph,
+                                                           size_t max_states = 1000000) {
   std::vector<std::string> op_ids;
   std::map<std::string, int> op_index;
   for (const auto& [uuid, op] : graph.op_nodes()) {
@@ -277,7 +277,7 @@ std::vector<std::string> find_bw_diamond_execution_order(Graph& graph,
 
   Allocator allocator;
   GraphExecutor executor(graph);
-  
+
   executor.init_boundaries(&allocator);
   std::vector<std::string> fw_order = find_fw_naive_dfs_execution_order(graph);
   for (const auto& op_id : fw_order) {
@@ -292,10 +292,10 @@ std::vector<std::string> find_bw_diamond_execution_order(Graph& graph,
   }
 
   size_t initial_peak = 0;
-  allocator.subscribe("diamond_dp_init",
+  allocator.subscribe("fork_join_dp_init",
                       [&](size_t memory) { initial_peak = std::max(initial_peak, memory); });
   executor.transition_to_backward(&allocator);
-  allocator.unsubscribe("diamond_dp_init");
+  allocator.unsubscribe("fork_join_dp_init");
 
   std::unordered_map<std::bitset<256>, Schedule> memo;
   bool state_limit_reached = false;
@@ -326,10 +326,10 @@ std::vector<std::string> find_bw_diamond_execution_order(Graph& graph,
 
       const auto& op = graph.get_op(op_id);
       size_t op_peak = allocator.allocated();
-      allocator.subscribe("diamond_dp",
+      allocator.subscribe("fork_join_dp",
                           [&](size_t memory) { op_peak = std::max(op_peak, memory); });
       executor.run_backward_op_node(&op, &allocator);
-      allocator.unsubscribe("diamond_dp");
+      allocator.unsubscribe("fork_join_dp");
       completed.set(index);
 
       Schedule suffix = solve(completed);
@@ -436,7 +436,7 @@ std::map<std::string, double> rank_backward_execution_orders(
     }
     Allocator allocator;
     GraphExecutor executor(g);
-    
+
     executor.init_boundaries(&allocator);
     std::vector<std::string> fw_order = find_fw_naive_dfs_execution_order(g);
     for (const auto& op_id : fw_order) {
@@ -585,7 +585,7 @@ void run_simulation_trials(int original_trials, const std::string& title,
   while (trials--) {
     Graph g = graph_generator();
 
-    auto fw_best_order = find_fw_diamond_execution_order(g);
+    auto fw_best_order = find_fw_fork_join_execution_order(g);
     auto fw_macro_order = find_fw_macro_candidate_execution_order(g);
     auto fw_dfs_order = find_fw_naive_dfs_execution_order(g);
 
@@ -594,7 +594,7 @@ void run_simulation_trials(int original_trials, const std::string& title,
 
     auto fw_effs = rank_execution_orders(g, fw_orders);
 
-    auto bw_best_order = find_bw_diamond_execution_order(g);
+    auto bw_best_order = find_bw_fork_join_execution_order(g);
     auto bw_macro_order = find_bw_macro_candidate_execution_order(g);
     auto bw_dfs_order = find_bw_naive_dfs_execution_order(g);
     std::map<std::string, std::vector<std::string>> bw_orders = {
@@ -677,10 +677,10 @@ int main() {
       trials, "Static Branch", "static_branch", []() { return random_static_branching_graph(3); },
       to_checks);
   run_simulation_trials(
-      trials, "Diamond", "diamond", []() { return random_diamond_graph(4); }, to_checks);
+      trials, "Fork_join", "fork_join", []() { return random_fork_join_graph(4); }, to_checks);
   run_simulation_trials(
-      trials, "Static Diamond", "static_diamond", []() { return random_static_diamond_graph(4); },
-      to_checks);
+      trials, "Static Fork_join", "static_fork_join",
+      []() { return random_static_fork_join_graph(4); }, to_checks);
 
   return 0;
 }

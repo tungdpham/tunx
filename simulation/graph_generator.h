@@ -12,7 +12,6 @@ inline size_t random_act_size() {
   return 10240;
 }
 
-
 inline size_t random_res_size() {
   int rand_val = rand() % 100;
   if (rand_val < 30) return 512;
@@ -29,8 +28,8 @@ inline size_t random_ws_size() {
   return 2048;
 }
 
-inline ActivationNode* build_random_diamond_dag(Graph& g, ActivationNode* input, int depth,
-                                                int& node_counter) {
+inline ActivationNode* build_random_fork_join_dag(Graph& g, ActivationNode* input, int depth,
+                                                  int& node_counter) {
   if (depth == 0) {
     return input;
   }
@@ -43,46 +42,48 @@ inline ActivationNode* build_random_diamond_dag(Graph& g, ActivationNode* input,
     // Sequential
     auto act = g.add_act(prefix + "_seq", random_act_size());
     g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {act}, {}, random_res_size());
-    return build_random_diamond_dag(g, act, depth - 1, node_counter);
+    return build_random_fork_join_dag(g, act, depth - 1, node_counter);
   } else if (structure_type == 1) {
-    // Diamond
+    // Fork_join
     auto left_act = g.add_act(prefix + "_left", random_act_size());
     g.add_op(prefix + "_left_conv", random_ws_size(), {input}, {left_act}, {}, random_res_size());
-    auto left_out = build_random_diamond_dag(g, left_act, depth - 1, node_counter);
+    auto left_out = build_random_fork_join_dag(g, left_act, depth - 1, node_counter);
 
     auto right_act = g.add_act(prefix + "_right", random_act_size());
     g.add_op(prefix + "_right_conv", random_ws_size(), {input}, {right_act}, {}, random_res_size());
-    auto right_out = build_random_diamond_dag(g, right_act, depth - 1, node_counter);
+    auto right_out = build_random_fork_join_dag(g, right_act, depth - 1, node_counter);
 
     auto merge_act = g.add_act(prefix + "_merge", random_act_size());
-    g.add_op(prefix + "_add", random_ws_size(), {left_out, right_out}, {merge_act}, {}, random_res_size());
+    g.add_op(prefix + "_add", random_ws_size(), {left_out, right_out}, {merge_act}, {},
+             random_res_size());
 
     return merge_act;
   } else {
     // Residual (skip connection)
     auto main_act = g.add_act(prefix + "_main", random_act_size());
     g.add_op(prefix + "_main_conv", random_ws_size(), {input}, {main_act}, {}, random_res_size());
-    auto main_out = build_random_diamond_dag(g, main_act, depth - 1, node_counter);
+    auto main_out = build_random_fork_join_dag(g, main_act, depth - 1, node_counter);
 
     auto merge_act = g.add_act(prefix + "_res_add", random_act_size());
-    g.add_op(prefix + "_res_add", random_ws_size(), {main_out, input}, {merge_act}, {}, random_res_size());
+    g.add_op(prefix + "_res_add", random_ws_size(), {main_out, input}, {merge_act}, {},
+             random_res_size());
 
     return merge_act;
   }
 }
 
-inline Graph random_diamond_graph(int depth) {
+inline Graph random_fork_join_graph(int depth) {
   Graph g;
   int node_counter = 0;
   auto input = g.add_act("input", 10000);
   g.set_inputs({input});
-  auto output = build_random_diamond_dag(g, input, depth, node_counter);
+  auto output = build_random_fork_join_dag(g, input, depth, node_counter);
   g.set_outputs({output});
   return g;
 }
 
-inline ActivationNode* build_random_static_diamond_dag(Graph& g, ActivationNode* input, int depth,
-                                                       int& node_counter) {
+inline ActivationNode* build_random_static_fork_join_dag(Graph& g, ActivationNode* input, int depth,
+                                                         int& node_counter) {
   if (depth == 0) {
     return input;
   }
@@ -93,38 +94,42 @@ inline ActivationNode* build_random_static_diamond_dag(Graph& g, ActivationNode*
   if (structure_type == 0) {
     auto act = g.add_act(prefix + "_seq", random_act_size());
     g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {act}, {}, random_res_size());
-    return build_random_static_diamond_dag(g, act, depth - 1, node_counter);
+    return build_random_static_fork_join_dag(g, act, depth - 1, node_counter);
   }
 
   if (structure_type == 1) {
     auto left_input = g.add_act(prefix + "_left_input", random_act_size());
     auto right_input = g.add_act(prefix + "_right_input", random_act_size());
-    g.add_op(prefix + "_split", random_ws_size(), {input}, {left_input, right_input}, {}, random_res_size());
+    g.add_op(prefix + "_split", random_ws_size(), {input}, {left_input, right_input}, {},
+             random_res_size());
 
-    auto left_out = build_random_static_diamond_dag(g, left_input, depth - 1, node_counter);
-    auto right_out = build_random_static_diamond_dag(g, right_input, depth - 1, node_counter);
+    auto left_out = build_random_static_fork_join_dag(g, left_input, depth - 1, node_counter);
+    auto right_out = build_random_static_fork_join_dag(g, right_input, depth - 1, node_counter);
 
     auto merge_act = g.add_act(prefix + "_merge", random_act_size());
-    g.add_op(prefix + "_add", random_ws_size(), {left_out, right_out}, {merge_act}, {}, random_res_size());
+    g.add_op(prefix + "_add", random_ws_size(), {left_out, right_out}, {merge_act}, {},
+             random_res_size());
     return merge_act;
   }
 
   auto main_input = g.add_act(prefix + "_main_input", random_act_size());
   auto skip_input = g.add_act(prefix + "_skip_input", random_act_size());
-  g.add_op(prefix + "_split", random_ws_size(), {input}, {main_input, skip_input}, {}, random_res_size());
+  g.add_op(prefix + "_split", random_ws_size(), {input}, {main_input, skip_input}, {},
+           random_res_size());
 
-  auto main_out = build_random_static_diamond_dag(g, main_input, depth - 1, node_counter);
+  auto main_out = build_random_static_fork_join_dag(g, main_input, depth - 1, node_counter);
   auto merge_act = g.add_act(prefix + "_res_merge", random_act_size());
-  g.add_op(prefix + "_res_add", random_ws_size(), {main_out, skip_input}, {merge_act}, {}, random_res_size());
+  g.add_op(prefix + "_res_add", random_ws_size(), {main_out, skip_input}, {merge_act}, {},
+           random_res_size());
   return merge_act;
 }
 
-inline Graph random_static_diamond_graph(int depth) {
+inline Graph random_static_fork_join_graph(int depth) {
   Graph g;
   int node_counter = 0;
   auto input = g.add_act("input", random_act_size());
   g.set_inputs({input});
-  auto output = build_random_static_diamond_dag(g, input, depth, node_counter);
+  auto output = build_random_static_fork_join_dag(g, input, depth, node_counter);
   g.set_outputs({output});
   return g;
 }
@@ -173,7 +178,8 @@ inline void build_random_branching_dag(Graph& g, ActivationNode* input, int dept
     int num_branches = rand() % 2 + 2;
     for (int i = 0; i < num_branches; ++i) {
       auto next_act = g.add_act(prefix + "_branch" + std::to_string(i), random_act_size());
-      g.add_op(prefix + "_conv" + std::to_string(i), random_ws_size(), {input}, {next_act}, {}, random_res_size());
+      g.add_op(prefix + "_conv" + std::to_string(i), random_ws_size(), {input}, {next_act}, {},
+               random_res_size());
       build_random_branching_dag(g, next_act, depth - 1, node_counter);
     }
   }
@@ -276,7 +282,8 @@ inline Graph sample_branch_graph() {
   // branch 1
   for (size_t i = 0; i < branch_length; i++) {
     b1_tail = g.add_act("b1_act" + std::to_string(i), random_act_size());
-    g.add_op("b1_op" + std::to_string(i), random_ws_size(), {prev}, {b1_tail}, {}, random_res_size());
+    g.add_op("b1_op" + std::to_string(i), random_ws_size(), {prev}, {b1_tail}, {},
+             random_res_size());
     prev = b1_tail;
   }
 
@@ -285,7 +292,8 @@ inline Graph sample_branch_graph() {
   // branch 2
   for (size_t i = 0; i < branch_length; i++) {
     b2_tail = g.add_act("b2_act" + std::to_string(i), random_act_size());
-    g.add_op("b2_op" + std::to_string(i), random_ws_size(), {prev}, {b2_tail}, {}, random_res_size());
+    g.add_op("b2_op" + std::to_string(i), random_ws_size(), {prev}, {b2_tail}, {},
+             random_res_size());
     prev = b2_tail;
   }
 
@@ -294,13 +302,15 @@ inline Graph sample_branch_graph() {
   // branch 3
   for (size_t i = 0; i < branch_length; i++) {
     b3_tail = g.add_act("b3_act" + std::to_string(i), random_act_size());
-    g.add_op("b3_op" + std::to_string(i), random_ws_size(), {prev}, {b3_tail}, {}, random_res_size());
+    g.add_op("b3_op" + std::to_string(i), random_ws_size(), {prev}, {b3_tail}, {},
+             random_res_size());
     prev = b3_tail;
   }
 
   // join
   ActivationNode* output = g.add_act("output", 10240);
-  g.add_op("join_op", random_ws_size(), {b1_tail, b2_tail, b3_tail}, {output}, {}, random_res_size());
+  g.add_op("join_op", random_ws_size(), {b1_tail, b2_tail, b3_tail}, {output}, {},
+           random_res_size());
 
   g.set_inputs({input});
   g.set_outputs({output});

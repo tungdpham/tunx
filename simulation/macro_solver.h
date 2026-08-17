@@ -494,10 +494,6 @@ public:
 
     for (auto& id : op_ids) {
       auto& node = graph_.get_op(id);
-      long long all_outputs = 0;
-      for (auto* t : node.outputs()) {
-        all_outputs += t->size();
-      }
       long long all_inputs = 0;
       for (auto* t : node.inputs()) {
         all_inputs += t->size();
