@@ -12,6 +12,7 @@
 #include <functional>
 #include <list>
 #include <map>
+#include <utility>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -81,16 +82,16 @@ public:
 
   static std::shared_ptr<DELAllocatorV2> instance(Device &device, stream s) {
     static std::mutex mutex;
-    static std::map<stream, std::shared_ptr<DELAllocatorV2>> instances;
+    static std::map<std::pair<Device *, stream>, std::shared_ptr<DELAllocatorV2>> instances;
 
     std::lock_guard<std::mutex> lock(mutex);
 
-    auto it = instances.find(s);
+    auto it = instances.find({&device, s});
     if (it != instances.end()) {
       return it->second;
     }
     auto instance = create(device, s);
-    instances[s] = instance;
+    instances[{&device, s}] = instance;
     return instance;
   }
 

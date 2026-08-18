@@ -67,8 +67,7 @@ public:
     if (ptr == nullptr && byte_size > 0) {
       throw std::invalid_argument("Cannot create dptr with null pointer and non-zero size");
     }
-    auto storage = std::make_shared<device_storage>(
-        device, ptr, byte_size, [&device, ptr]() { device.deallocate_aligned_memory(ptr); });
+    auto storage = std::make_shared<device_storage>(device, ptr, byte_size, []() {});
     storage_ = storage;
     offset_ = 0;
     capacity_ = byte_size;

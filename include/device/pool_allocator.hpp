@@ -13,6 +13,7 @@
 #include "device/dptr.hpp"
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
+#include <utility>
 
 namespace tunx {
 
@@ -33,9 +34,9 @@ public:
 
   static PoolAllocator &instance(Device &device, stream s) {
     static std::mutex registry_mutex;
-    static std::map<stream, std::unique_ptr<PoolAllocator>> instances;
+    static std::map<std::pair<Device *, stream>, std::unique_ptr<PoolAllocator>> instances;
     std::lock_guard<std::mutex> lock(registry_mutex);
-    auto &pool = instances[s];
+    auto &pool = instances[{&device, s}];
     if (!pool) {
       pool = std::make_unique<PoolAllocator>(device, s);
     }
