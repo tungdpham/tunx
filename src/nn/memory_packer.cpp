@@ -37,7 +37,7 @@ dptr TrackingAllocator::allocate(size_t size) {
   TensorAllocation alloc;
   alloc.iid = iid;
   alloc.size = aligned_size;
-  alloc.start_step = current_step_;
+  alloc.start_step = ++current_step_;
   alloc.end_step = -1;  // -1 means not freed yet
 
   size_t alloc_idx = allocations_.size();
@@ -48,7 +48,7 @@ dptr TrackingAllocator::allocate(size_t size) {
   void* ptr = orig_ptr.get<void>();
   auto storage = std::make_shared<device_storage>(
       device(), ptr, aligned_size, [this, alloc_idx, orig_ptr]() mutable {
-        this->allocations_[alloc_idx].end_step = this->current_step_;
+        this->allocations_[alloc_idx].end_step = ++this->current_step_;
         orig_ptr = dptr(nullptr);  // release orig_ptr
       });
   return dptr(storage, 0, aligned_size);
@@ -136,8 +136,16 @@ MemoryPacker::PackResult MemoryPacker::pack(std::vector<TensorAllocation> alloca
       }
       if (!overlap) {
         size_t gap_size = (gap_end == (size_t)-1) ? (size_t)-1 : (gap_end - offset);
-        if (gap_size >= alloc.size) {
-          if (best_gap_size == (size_t)-1 || gap_size < best_gap_size) {
+        if (gap_size >= alloc.size || gap_size == (size_t)-1) {
+          bool is_better = false;
+          if (best_offset == (size_t)-1) {
+            is_better = true;
+          } else if (gap_size != (size_t)-1) {
+            if (best_gap_size == (size_t)-1 || gap_size < best_gap_size) {
+              is_better = true;
+            }
+          }
+          if (is_better) {
             best_offset = offset;
             best_gap_size = gap_size;
           }
@@ -162,7 +170,7 @@ MemoryPacker::PackResult MemoryPacker::pack(std::vector<TensorAllocation> alloca
 
   std::ofstream out("memory_placement.csv");
   if (out.is_open()) {
-    out << "edge_uid,alloc_step,free_step,size,ffd_offset\n";
+    out << "edge_uid,alloc_step,free_step,size,bfd_offset\n";
     for (const auto& alloc : allocations) {
       std::string iid = alloc.iid;
       size_t last_underscore = iid.find_last_of('_');

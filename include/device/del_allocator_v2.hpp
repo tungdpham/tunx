@@ -12,11 +12,11 @@
 #include <functional>
 #include <list>
 #include <map>
-#include <utility>
 #include <memory>
 #include <mutex>
 #include <set>
 #include <stdexcept>
+#include <utility>
 
 #include "device/dptr.hpp"
 #include "device/iallocator.hpp"
@@ -108,7 +108,10 @@ public:
   DELAllocatorV2 &operator=(const DELAllocatorV2 &) = delete;
 
   dptr allocate(size_t size) override {
-    if (size == 0) return dptr(nullptr);
+    if (size == 0) {
+      auto storage = std::make_shared<device_storage>(device_, nullptr, 0, []() {});
+      return dptr(storage, 0, 0);
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     size_t aligned_size = align_up(size, DEFAULT_ALIGNMENT);
 

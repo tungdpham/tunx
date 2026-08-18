@@ -56,8 +56,8 @@ public:
       free_blocks_.erase(it);
     } else {
       ptr = device_.allocate_aligned_memory(size, DEFAULT_ALIGNMENT);
-      set_allocated(allocated_ + size);
     }
+    set_allocated(allocated_ + size);
 
     auto storage = std::make_shared<device_storage>(device_, ptr, size,
                                                     [this, ptr, size]() { reclaim(ptr, size); });
@@ -68,7 +68,6 @@ public:
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto &pair : free_blocks_) {
       device_.deallocate_aligned_memory(pair.second);
-      set_allocated(allocated_ - pair.first);
     }
     free_blocks_.clear();
   }
@@ -80,7 +79,6 @@ public:
       return;
     }
     void *ptr = device_.allocate_aligned_memory(size, DEFAULT_ALIGNMENT);
-    set_allocated(allocated_ + size);
     free_blocks_.emplace(size, ptr);
   }
 

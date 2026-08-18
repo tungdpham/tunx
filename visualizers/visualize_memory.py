@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.cm as cm
 
 
-def plot_memory(csv_file, offset_column='ffd_offset', output_file='memory_placement.png'):
+def plot_memory(csv_file, offset_column='bfd_offset', output_file='memory_placement.png'):
     df = pd.read_csv(csv_file)
 
     fig, ax = plt.subplots(figsize=(16, 9))
@@ -73,8 +73,8 @@ if __name__ == '__main__':
         description='Visualize memory placement from CSV.')
     parser.add_argument('csv_file', nargs='?', type=str, default='build/memory_placement.csv',
                         help='Path to the CSV file (default: memory_placement.csv)')
-    parser.add_argument('--offset', type=str, default='ffd_offset', choices=[
-                        'naive_offset', 'ffd_offset'], help='Offset column to use (default: ffd_offset)')
+    parser.add_argument('--offset', type=str, default='bfd_offset', choices=[
+                        'naive_offset', 'bfd_offset'], help='Offset column to use (default: bfd_offset)')
     parser.add_argument('--out', type=str, default='memory_placement.png',
                         help='Output image file (default: memory_placement.png)')
 

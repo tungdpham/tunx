@@ -6,8 +6,6 @@
  */
 #pragma once
 
-#include <unordered_map>
-
 #include "device/device_manager.hpp"
 #include "device/dptr.hpp"
 #include "device/iallocator.hpp"
@@ -19,18 +17,27 @@ class DeviceAllocator : public IAllocator {
 public:
   DeviceAllocator(Device& device)
       : device_(device) {}
+  ~DeviceAllocator() {}
+  DeviceAllocator(const DeviceAllocator&) = delete;
+  DeviceAllocator& operator=(const DeviceAllocator&) = delete;
 
-  static DeviceAllocator& instance(Device& device) {
+  static DeviceAllocator& instance(Device& device, stream s = nullptr) {
     static std::mutex registry_mutex;
-    static std::unordered_map<Device*, std::unique_ptr<DeviceAllocator>> registry;
+    static std::map<std::pair<Device*, stream>, std::unique_ptr<DeviceAllocator>> registry;
     std::lock_guard<std::mutex> lock(registry_mutex);
-    if (registry.find(&device) == registry.end()) {
-      registry[&device] = std::make_unique<DeviceAllocator>(device);
+    std::pair<Device*, stream> key = {&device, s};
+    auto it = registry.find(key);
+    if (it == registry.end()) {
+      registry.emplace(key, std::make_unique<DeviceAllocator>(device));
     }
-    return *registry[&device];
+    return *registry[key];
   }
 
   dptr allocate(size_t size) override {
+    if (size == 0) {
+      auto storage = std::make_shared<device_storage>(device_, nullptr, 0, []() {});
+      return dptr(storage, 0, 0);
+    }
     void* ptr = device_->allocate_aligned_memory(size, DEFAULT_ALIGNMENT);
 
     set_allocated(allocated_ + size);

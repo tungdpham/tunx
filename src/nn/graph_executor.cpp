@@ -32,6 +32,12 @@ GraphExecutor::GraphExecutor(Graph &graph)
       ++grad_ref_counts_[consumer];
     }
   }
+  for (const auto &output : graph_.outputs()) {
+    ++data_ref_counts_[output];
+  }
+  for (const auto &input : graph_.inputs()) {
+    ++grad_ref_counts_[input];
+  }
 }
 
 const Tensor &GraphExecutor::data(const Node &node) const { return data_.at(node).tensor; }
@@ -168,11 +174,6 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
     }
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
   }
-
-  for (const auto &output : graph_.outputs()) {
-    ++data_ref_counts_[output];
-  }
-
   for (auto &edge : graph_.edges()) {
     if (edge->layer())
       edge->layer()->set_workspace_allocator(active_built_plan_.packed_allocator.get());
@@ -215,11 +216,6 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
     }
     set_grad(it->second, device_tensor, grad_ref_counts_[it->second]);
   }
-
-  for (const auto &input : graph_.inputs()) {
-    ++grad_ref_counts_[input];
-  }
-
   TensorBundle grad_input_map;
 
   for (auto &edge : graph_.edges()) {
@@ -265,11 +261,6 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
     }
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
   }
-
-  for (const auto &output : graph_.outputs()) {
-    ++data_ref_counts_[output];
-  }
-
   TensorBundle output_map;  // placeholder to ensure outputs arent prematurely deallocated
 
   auto *allocator = graph_.workspace_allocator();
@@ -354,7 +345,7 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
       }
     }
   }
-
+  cleanup_released(data_);
   return {output_map, edge_profiles};
 }
 
@@ -375,11 +366,6 @@ ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,
     }
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
   }
-
-  for (const auto &output : graph_.outputs()) {
-    ++data_ref_counts_[output];
-  }
-
   TensorBundle output_map;  // placeholder to ensure outputs arent prematurely deallocated
 
   auto *allocator = graph_.workspace_allocator();
@@ -414,6 +400,7 @@ ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,
   // free memory for residuals since this is just profiling
   residuals_.clear();
   output_map.clear();
+  cleanup_released(data_);
   allocator->evict_unused();
 
   return stats;
@@ -437,11 +424,6 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
     }
     set_grad(it->second, device_tensor, grad_ref_counts_[it->second]);
   }
-
-  for (const auto &input : graph_.inputs()) {
-    ++grad_ref_counts_[input];
-  }
-
   TensorBundle grad_input_map;
 
   auto *allocator = graph_.workspace_allocator();
@@ -495,7 +477,7 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
       }
     }
   }
-
+  cleanup_released(grads_);
   allocator->evict_unused();
 
   return {grad_input_map, edge_profiles};
@@ -519,11 +501,6 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
     }
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
   }
-
-  for (const auto &output : graph_.outputs()) {
-    ++data_ref_counts_[output];
-  }
-
   TensorBundle output_map;  // placeholder to ensure outputs arent prematurely deallocated
 
   // assuming sorted topologically
@@ -538,10 +515,10 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
     }
   }
 
-  auto &pool_allocator = PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
+  auto &mem_pool = PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
   TensorBundle output_grad_map;
   for (const auto &[uid, tensor] : output_map) {
-    output_grad_map.set(uid, Tensor(tensor.shape(), tensor.dtype(), pool_allocator));
+    output_grad_map.set(uid, Tensor(tensor.shape(), tensor.dtype(), mem_pool));
   }
 
   output_map.clear();
@@ -557,10 +534,7 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
     }
     set_grad(it->second, device_tensor, grad_ref_counts_[it->second]);
   }
-
-  for (const auto &input : graph_.inputs()) {
-    ++grad_ref_counts_[input];
-  }
+  output_grad_map.clear();
 
   TensorBundle grad_input_map;
 
@@ -594,6 +568,7 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
   stats.peak_mem = stats.edge_stats.size() > 0 ? stats.edge_stats.back().peak_mem : 0;
 
   grad_input_map.clear();
+  cleanup_released(grads_);
   allocator->evict_unused();
 
   return stats;
