@@ -6,6 +6,9 @@
  */
 #pragma once
 
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+
 #include <asio.hpp>
 #include <device/stream.hpp>
 #include <memory>
@@ -20,6 +23,7 @@ struct TCPConfig {
   int port = 0;
   std::string local_worker_host = "";
   int local_worker_port = 0;
+  int local_worker_position = 0;
   uint32_t num_io_threads = 4;
   uint32_t max_packet_size = 4 * 1024 * 1024;  // 4 MB
   uint32_t skts_per_endpoint = 1;
@@ -38,6 +42,7 @@ struct TCPConfig {
     port = j.value("port", port);
     local_worker_host = j.value("local_worker_host", local_worker_host);
     local_worker_port = j.value("local_worker_port", local_worker_port);
+    local_worker_position = j.value("local_worker_position", local_worker_position);
     num_io_threads = j.value("num_io_threads", num_io_threads);
     max_packet_size = j.value("max_packet_size", max_packet_size);
     skts_per_endpoint = j.value("skts_per_endpoint", skts_per_endpoint);
@@ -53,6 +58,20 @@ struct TCPConfig {
     } else {
       throw std::runtime_error("TCP config must contain partition_ratios");
     }
+  }
+
+  void print_config() {
+    fmt::print("TCP Config:\n");
+    fmt::print("  Host: {}\n", host);
+    fmt::print("  Port: {}\n", port);
+    fmt::print("  Local Worker Host: {}\n", local_worker_host);
+    fmt::print("  Local Worker Port: {}\n", local_worker_port);
+    fmt::print("  Local Worker Position: {}\n", local_worker_position);
+    fmt::print("  Number of IO threads: {}\n", num_io_threads);
+    fmt::print("  Max packet size: {}\n", max_packet_size);
+    fmt::print("  Sockets per endpoint: {}\n", skts_per_endpoint);
+    fmt::print("  Worker endpoints: {}\n", worker_endpoints);
+    fmt::print("  Partition ratios: {}\n", partition_ratios);
   }
 };
 

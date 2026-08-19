@@ -60,6 +60,7 @@ int main(int argc, char *argv[]) {
 
   TCPConfig tcp_config;
   tcp_config.load_from_json(config_path);
+  tcp_config.print_config();
 
   Device &device = DeviceManager::instance().get(train_config.device_id);
   auto &allocator = PoolAllocator::instance(device, device.default_stream());
@@ -92,7 +93,9 @@ int main(int argc, char *argv[]) {
   Endpoint local_worker_endpoint =
       Endpoint::tcp(tcp_config.local_worker_host, tcp_config.local_worker_port);
 
-  tcp_config.worker_endpoints.push_back(local_worker_endpoint);
+  tcp_config.worker_endpoints.insert(
+      tcp_config.worker_endpoints.begin() + tcp_config.local_worker_position,
+      local_worker_endpoint);
 
   cout << "Local worker endpoint: " << local_worker_endpoint.to_json().dump(4) << endl;
 
