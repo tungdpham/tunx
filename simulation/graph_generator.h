@@ -82,8 +82,8 @@ inline Graph random_fork_join_graph(int depth) {
   return g;
 }
 
-inline ActivationNode* build_random_static_fork_join_dag(Graph& g, ActivationNode* input, int depth,
-                                                         int& node_counter) {
+inline ActivationNode* build_random_order_invariant_fork_join_dag(Graph& g, ActivationNode* input,
+                                                                  int depth, int& node_counter) {
   if (depth == 0) {
     return input;
   }
@@ -94,7 +94,7 @@ inline ActivationNode* build_random_static_fork_join_dag(Graph& g, ActivationNod
   if (structure_type == 0) {
     auto act = g.add_act(prefix + "_seq", random_act_size());
     g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {act}, {}, random_res_size());
-    return build_random_static_fork_join_dag(g, act, depth - 1, node_counter);
+    return build_random_order_invariant_fork_join_dag(g, act, depth - 1, node_counter);
   }
 
   if (structure_type == 1) {
@@ -103,8 +103,10 @@ inline ActivationNode* build_random_static_fork_join_dag(Graph& g, ActivationNod
     g.add_op(prefix + "_split", random_ws_size(), {input}, {left_input, right_input}, {},
              random_res_size());
 
-    auto left_out = build_random_static_fork_join_dag(g, left_input, depth - 1, node_counter);
-    auto right_out = build_random_static_fork_join_dag(g, right_input, depth - 1, node_counter);
+    auto left_out =
+        build_random_order_invariant_fork_join_dag(g, left_input, depth - 1, node_counter);
+    auto right_out =
+        build_random_order_invariant_fork_join_dag(g, right_input, depth - 1, node_counter);
 
     auto merge_act = g.add_act(prefix + "_merge", random_act_size());
     g.add_op(prefix + "_add", random_ws_size(), {left_out, right_out}, {merge_act}, {},
@@ -117,19 +119,20 @@ inline ActivationNode* build_random_static_fork_join_dag(Graph& g, ActivationNod
   g.add_op(prefix + "_split", random_ws_size(), {input}, {main_input, skip_input}, {},
            random_res_size());
 
-  auto main_out = build_random_static_fork_join_dag(g, main_input, depth - 1, node_counter);
+  auto main_out =
+      build_random_order_invariant_fork_join_dag(g, main_input, depth - 1, node_counter);
   auto merge_act = g.add_act(prefix + "_res_merge", random_act_size());
   g.add_op(prefix + "_res_add", random_ws_size(), {main_out, skip_input}, {merge_act}, {},
            random_res_size());
   return merge_act;
 }
 
-inline Graph random_static_fork_join_graph(int depth) {
+inline Graph random_order_invariant_fork_join_graph(int depth) {
   Graph g;
   int node_counter = 0;
   auto input = g.add_act("input", random_act_size());
   g.set_inputs({input});
-  auto output = build_random_static_fork_join_dag(g, input, depth, node_counter);
+  auto output = build_random_order_invariant_fork_join_dag(g, input, depth, node_counter);
   g.set_outputs({output});
   return g;
 }
@@ -194,8 +197,8 @@ inline Graph random_branching_graph(int depth) {
   return g;
 }
 
-inline void build_random_static_branching_dag(Graph& g, ActivationNode* input, int depth,
-                                              int& node_counter) {
+inline void build_random_order_invariant_branching_dag(Graph& g, ActivationNode* input, int depth,
+                                                       int& node_counter) {
   if (depth == 0) {
     auto outputs = g.outputs();
     outputs.push_back(input);
@@ -207,7 +210,7 @@ inline void build_random_static_branching_dag(Graph& g, ActivationNode* input, i
   if (rand() % 3 > 0) {
     auto next_act = g.add_act(prefix + "_seq", random_act_size());
     g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {next_act}, {}, random_res_size());
-    build_random_static_branching_dag(g, next_act, depth - 1, node_counter);
+    build_random_order_invariant_branching_dag(g, next_act, depth - 1, node_counter);
     return;
   }
 
@@ -221,16 +224,16 @@ inline void build_random_static_branching_dag(Graph& g, ActivationNode* input, i
   g.add_op(prefix + "_split", random_ws_size(), {input}, branch_inputs);
 
   for (auto* branch_input : branch_inputs) {
-    build_random_static_branching_dag(g, branch_input, depth - 1, node_counter);
+    build_random_order_invariant_branching_dag(g, branch_input, depth - 1, node_counter);
   }
 }
 
-inline Graph random_static_branching_graph(int depth) {
+inline Graph random_order_invariant_branching_graph(int depth) {
   Graph g;
   int node_counter = 0;
   auto input = g.add_act("input", random_act_size());
   g.set_inputs({input});
-  build_random_static_branching_dag(g, input, depth, node_counter);
+  build_random_order_invariant_branching_dag(g, input, depth, node_counter);
   return g;
 }
 

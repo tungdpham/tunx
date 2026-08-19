@@ -31,126 +31,6 @@ std::vector<std::string> find_bw_macro_candidate_execution_order(Graph& graph,
   return solver.find_backward_order();
 }
 
-std::vector<std::string> find_fork_join_optimal_execution_order(Graph& graph) {
-  if (graph.inputs().size() != 1 || graph.outputs().size() != 1) return {};
-
-  std::map<std::string, std::vector<std::string>> consumers;
-  for (const auto& [op_id, op] : graph.op_nodes()) {
-    for (auto* input : op.inputs()) consumers[input->uuid()].push_back(op_id);
-  }
-
-  const auto* shared_input = graph.inputs().front();
-  const auto& root_ops = consumers[shared_input->uuid()];
-  if (root_ops.size() < 2) return {};
-
-  std::vector<std::vector<std::string>> branches;
-  std::string join_op_id;
-  std::set<std::string> branch_ops;
-
-  for (const auto& root_op_id : root_ops) {
-    const auto* current_op = &graph.get_op(root_op_id);
-    if (current_op->inputs().size() != 1 || current_op->inputs().front() != shared_input ||
-        current_op->outputs().size() != 1) {
-      return {};
-    }
-
-    std::vector<std::string> branch;
-    while (true) {
-      if (!branch_ops.insert(current_op->uuid()).second) return {};
-      branch.push_back(current_op->uuid());
-
-      const auto& next_ops = consumers[current_op->outputs().front()->uuid()];
-      if (next_ops.size() != 1) return {};
-      const auto* next_op = &graph.get_op(next_ops.front());
-      if (next_op->inputs().size() > 1) {
-        if (join_op_id.empty()) join_op_id = next_op->uuid();
-        if (join_op_id != next_op->uuid()) return {};
-        break;
-      }
-      if (next_op->inputs().size() != 1 || next_op->outputs().size() != 1) return {};
-      current_op = next_op;
-    }
-    branches.push_back(std::move(branch));
-  }
-
-  if (join_op_id.empty()) return {};
-  const auto& join_op = graph.get_op(join_op_id);
-  if (join_op.outputs().size() != 1 || join_op.outputs().front() != graph.outputs().front() ||
-      join_op.inputs().size() != branches.size() ||
-      branch_ops.size() + 1 != graph.op_nodes().size()) {
-    return {};
-  }
-
-  std::set<std::string> branch_tails;
-  for (const auto& branch : branches) {
-    const auto& tail = graph.get_op(branch.back());
-    branch_tails.insert(tail.outputs().front()->uuid());
-  }
-  for (auto* input : join_op.inputs()) {
-    if (!branch_tails.erase(input->uuid())) return {};
-  }
-  if (!branch_tails.empty()) return {};
-
-  struct Schedule {
-    size_t peak;
-    std::vector<std::string> order;
-  };
-
-  Allocator allocator;
-  GraphExecutor executor(graph);
-  executor.init_boundaries(&allocator);
-  std::map<std::vector<size_t>, Schedule> memo;
-
-  std::function<Schedule(std::vector<size_t>&)> solve = [&](std::vector<size_t>& completed) {
-    if (const auto it = memo.find(completed); it != memo.end()) return it->second;
-
-    bool all_branches_complete = true;
-    for (size_t branch_index = 0; branch_index < branches.size(); ++branch_index) {
-      if (completed[branch_index] != branches[branch_index].size()) {
-        all_branches_complete = false;
-        break;
-      }
-    }
-
-    if (all_branches_complete) {
-      size_t peak = allocator.allocated();
-      allocator.subscribe("fork_join_dp", [&](size_t memory) { peak = std::max(peak, memory); });
-      executor.run_op_node(&join_op, &allocator);
-      allocator.unsubscribe("fork_join_dp");
-      executor.undo_run_op_node(&join_op, &allocator);
-      return memo.emplace(completed, Schedule{peak, {join_op_id}}).first->second;
-    }
-
-    Schedule best{std::numeric_limits<size_t>::max(), {}};
-    for (size_t branch_index = 0; branch_index < branches.size(); ++branch_index) {
-      if (completed[branch_index] == branches[branch_index].size()) continue;
-
-      const auto& op_id = branches[branch_index][completed[branch_index]++];
-      const auto& op = graph.get_op(op_id);
-      size_t op_peak = allocator.allocated();
-      allocator.subscribe("fork_join_dp",
-                          [&](size_t memory) { op_peak = std::max(op_peak, memory); });
-      executor.run_op_node(&op, &allocator);
-      allocator.unsubscribe("fork_join_dp");
-
-      Schedule suffix = solve(completed);
-      const size_t candidate_peak = std::max(op_peak, suffix.peak);
-      if (candidate_peak < best.peak) {
-        best.peak = candidate_peak;
-        best.order = {op_id};
-        best.order.insert(best.order.end(), suffix.order.begin(), suffix.order.end());
-      }
-
-      executor.undo_run_op_node(&op, &allocator);
-      completed[branch_index]--;
-    }
-    return memo.emplace(completed, std::move(best)).first->second;
-  };
-
-  std::vector<size_t> completed(branches.size(), 0);
-  return solve(completed).order;
-}
-
 std::vector<std::string> find_fw_fork_join_execution_order(Graph& graph,
                                                            size_t max_states = 1000000) {
   std::vector<std::string> op_ids;
@@ -159,6 +39,20 @@ std::vector<std::string> find_fw_fork_join_execution_order(Graph& graph,
     if (op_ids.size() == 256) return find_fw_macro_candidate_execution_order(graph);
     op_index[op.uuid()] = static_cast<int>(op_ids.size());
     op_ids.push_back(op.uuid());
+  }
+
+  std::vector<std::string> baseline_order = find_fw_macro_candidate_execution_order(graph);
+  size_t baseline_peak = 0;
+  {
+    Allocator temp_allocator;
+    GraphExecutor temp_executor(graph);
+    temp_allocator.subscribe(
+        "baseline", [&](size_t memory) { baseline_peak = std::max(baseline_peak, memory); });
+    temp_executor.init_boundaries(&temp_allocator);
+    for (const auto& op_id : baseline_order) {
+      temp_executor.run_op_node(&graph.get_op(op_id), &temp_allocator);
+    }
+    temp_allocator.unsubscribe("baseline");
   }
 
   auto [dependencies, dependents] = get_dependencies(graph);
@@ -182,6 +76,10 @@ std::vector<std::string> find_fw_fork_join_execution_order(Graph& graph,
     if (memo.size() >= max_states) {
       state_limit_reached = true;
       return Schedule{std::numeric_limits<size_t>::max(), {}};
+    }
+    if (allocator.allocated() >= baseline_peak) {
+      return memo.emplace(completed, Schedule{std::numeric_limits<size_t>::max(), {}})
+          .first->second;
     }
 
     if (completed.count() == op_ids.size()) {
@@ -208,6 +106,12 @@ std::vector<std::string> find_fw_fork_join_execution_order(Graph& graph,
                           [&](size_t memory) { op_peak = std::max(op_peak, memory); });
       executor.run_op_node(&op, &allocator);
       allocator.unsubscribe("fork_join_dp");
+
+      if (op_peak >= baseline_peak || op_peak >= best.peak) {
+        executor.undo_run_op_node(&op, &allocator);
+        continue;
+      }
+
       completed.set(index);
 
       Schedule suffix = solve(completed);
@@ -226,6 +130,9 @@ std::vector<std::string> find_fw_fork_join_execution_order(Graph& graph,
 
   std::bitset<256> completed;
   Schedule result = solve(completed);
+  if (result.peak >= baseline_peak) {
+    return baseline_order;
+  }
   return result.order;
 }
 
@@ -267,6 +174,29 @@ std::vector<std::string> find_bw_fork_join_execution_order(Graph& graph,
     op_ids.push_back(op.uuid());
   }
 
+  std::vector<std::string> baseline_order;
+  {
+    MacroSolver solver(graph);
+    baseline_order = solver.find_backward_order();
+  }
+  size_t baseline_peak = 0;
+  {
+    Allocator temp_allocator;
+    GraphExecutor temp_executor(graph);
+    temp_executor.init_boundaries(&temp_allocator);
+    std::vector<std::string> fw_order = find_fw_naive_dfs_execution_order(graph);
+    for (const auto& op_id : fw_order) {
+      temp_executor.run_op_node(&graph.get_op(op_id), &temp_allocator);
+    }
+    temp_allocator.subscribe(
+        "baseline", [&](size_t memory) { baseline_peak = std::max(baseline_peak, memory); });
+    temp_executor.transition_to_backward(&temp_allocator);
+    for (const auto& op_id : baseline_order) {
+      temp_executor.run_backward_op_node(&graph.get_op(op_id), &temp_allocator);
+    }
+    temp_allocator.unsubscribe("baseline");
+  }
+
   auto deps_and_dependents = get_dependencies(graph);
   auto dependencies = deps_and_dependents.second;
 
@@ -305,6 +235,10 @@ std::vector<std::string> find_bw_fork_join_execution_order(Graph& graph,
       state_limit_reached = true;
       return Schedule{std::numeric_limits<size_t>::max(), {}};
     }
+    if (allocator.allocated() >= baseline_peak) {
+      return memo.emplace(completed, Schedule{std::numeric_limits<size_t>::max(), {}})
+          .first->second;
+    }
 
     if (completed.count() == op_ids.size()) {
       return memo.emplace(completed, Schedule{allocator.allocated(), {}}).first->second;
@@ -330,6 +264,12 @@ std::vector<std::string> find_bw_fork_join_execution_order(Graph& graph,
                           [&](size_t memory) { op_peak = std::max(op_peak, memory); });
       executor.run_backward_op_node(&op, &allocator);
       allocator.unsubscribe("fork_join_dp");
+
+      if (op_peak >= baseline_peak || op_peak >= best.peak) {
+        executor.undo_run_backward_op_node(&op, &allocator);
+        continue;
+      }
+
       completed.set(index);
 
       Schedule suffix = solve(completed);
@@ -348,6 +288,9 @@ std::vector<std::string> find_bw_fork_join_execution_order(Graph& graph,
 
   std::bitset<256> completed;
   Schedule result = solve(completed);
+  if (result.peak >= baseline_peak) {
+    return baseline_order;
+  }
   return result.order;
 }
 
@@ -666,21 +609,20 @@ int main() {
   std::cin >> trials;
   std::vector<std::string> to_checks = {"MACRO"};
 
-  run_simulation_trials(1, "Tunx V1", "tunx_v1", []() { return tunx_v1_graph(); }, to_checks);
-  run_simulation_trials(
-      trials, "Sample", "sample", []() { return sample_branch_graph(); }, to_checks);
   run_simulation_trials(
       trials, "Join", "join", []() { return random_joining_graph(4); }, to_checks);
   run_simulation_trials(
-      trials, "Branch", "branch", []() { return random_branching_graph(3); }, to_checks);
+      trials, "Order-Invariant Branch", "order_invariant_branch",
+      []() { return random_order_invariant_branching_graph(3); }, to_checks);
   run_simulation_trials(
-      trials, "Static Branch", "static_branch", []() { return random_static_branching_graph(3); },
+      trials, "Order-Invariant Fork Join", "order_invariant_fork_join",
+      []() { return random_order_invariant_fork_join_graph(4); }, to_checks);
+  run_simulation_trials(
+      trials, "Order-Dependent Branch", "branch", []() { return random_branching_graph(3); },
       to_checks);
   run_simulation_trials(
-      trials, "Fork_join", "fork_join", []() { return random_fork_join_graph(4); }, to_checks);
-  run_simulation_trials(
-      trials, "Static Fork_join", "static_fork_join",
-      []() { return random_static_fork_join_graph(4); }, to_checks);
+      trials, "Order-Dependent Fork Join", "fork_join", []() { return random_fork_join_graph(4); },
+      to_checks);
 
   return 0;
 }
