@@ -285,27 +285,31 @@ Node v1_residual_block(Node input, Shape &shape, size_t out_channels, const std:
   b1 = maxpool2d(b1, b1_shape, 2, 2, 2, 2, 0, 0, name + "_b1_pool");
 
   Shape b2_shape = shape;
-  Node b2 = conv2d(input, b2_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b2_conv1");
+  Node b2 = conv2d(input, b2_shape, out_channels, 3, 3, 1, 1, 1, 1, false, name + "_b2_conv1");
   b2 = batchnorm(b2, b2_shape, true, name + "_b2_bn1");
-  b2 = conv2d(b2, b2_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b2_conv2");
+  b2 = conv2d(b2, b2_shape, out_channels, 3, 3, 1, 1, 1, 1, false, name + "_b2_conv2");
   b2 = batchnorm(b2, b2_shape, true, name + "_b2_bn2");
   b2 = maxpool2d(b2, b2_shape, 2, 2, 2, 2, 0, 0, name + "_b2_pool");
 
   Shape b3_shape = shape;
-  Node b3 = conv2d(input, b3_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b3_conv1");
+  Node b3 = conv2d(input, b3_shape, out_channels, 3, 3, 1, 1, 1, 1, false, name + "_b3_conv1");
   b3 = batchnorm(b3, b3_shape, true, name + "_b3_bn1");
-  b3 = conv2d(b3, b3_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b3_conv2");
+  b3 = conv2d(b3, b3_shape, out_channels, 5, 5, 1, 1, 2, 2, false, name + "_b3_conv2");
   b3 = batchnorm(b3, b3_shape, true, name + "_b3_bn2");
   b3 = maxpool2d(b3, b3_shape, 2, 2, 2, 2, 0, 0, name + "_b3_pool");
 
   Shape b4_shape = shape;
-  Node b4 = conv2d(input, b4_shape, out_channels * 2, 1, 1, 1, 1, 0, 0, false, name + "_b4_conv_1");
+  Node b4 = conv2d(input, b4_shape, out_channels * 2, 3, 3, 1, 1, 1, 1, false, name + "_b4_conv_1");
+  b4 = batchnorm(b4, b4_shape, true, name + "_b4_bn1");
+
   Shape b4_main_shape = b4_shape;
   Node b4_main = conv2d(b4, b4_main_shape, out_channels * 4, 3, 3, 1, 1, 1, 1, false,
                         name + "_b4_conv_2_main");
+
   Shape b4_shortcut_shape = b4_shape;
   Node b4_shortcut = conv2d(b4, b4_shortcut_shape, out_channels * 4, 3, 3, 1, 1, 1, 1, false,
                             name + "_b4_conv2_shortcut");
+
   b4 = b4_main + b4_shortcut;
   b4_shape = b4_main_shape;
   b4 = maxpool2d(b4, b4_shape, 2, 2, 2, 2, 0, 0, name + "_b4_pool");
@@ -745,10 +749,10 @@ Graph create_tunx_v1_graph(IAllocator &allocator, GraphOpts opts) {
   x = batchnorm(x, shape, true, "bn1");
   x = maxpool2d(x, shape, 3, 3, 2, 2, 1, 1, "pool1");  // -> {56, 56, 64}
 
-  x = v1_residual_block(x, shape, 256, "asym1");       // -> {56, 56, 256}
-  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool2");  // -> {28, 28, 256}
+  x = v1_residual_block(x, shape, 256, "asym1");       // -> {28, 28, 256}
+  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool2");  // -> {14, 14, 256}
 
-  x = avgpool2d(x, shape, 28, 28, 1, 1, 0, 0, "avgpool");
+  x = avgpool2d(x, shape, 14, 14, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 100, true, "output");
 
