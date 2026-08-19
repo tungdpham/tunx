@@ -34,7 +34,7 @@ public:
   const BuiltPlan &build_plans(TensorBundle &input_map);
 
   ExecutionPlanStats profile_forward_plan(TensorBundle &input_map, const ExecutionPlan &plan);
-  ExecutionPlanStats profile_backward_plan(TensorBundle &input_map, const ExecutionPlan &plan);
+  ExecutionPlanStats profile_backward_plan(TensorBundle &input_map, const ExecutionPlan &forward_plan, const ExecutionPlan &backward_plan);
 
   ExecutionPlan &active_forward_plan() { return active_built_plan_.forward_plan; }
   const ExecutionPlan &active_forward_plan() const { return active_built_plan_.forward_plan; }
@@ -79,10 +79,12 @@ private:
   void backward_edge(const Edge &edge);
   void cleanup_released(std::map<Node, Entry> &entries);
 
-  std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edge_forward(
+  std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edges_forward(
       TensorBundle &input_map);
-  std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edge_backward(
+  std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edges_backward(
       TensorBundle &output_grad_map);
+  EdgeProfile profile_edge_forward(const Edge &edge);
+  EdgeProfile profile_edge_backward(const Edge &edge);
 
   void pack_memory(BuiltPlan &plan, TensorBundle &input_map, TensorBundle &output_grad_map);
 };

@@ -20,7 +20,9 @@
 #include <iostream>
 #include <memory>
 
+#include "common/csv_logger.hpp"
 #include "data_loading/batch_prefetcher.hpp"
+#include "device/iallocator.hpp"
 #include "device/pool_allocator.hpp"
 #include "device/stream.hpp"
 #include "nn/edge_profile.hpp"
@@ -144,11 +146,13 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
     naive_plan.order.push_back(*it);
   }
 
-  auto naive_stats = executor.profile_backward_plan(inputs, naive_plan);
+  ExecutionPlan naive_forward_plan;
+  naive_forward_plan.order = executor.graph().edges();
+  auto naive_stats = executor.profile_backward_plan(inputs, naive_forward_plan, naive_plan);
 
   auto &built_plan = executor.build_plans(inputs);
   auto &bfd_plan = built_plan.backward_plan;
-  auto bfd_stats = executor.profile_backward_plan(inputs, bfd_plan);
+  auto bfd_stats = executor.profile_backward_plan(inputs, built_plan.forward_plan, bfd_plan);
 
   fmt::print("\n{:=^80}\n", " Backward Execution Plan Stats ");
   fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
@@ -194,6 +198,71 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
   }
 }
 
+static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimizer,
+                               GraphExecutor &executor, TensorBundle &inputs, IAllocator &alloc,
+                               std::unique_ptr<CsvLogger> &logger, std::string allocator_name) {
+  auto *previous_alloc = graph.workspace_allocator();
+  graph.set_workspace_allocator(alloc);
+
+  size_t optimizer_mem = 0;
+  if (optimizer) {
+    for (const auto &tensor : optimizer->states()) {
+      if (tensor) optimizer_mem += tensor.num_bytes();
+    }
+  }
+
+  auto &built_plan = executor.build_plans(inputs);
+
+  ExecutionPlanStats forward_stats = executor.profile_forward_plan(inputs, built_plan.forward_plan);
+  ExecutionPlanStats backward_stats =
+      executor.profile_backward_plan(inputs, built_plan.forward_plan, built_plan.backward_plan);
+
+  fmt::print("\n{:=^120}\n", fmt::format(" Memory Metrics Breakdown {} ", allocator_name));
+  fmt::print("{:<10} | {:<20} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12}\n", "Pass", "Layer Name",
+             "Allocated", "Reserved", "Peak", "Cached", "Activations");
+  fmt::print("{:-<10}-+-{:-<20}-+-{:-<12}-+-{:-<12}-+-{:-<12}-+-{:-<12}-+-{:-<12}\n", "", "", "",
+             "", "", "", "");
+
+  auto log_stats = [&](const std::vector<EdgeMemStats> &edge_stats, const std::string &pass_name) {
+    for (const auto &stat : edge_stats) {
+      fmt::print("{:<10} | {:<20} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12}\n", pass_name,
+                 stat.layer_name, stat.allocated_mem, stat.reserved_mem, stat.peak_mem,
+                 stat.cached_mem, stat.activations_mem);
+
+      if (logger) {
+        std::unordered_map<std::string, std::string> row = {
+            {"allocator_type", allocator_name},
+            {"pass", pass_name},
+            {"layer_name", stat.layer_name},
+            {"allocated_b", std::to_string(stat.allocated_mem)},
+            {"reserved_b", std::to_string(stat.reserved_mem)},
+            {"peak_b", std::to_string(stat.peak_mem)},
+            {"cached_b", std::to_string(stat.cached_mem)},
+            {"fragmented_b", std::to_string(stat.fragmented_mem)},
+            {"host_pinned_b", std::to_string(stat.host_mem)},
+            {"gradients_b", std::to_string(stat.gradients_mem)},
+            {"optimizer_b", std::to_string(optimizer_mem)},
+            {"activations_b", std::to_string(stat.activations_mem)},
+            {"workspaces_b", std::to_string(stat.workspaces_mem)}};
+        logger->log(row);
+      }
+    }
+  };
+
+  log_stats(forward_stats.edge_stats, "forward");
+  log_stats(backward_stats.edge_stats, "backward");
+
+  fmt::print("{:=^120}\n\n", "");
+  if (logger) {
+    logger->flush();
+  }
+
+  graph.set_workspace_allocator(*previous_alloc);
+  for (auto &edge : graph.edges()) {
+    edge->layer()->set_workspace_allocator(previous_alloc);
+  }
+}
+
 static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
                           unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
                           unique_ptr<Scheduler> &scheduler, const TrainingConfig &config,
@@ -236,23 +305,6 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
   graph.save_dot("current_graph.dot");
 
   GraphExecutor executor(graph);
-
-  // profiling
-  if (config.print_layer_profiling) {
-    get_next(batch_data, batch_labels);
-    Tensor device_input = to_device(batch_data, model_device);
-    Tensor device_labels = to_device(batch_labels, model_device);
-    TensorBundle inputs{{"input", device_input}};
-    auto &built_plan = executor.build_plans(inputs);
-    log_edge_profiles(built_plan.forward_edge_profiles, forward_profiles_logger);
-    log_execution_plan_stats(executor, inputs, forward_plan_logger);
-
-    log_edge_profiles(built_plan.backward_edge_profiles, backward_profiles_logger);
-    log_execution_plan_stats_backward(executor, inputs, backward_plan_logger);
-
-    // avoid affecting training
-    train_dataset->reset();
-  }
 
   cout << "Training batches: " << train_dataset->size() << endl;
   while (get_next(batch_data, batch_labels) &&
@@ -560,6 +612,9 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
                  unique_ptr<Scheduler> &scheduler, const TrainingConfig &config) {
   optimizer->attach(graph);
 
+  std::string timestamp = csv_timestamp();
+  std::string artifact_name = training_artifact_name(config);
+
   cout << "Training batches: " << train_dataset->size() / config.batch_size << endl;
   cout << "Validation batches: " << val_dataset->size() / config.batch_size << endl;
 
@@ -568,13 +623,11 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
 
   bool is_val = config.max_steps == -1;
 
-  std::string timestamp = csv_timestamp();
-  std::string artifact_name = training_artifact_name(config);
-
   std::unique_ptr<CsvLogger> forward_profiles_logger;
   std::unique_ptr<CsvLogger> forward_plan_logger;
   std::unique_ptr<CsvLogger> backward_profiles_logger;
   std::unique_ptr<CsvLogger> backward_plan_logger;
+  std::unique_ptr<CsvLogger> memory_metrics_logger;
 
   if (config.print_layer_profiling) {
     std::vector<std::string> profile_headers = {"layer_name", "time_ms", "peak_mem_b", "net_mem_b"};
@@ -607,8 +660,44 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
                                                        bw_plan_csv_path, plan_headers);
   }
 
+  std::vector<std::string> mem_headers = {
+      "allocator_type", "pass",          "layer_name",   "allocated_b",   "reserved_b",
+      "peak_b",         "cached_b",      "fragmented_b", "host_pinned_b", "gradients_b",
+      "optimizer_b",    "activations_b", "workspaces_b"};
+
+  std::string mem_csv_path = "tunx_" + artifact_name + "_" + timestamp + "_memory_metrics.csv";
+  if (!config.log_dir.empty()) mem_csv_path = config.log_dir + "/" + mem_csv_path;
+  memory_metrics_logger = std::make_unique<CsvLogger>("memory_metrics", mem_csv_path, mem_headers);
+
   MetricsLogger metrics_logger("tunx_" + artifact_name + "_" + timestamp, config.log_dir,
                                config.log_mode);
+
+  // Compute and log memory metrics before training
+  Tensor batch_data, batch_labels;
+  if (train_dataset->get_batch(config.batch_size, batch_data, batch_labels)) {
+    Tensor device_input = to_device(batch_data, graph.device());
+    TensorBundle inputs{{"input", device_input}};
+    GraphExecutor executor(graph);
+
+    auto &built_plan = executor.build_plans(inputs);
+    log_edge_profiles(built_plan.forward_edge_profiles, forward_profiles_logger);
+    log_execution_plan_stats(executor, inputs, forward_plan_logger);
+
+    log_edge_profiles(built_plan.backward_edge_profiles, backward_profiles_logger);
+    log_execution_plan_stats_backward(executor, inputs, backward_plan_logger);
+
+    auto &pool_allocator = PoolAllocator::instance(graph.device(), graph.handle().get_stream());
+    auto &packed_allocator = *built_plan.packed_allocator;
+    log_memory_metrics(graph, optimizer, executor, inputs, pool_allocator, memory_metrics_logger,
+                       "reactive");
+    log_memory_metrics(graph, optimizer, executor, inputs, packed_allocator, memory_metrics_logger,
+                       "packed");
+
+    if (optimizer) {
+      optimizer->zero_grads();
+    }
+    train_dataset->reset();
+  }
 
   if (is_val) {
     train_val(graph, train_dataset, val_dataset, optimizer, criterion, scheduler, config,

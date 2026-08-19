@@ -239,7 +239,8 @@ public:
   void set_training(bool training);
   bool is_training() const;
 
-  void set_workspace_allocator(IAllocator* alloc);
+  IAllocator *workspace_allocator();
+  void set_workspace_allocator(IAllocator *alloc);
 
   virtual Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const = 0;
   std::string name() const { return name_; }

@@ -12,8 +12,15 @@ struct ExecutionPlan {
 
 struct EdgeMemStats {
   std::string layer_name;
-  size_t allocated_mem;
-  size_t peak_mem;
+  int64_t allocated_mem;
+  int64_t reserved_mem;
+  int64_t peak_mem;
+  int64_t cached_mem;
+  int64_t fragmented_mem;
+  int64_t host_mem;
+  int64_t gradients_mem;
+  int64_t activations_mem;
+  int64_t workspaces_mem;
 };
 
 struct ExecutionPlanStats {

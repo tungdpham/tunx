@@ -138,6 +138,11 @@ public:
     return total;
   }
 
+  size_t peak_allocated() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return peak_allocated_;
+  }
+
   Device &device() const override { return device_; }
 
 private:
@@ -146,10 +151,14 @@ private:
   stream stream_;
   mutable std::mutex mutex_;
   size_t allocated_ = 0;
+  size_t peak_allocated_ = 0;
   std::vector<std::function<void(size_t)>> allocation_hooks_;
 
   void set_allocated(size_t new_total) {
     allocated_ = new_total;
+    if (allocated_ > peak_allocated_) {
+      peak_allocated_ = allocated_;
+    }
     for (auto &hook : allocation_hooks_) {
       hook(allocated_);
     }

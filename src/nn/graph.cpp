@@ -63,11 +63,11 @@ void Graph::compile(IAllocator &allocator, GraphOpts opts) {
 
   engine_ = opts.engine ? opts.engine : get_default_engine(allocator.device());
   param_allocator_ = &allocator;
-  workspace_allocator_ = DELAllocatorV2::create(allocator.device(), s);
+  workspace_allocator_ = DELAllocatorV2::instance(device, s).get();
   engine_handle_ = engine_->create_handle(s);
 
   InitOptions layer_opts{
-      .ws_allocator = workspace_allocator_.get(),
+      .ws_allocator = workspace_allocator_,
       .engine = engine_,
       .handle = engine_handle_,
       .seed = opts.seed,
@@ -167,7 +167,8 @@ void Graph::sort() {
     ready.pop_back();
     sorted.push_back(e);
 
-    for (auto consumer_it = e->consumers().rbegin(); consumer_it != e->consumers().rend(); ++consumer_it) {
+    for (auto consumer_it = e->consumers().rbegin(); consumer_it != e->consumers().rend();
+         ++consumer_it) {
       const auto &consumer = *consumer_it;
       auto it = node_to_dependent_edges.find(consumer);
       if (it != node_to_dependent_edges.end()) {

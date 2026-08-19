@@ -13,6 +13,7 @@
 #include <stdexcept>
 
 #include "device/dptr.hpp"
+#include "device/iallocator.hpp"
 
 namespace tunx {
 
@@ -184,17 +185,13 @@ MemoryPacker::PackResult MemoryPacker::pack(std::vector<TensorAllocation> alloca
   return result;
 }
 
-PackedAllocator::PackedAllocator(IAllocator* backend_alloc, size_t peak_memory,
-                                 const std::map<std::string, size_t>& offsets)
-    : backend_alloc_(backend_alloc),
-      peak_memory_(peak_memory),
-      offsets_(offsets) {
-  if (backend_alloc == nullptr) {
-    throw std::runtime_error("Received null backend allocator in PackedAllocator constructor");
-  }
-}
+PackedAllocator::PackedAllocator(size_t peak_memory, const std::map<std::string, size_t>& offsets)
+    : peak_memory_(peak_memory),
+      offsets_(offsets) {}
 
 PackedAllocator::~PackedAllocator() { clear(); }
+
+void PackedAllocator::set_backend_allocator(IAllocator* allocator) { backend_alloc_ = allocator; }
 
 void PackedAllocator::set_current_edge(const std::string& uid) {
   current_edge_uid_ = uid;
@@ -202,6 +199,10 @@ void PackedAllocator::set_current_edge(const std::string& uid) {
 }
 
 void PackedAllocator::ensure(size_t size) {
+  if (!backend_alloc_) {
+    std::cerr << "ERROR: PackedAllocator ensure(): Backend allocator is not set" << std::endl;
+    throw std::runtime_error("Backend allocator is not set");
+  }
   if (!is_ensured_ && peak_memory_ > 0) {
     backend_alloc_->evict_unused();
     base_dptr_ = backend_alloc_->allocate(peak_memory_);
@@ -212,13 +213,25 @@ void PackedAllocator::ensure(size_t size) {
 dptr PackedAllocator::create_dptr(size_t offset, size_t size) {
   void* ptr = base_dptr_.get<char>() + offset;
   std::shared_ptr<device_storage> storage = std::make_shared<device_storage>(
-      base_dptr_.device(), ptr, size, [this, size]() { this->current_allocated -= size; });
-  current_allocated += size;
+      base_dptr_.device(), ptr, size, [this, size]() {
+        this->current_allocated_ -= size;
+        for (auto& hook : this->hooks_) {
+          hook.second(this->current_allocated_);
+        }
+      });
+  current_allocated_ += size;
+  for (auto& hook : hooks_) {
+    hook.second(current_allocated_);
+  }
   return dptr(storage, 0, size);
 }
 
 dptr PackedAllocator::allocate(size_t size) {
   if (size == 0) return dptr(nullptr);
+  if (!backend_alloc_) {
+    std::cerr << "ERROR: PackedAllocator allocate(): Backend allocator is not set" << std::endl;
+    throw std::runtime_error("Backend allocator is not set");
+  }
   ensure(size);
 
   size_t aligned_size = (size + 255) & ~255;
@@ -245,16 +258,34 @@ void PackedAllocator::clear() {
 
 size_t PackedAllocator::reserved() const { return is_ensured_ ? peak_memory_ : 0; }
 
-size_t PackedAllocator::allocated() const { return is_ensured_ ? peak_memory_ : 0; }
+size_t PackedAllocator::allocated() const { return current_allocated_; }
 
-size_t PackedAllocator::unused() const { return 0; }
+size_t PackedAllocator::unused() const {
+  return is_ensured_ ? (peak_memory_ - current_allocated_) : 0;
+}
 
-void PackedAllocator::evict_unused() {}
+void PackedAllocator::evict_unused() {
+  if (current_allocated_ == 0) {
+    clear();
+  }
+}
 
-size_t PackedAllocator::add_allocation_hook(std::function<void(size_t)> hook) { return 0; }
+size_t PackedAllocator::add_allocation_hook(std::function<void(size_t)> hook) {
+  size_t id = next_hook_id_++;
+  hooks_[id] = std::move(hook);
+  return id;
+}
 
-bool PackedAllocator::remove_allocation_hook(size_t hook_id) { return false; }
+bool PackedAllocator::remove_allocation_hook(size_t hook_id) {
+  return hooks_.erase(hook_id) > 0;
+}
 
-Device& PackedAllocator::device() const { return backend_alloc_->device(); }
+Device& PackedAllocator::device() const {
+  if (!backend_alloc_) {
+    std::cerr << "ERROR: PackedAllocator device(): Backend allocator is not set" << std::endl;
+    throw std::runtime_error("Backend allocator is not set");
+  }
+  return backend_alloc_->device();
+}
 
 }  // namespace tunx

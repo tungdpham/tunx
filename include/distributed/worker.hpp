@@ -6,6 +6,9 @@
  */
 #pragma once
 
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
