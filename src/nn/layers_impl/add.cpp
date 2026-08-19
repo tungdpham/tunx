@@ -12,58 +12,62 @@
 #include "type/type.hpp"
 
 namespace tunx {
-namespace internal {
 
-Vec<Vec<size_t>> AddImpl::output_shapes(const Vec<Vec<size_t>> &input_shapes) const {
-  if (input_shapes.size() != 2) {
-    throw std::runtime_error("AddImpl: expected exactly 2 inputs");
+Vec<Vec<size_t>> AddOp::output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config) {
+  if (input_shapes.size() < 2) {
+    throw std::runtime_error("AddOp: expected at least 2 inputs");
   }
-  if (input_shapes[0] != input_shapes[1]) {
-    throw std::runtime_error("AddImpl: both inputs must have the same shape");
+  for (size_t i = 1; i < input_shapes.size(); ++i) {
+    if (input_shapes[0] != input_shapes[i]) {
+      throw std::runtime_error("AddOp: all inputs must have the same shape");
+    }
   }
   return {input_shapes[0]};
 }
 
-Vec<Tensor> AddImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) {
-  if (inputs.size() != 2) {
-    throw std::runtime_error("AddImpl: expected exactly 2 inputs");
+Tensor AddOp::forward(OpContext &ctx, const Vec<Tensor> &inputs) {
+  if (inputs.size() < 2) {
+    throw std::runtime_error("AddOp: expected at least 2 inputs");
   }
-  const Tensor &a = inputs[0];
-  const Tensor &b = inputs[1];
-
-  if (a.shape() != b.shape()) {
-    throw std::runtime_error("AddImpl: both inputs must have the same shape");
+  for (size_t i = 1; i < inputs.size(); ++i) {
+    if (inputs[0].shape() != inputs[i].shape()) {
+      throw std::runtime_error("AddOp: all inputs must have the same shape");
+    }
   }
 
-  Tensor output = make_tensor(a.shape(), a.dtype());
-  add(a, b, output);
-  return {output};
-}
-
-Vec<Tensor> AddImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &residuals) {
-  if (grad_outputs.size() != 1) {
-    throw std::runtime_error("AddImpl: expected exactly 1 grad output");
+  if (ctx.is_training) {
+    Tensor num_inputs_tensor({inputs.size()}, dptr(nullptr), DType_t::SIZE_T);
+    ctx.residuals["num_inputs"] = num_inputs_tensor;
   }
-  const Tensor &grad_out = grad_outputs[0];
-  Tensor grad_a = make_tensor(grad_out.shape(), this->io_dtype_);
-  Tensor grad_b = make_tensor(grad_out.shape(), this->io_dtype_);
 
-  copy(grad_out, grad_a, engine_handle_.get_stream());
-  copy(grad_out, grad_b, engine_handle_.get_stream());
-
-  return {grad_a, grad_b};
+  Tensor output = ctx.make_tensor(inputs[0].shape(), inputs[0].dtype());
+  add(inputs[0], inputs[1], output);
+  for (size_t i = 2; i < inputs.size(); ++i) {
+    add(output, inputs[i], output);
+  }
+  return output;
 }
 
-LayerConfig AddImpl::get_config() const {
-  LayerConfig config;
-  config.type = TYPE_NAME;
-  config.name = this->name_;
-  return config;
+Vec<Tensor> AddOp::backward(OpContext &ctx, const Tensor &grad_out) {
+  const Tensor &num_inputs_tensor = ctx.residuals["num_inputs"];
+  size_t num_inputs = num_inputs_tensor.shape()[0];
+
+  Vec<Tensor> grad_inputs;
+  grad_inputs.reserve(num_inputs);
+  for (size_t i = 0; i < num_inputs; ++i) {
+    Tensor grad = ctx.make_tensor(grad_out.shape(), ctx.io_dtype);
+    copy(grad_out, grad, ctx.handle.get_stream());
+    grad_inputs.push_back(grad);
+  }
+
+  return grad_inputs;
 }
 
-std::shared_ptr<AddImpl> AddImpl::create_from_config(const LayerConfig &config) {
-  return std::make_shared<AddImpl>(config.name.empty() ? "add" : config.name);
+LayerConfig AddOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.type = TYPE_NAME;
+  lcfg.name = name;
+  return lcfg;
 }
 
-}  // namespace internal
 }  // namespace tunx

@@ -4,7 +4,6 @@
 #include <iostream>
 #include <stdexcept>
 
-#include "device/pool_allocator.hpp"
 #include "device/task.hpp"
 #include "nn/optimizers_impl/cpu/adam_kernels.hpp"
 #include "nn/optimizers_impl/cpu/sgd_kernels.hpp"
@@ -18,7 +17,12 @@ namespace tunx {
 
 void Optimizer::attach(Graph &graph) {
   graph_ = &graph;
-  params_ = graph.params();
+  auto all_params = graph.params();
+  for (const auto &p : all_params) {
+    if (p.requires_grad() && p.size() > 0) {
+      params_.push_back(p);
+    }
+  }
   on_attach();
   std::cout << "Optimizer attached to " << params_.size() << " parameters" << std::endl;
 }
@@ -37,15 +41,17 @@ void Optimizer::zero_grads() {
   if (!graph_) {
     throw std::runtime_error("Optimizer not attached to any graph or graph has been destroyed");
   }
-  graph_->zero_grads();
+  for (Param &param : params_) {
+    param.zero_grad();
+  }
 }
 
 void SGD::on_attach() {
   if (momentum_ > 0.0f) {
     velocities_.resize(params_.size());
     for (size_t i = 0; i < params_.size(); ++i) {
-      velocities_[i] = Tensor(params_[i].shape(), params_[i].dtype(),
-                              PoolAllocator::instance(params_[i].device(), nullptr));
+      velocities_[i] =
+          Tensor(params_[i].shape(), params_[i].dtype(), params_[i].data().allocator());
       fill(velocities_[i], 0.0f);
     }
   }
@@ -104,11 +110,9 @@ void Adam::on_attach() {
   m_.resize(params_.size());
   v_.resize(params_.size());
   for (size_t i = 0; i < params_.size(); ++i) {
-    m_[i] = Tensor(params_[i].shape(), params_[i].dtype(),
-                   PoolAllocator::instance(params_[i].device(), nullptr));
+    m_[i] = Tensor(params_[i].shape(), params_[i].dtype(), params_[i].data().allocator());
     fill(m_[i], 0.0f);
-    v_[i] = Tensor(params_[i].shape(), params_[i].dtype(),
-                   PoolAllocator::instance(params_[i].device(), nullptr));
+    v_[i] = Tensor(params_[i].shape(), params_[i].dtype(), params_[i].data().allocator());
     fill(v_[i], 0.0f);
   }
   t_ = 0;

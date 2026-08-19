@@ -37,6 +37,7 @@ __global__ void update_sgd_momentum_kernel(T* params_data, const T* grads_data, 
 template <typename T>
 void update_sgd(T* params_data, const T* grads_data, size_t size, const float learning_rate,
                 cudaStream_t stream) {
+  if (size == 0) return;
   const int threads_per_block = 256;
   const int num_blocks = (size + threads_per_block - 1) / threads_per_block;
 
@@ -47,6 +48,7 @@ void update_sgd(T* params_data, const T* grads_data, size_t size, const float le
 template <typename T>
 void update_sgd_momentum(T* params_data, const T* grads_data, T* velocity_data, size_t size,
                          const float learning_rate, const float momentum, cudaStream_t stream) {
+  if (size == 0) return;
   const int threads_per_block = 256;
   const int num_blocks = (size + threads_per_block - 1) / threads_per_block;
 

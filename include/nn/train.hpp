@@ -10,12 +10,12 @@
 
 #include "data_loading/dataset.hpp"
 #include "data_loading/regression_dataset.hpp"
-#include "nn/csv_logger.hpp"
 #include "nn/graph.hpp"
 #include "nn/loss.hpp"
+#include "nn/metrics_logger.hpp"
 #include "nn/optimizers.hpp"
 #include "nn/schedulers.hpp"
-#include "type/type.hpp"
+#include "nn/train_config.hpp"
 
 #ifdef USE_TBB
 #include <tbb/info.h>
@@ -28,56 +28,10 @@
 #endif
 
 namespace tunx {
-enum class ProfilerType { NONE = 0, NORMAL = 1, CUMULATIVE = 2 };
-enum class TrainingMode { CLASSIFICATION = 0, REGRESSION = 1, CUSTOM = 2 };
 
 #ifdef USE_TBB
 inline void tbb_cleanup();
 #endif
-
-struct TrainingConfig {
-  // Trainer params
-  int epochs = 10;
-  size_t batch_size = 32;
-  int64 max_steps = -1;  // -1 for no limit, otherwise max number of batches per epoch
-  //   "epoch" -> full dataloader epoch, then validation + epoch CSV summary.
-  //   "batch" -> fixed-step training loop for GPT/OpenWebText style runs.
-  //   "auto"  -> old behavior: epoch if max_steps == -1, batch otherwise.
-  std::string train_mode = "auto";
-  float lr_initial = 0.001f;
-  int gradient_accumulation_steps = 1;
-  int progress_print_interval = 100;
-  int64 num_threads = 8;  // Typical number of P-Cores on laptop CPUs
-  ProfilerType profiler_type = ProfilerType::NONE;
-  bool print_layer_profiling = false;
-  bool print_layer_memory_usage = false;
-  std::string model_name =
-      "cifar10_resnet9";          // If set, will try to load this model from example models
-  std::string model_path = "";    // If set, will try to load model from this path before training
-  std::string dataset_name = "";  // e.g., "cifar10", "mnist", "open-web-text", etc.
-  std::string dataset_path = "data";
-  DeviceID device_id;
-  DType_t io_dtype = DType_t::FP32;
-  DType_t param_dtype = DType_t::FP32;
-  DType_t compute_dtype = DType_t::FP32;
-  std::string log_dir = "logs";  // directory for CSV metric logs
-
-  bool prefetch_data = false;
-  size_t prefetch_depth = 2;
-  bool async_pipeline = true;
-  bool augmentation = true;
-
-  LogMode log_mode;  // what metrics to log
-
-  size_t num_microbatches = 2;
-
-  OptimizerConfig optimizer_config;
-  SchedulerConfig scheduler_config;
-  LossConfig loss_config;
-
-  void print_config() const;
-  void load_from_json(const std::string &config_path);
-};
 
 struct Result {
   double avg_loss = 0.0f;
@@ -86,7 +40,7 @@ struct Result {
 
 Result validate_model(Graph &graph, std::unique_ptr<Dataset> &val_dataset,
                       const std::unique_ptr<Loss> &criterion, const TrainingConfig &config,
-                      CsvLogger *logger = nullptr, int epoch = 0);
+                      MetricsLogger *logger = nullptr, int epoch = 1);
 
 void train_model(Graph &graph, std::unique_ptr<Dataset> &train_dataset,
                  std::unique_ptr<Dataset> &val_dataset, std::unique_ptr<Optimizer> &optimizer,

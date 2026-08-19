@@ -12,6 +12,8 @@ The script searches logs/ for the most recent epoch CSV matching each run:
   PyTorch: torch_{experiment}_epoch_{timestamp}.csv
 """
 
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 import argparse
 import csv
 import glob
@@ -20,8 +22,6 @@ import sys
 
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.gridspec as gridspec
 
 
 # ---------------------------------------------------------------------------
@@ -63,11 +63,13 @@ def read_epoch_csv(path: str) -> dict[str, list]:
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Plot tunx vs PyTorch convergence curves.")
+    parser = argparse.ArgumentParser(
+        description="Plot tunx vs PyTorch convergence curves.")
     parser.add_argument(
         "--experiment", "-e",
         required=True,
-        choices=["cifar10_resnet9", "cifar100_wrn16_8", "tiny_imagenet_resnet50"],
+        choices=["cifar10_resnet9", "cifar100_wrn16_8",
+                 "tiny_imagenet_resnet50"],
         help="Experiment name (used to find CSV files).",
     )
     parser.add_argument(
@@ -89,37 +91,40 @@ def main():
     args = parser.parse_args()
 
     experiment = args.experiment
-    log_dir    = args.log_dir
-    out_path   = args.out or os.path.join("output_images", f"convergence_{experiment}.png")
+    log_dir = args.log_dir
+    out_path = args.out or os.path.join(
+        "output_images", f"convergence_{experiment}.png")
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
     # ---- Find epoch CSVs ----
-    tunx_path   = find_latest_csv(log_dir, f"{experiment}_epoch_*.csv")
+    tunx_path = find_latest_csv(log_dir, f"{experiment}_epoch_*.csv")
     torch_path = find_latest_csv(log_dir, f"torch_{experiment}_epoch_*.csv")
 
     if tunx_path is None and torch_path is None:
-        print(f"ERROR: No epoch CSV files found for experiment '{experiment}' in '{log_dir}'.")
+        print(
+            f"ERROR: No epoch CSV files found for experiment '{experiment}' in '{log_dir}'.")
         sys.exit(1)
 
     print(f"Experiment : {experiment}")
-    print(f"tunx log    : {tunx_path   or '(none found)'}")
+    print(f"tunx log    : {tunx_path or '(none found)'}")
     print(f"PyTorch log: {torch_path or '(none found)'}")
 
-    tunx_data   = read_epoch_csv(tunx_path)   if tunx_path   else None
+    tunx_data = read_epoch_csv(tunx_path) if tunx_path else None
     torch_data = read_epoch_csv(torch_path) if torch_path else None
 
     # ---- Plot ----
     fig = plt.figure(figsize=(14, 10))
-    fig.suptitle(f"Convergence: {experiment.replace('_', ' ').title()}", fontsize=15, fontweight="bold")
+    fig.suptitle(
+        f"Convergence: {experiment.replace('_', ' ').title()}", fontsize=15, fontweight="bold")
     gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.38, wspace=0.30)
 
     ax_train_loss = fig.add_subplot(gs[0, 0])
-    ax_val_loss   = fig.add_subplot(gs[0, 1])
-    ax_train_acc  = fig.add_subplot(gs[1, 0])
-    ax_val_acc    = fig.add_subplot(gs[1, 1])
+    ax_val_loss = fig.add_subplot(gs[0, 1])
+    ax_train_acc = fig.add_subplot(gs[1, 0])
+    ax_val_acc = fig.add_subplot(gs[1, 1])
 
-    COLOR_tunx   = "#1f77b4"   # matplotlib blue
+    COLOR_tunx = "#1f77b4"   # matplotlib blue
     COLOR_TORCH = "#ff7f0e"   # matplotlib orange
 
     def _plot(ax, data, col, color, label, linestyle="-"):
@@ -129,13 +134,16 @@ def main():
     for ax, col, title, ylabel in [
         (ax_train_loss, "train_loss",         "Training Loss",          "Loss"),
         (ax_val_loss,   "val_loss",            "Validation Loss",        "Loss"),
-        (ax_train_acc,  "train_accuracy_pct",  "Training Accuracy",      "Accuracy (%)"),
-        (ax_val_acc,    "val_accuracy_pct",    "Validation Accuracy",    "Accuracy (%)"),
+        (ax_train_acc,  "train_accuracy_pct",
+         "Training Accuracy",      "Accuracy (%)"),
+        (ax_val_acc,    "val_accuracy_pct",
+         "Validation Accuracy",    "Accuracy (%)"),
     ]:
         if tunx_data is not None:
             _plot(ax, tunx_data, col, COLOR_tunx, args.tunx_label)
         if torch_data is not None:
-            _plot(ax, torch_data, col, COLOR_TORCH, args.torch_label, linestyle="--")
+            _plot(ax, torch_data, col, COLOR_TORCH,
+                  args.torch_label, linestyle="--")
 
         ax.set_title(title, fontsize=12)
         ax.set_xlabel("Epoch")

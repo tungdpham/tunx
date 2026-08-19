@@ -9,8 +9,8 @@ namespace tunx {
 namespace func {
 namespace cpu {
 template <typename T>
-void softmax(const T *input, T *output, size_t batch_size, size_t channels, size_t height,
-             size_t width) {
+void softmax_impl(const T *input, T *output, size_t batch_size, size_t channels, size_t height,
+                  size_t width) {
   size_t spatial_size = height * width;
   size_t channel_stride = spatial_size;
   size_t batch_stride = channels * channel_stride;
@@ -47,14 +47,14 @@ void softmax(const T *input, T *output, size_t batch_size, size_t channels, size
 }
 
 template <typename T>
-void softmax_gradient(const T *input, const T *grad_output, T *grad_input, size_t batch_size,
-                      size_t channels, size_t height, size_t width) {
+void softmax_gradient_impl(const T *input, const T *grad_output, T *grad_input, size_t batch_size,
+                           size_t channels, size_t height, size_t width) {
   size_t spatial_size = height * width;
   size_t channel_stride = spatial_size;
   size_t batch_stride = channels * channel_stride;
 
   T *softmax_values = new T[batch_size * channels * spatial_size];
-  softmax(input, softmax_values, batch_size, channels, height, width);
+  softmax_impl(input, softmax_values, batch_size, channels, height, width);
 
   parallel_for<size_t>(0, batch_size, [&](size_t n) {
     for (size_t h = 0; h < height; ++h) {
@@ -80,15 +80,20 @@ void softmax_gradient(const T *input, const T *grad_output, T *grad_input, size_
   delete[] softmax_values;
 }
 
-#define INSTANTIATE(T)                                                                    \
-  template void softmax<T>(const T *input, T *output, size_t batch_size, size_t channels, \
-                           size_t height, size_t width);                                  \
-  template void softmax_gradient<T>(const T *input, const T *grad_output, T *grad_input,  \
-                                    size_t batch_size, size_t channels, size_t height,    \
-                                    size_t width);
-#include "macros/floating_type_instantiation.hpp"
+void softmax(DType_t dtype, const void *input, void *output, size_t batch_size, size_t channels,
+             size_t height, size_t width) {
+  DISPATCH_DTYPE(dtype, T,
+                 softmax_impl<T>(static_cast<const T *>(input), static_cast<T *>(output),
+                                 batch_size, channels, height, width));
+}
 
-#undef INSTANTIATE
+void softmax_gradient(DType_t dtype, const void *input, const void *grad_output, void *grad_input,
+                      size_t batch_size, size_t channels, size_t height, size_t width) {
+  DISPATCH_DTYPE(
+      dtype, T,
+      softmax_gradient_impl<T>(static_cast<const T *>(input), static_cast<const T *>(grad_output),
+                               static_cast<T *>(grad_input), batch_size, channels, height, width));
+}
 
 }  // namespace cpu
 }  // namespace func

@@ -6,93 +6,68 @@
  */
 #include "nn/layers_impl/relu.hpp"
 
-#include <memory>
 #include <stdexcept>
 
-#include "nn/engines/iengine.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
-namespace internal {
 
-ReLUImpl::ReLUImpl(const std::string &name)
-    : SISOLayerImpl(name) {}
+Vec<Vec<size_t>> ReLUOp::output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config) {
+  if (input_shapes.size() != 1) {
+    throw std::runtime_error("ReLUOp: expected exactly 1 input");
+  }
+  return {input_shapes[0]};
+}
 
-Tensor ReLUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  Tensor output = make_tensor(input.shape(), io_dtype_);
+Tensor ReLUOp::forward(OpContext &ctx, const Tensor &input) {
+  Tensor output = ctx.make_tensor(input.shape(), ctx.io_dtype);
 
   size_t batch_size = input.dims() > 0 ? input.dim(0) : 1;
   size_t spatial_size = input.dims() > 0 ? input.stride(0) : 1;
 
-  ReLUStats stats{
-      .batch_size = batch_size,
-      .spatial_size = spatial_size,
-  };
+  ReLUStats stats{batch_size, spatial_size};
+  DTypeDesc type_desc{ctx.io_dtype, ctx.param_dtype, ctx.compute_dtype};
 
-  DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
-  };
+  WorkspaceReq ws_req = ctx.engine->query_relu_graph(ctx.handle, stats, type_desc);
+  Tensor ws = ctx.make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
 
-  WorkspaceReq ws_req = engine_->query_relu_graph(engine_handle_, stats, type_desc);
-  Tensor ws = make_tensor({ws_req.fwd_workspace}, DType_t::BYTE);
-
-  if (this->is_training_) {
-    Tensor mask = this->make_tensor(input.shape(), DType_t::BOOL);
-    residuals["mask"] = mask;
-
-    engine_->relu_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
-                      mask.data_as<bool>(), ws.data_as<void>(), type_desc);
+  if (ctx.is_training) {
+    ctx.residuals["output"] = output;
+    ctx.engine->relu_fwd(ctx.handle, stats, input.data_as<void>(), output.data_as<void>(),
+                         ws.data_as<void>(), type_desc);
   } else {
-    engine_->relu_inf(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
-                      ws.data_as<void>(), type_desc);
+    ctx.engine->relu_inf(ctx.handle, stats, input.data_as<void>(), output.data_as<void>(),
+                         ws.data_as<void>(), type_desc);
   }
 
   return output;
 }
 
-Tensor ReLUImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  Tensor &mask = residuals["mask"];
-  if (!mask) {
-    throw std::runtime_error("No cached mask found for backward pass in ReLUImpl");
-  }
+Tensor ReLUOp::backward(OpContext &ctx, const Tensor &grad_output) {
+  const Tensor &output = ctx.residuals["output"];
 
-  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
+  Tensor grad_input = ctx.make_tensor(grad_output.shape(), ctx.io_dtype);
 
   size_t batch_size = grad_output.dims() > 0 ? grad_output.dim(0) : 1;
   size_t spatial_size = grad_output.dims() > 0 ? grad_output.stride(0) : 1;
 
-  ReLUStats stats{
-      .batch_size = batch_size,
-      .spatial_size = spatial_size,
-  };
+  ReLUStats stats{batch_size, spatial_size};
+  DTypeDesc type_desc{ctx.io_dtype, ctx.param_dtype, ctx.compute_dtype};
 
-  DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
-  };
+  WorkspaceReq ws_req = ctx.engine->query_relu_graph(ctx.handle, stats, type_desc);
+  Tensor ws = ctx.make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  WorkspaceReq ws_req = engine_->query_relu_graph(engine_handle_, stats, type_desc);
-  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
-
-  engine_->relu_bwd(engine_handle_, stats, grad_output.data_as<void>(), grad_input.data_as<void>(),
-                    mask.data_as<bool>(), ws.data_as<void>(), type_desc);
+  ctx.engine->relu_bwd(ctx.handle, stats, grad_output.data_as<void>(), grad_input.data_as<void>(),
+                       output.data_as<void>(), ws.data_as<void>(), type_desc);
 
   return grad_input;
 }
 
-LayerConfig ReLUImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  return config;
+LayerConfig ReLUOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.type = TYPE_NAME;
+  lcfg.name = name;
+  return lcfg;
 }
 
-std::shared_ptr<ReLUImpl> ReLUImpl::create_from_config(const LayerConfig &config) {
-  return std::make_shared<ReLUImpl>(config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

@@ -10,22 +10,22 @@ namespace {
 template <typename T>
 void dense_fwd_impl(const T* input_data, const T* weight_data, T* output_data, size_t batch_size,
                     size_t input_features, size_t output_features) {
-  cpu::gemm<T>(input_data, weight_data, output_data, batch_size, output_features, input_features,
-               false, true, T(1.0), T(0.0));
+  cpu::legacy_gemm(input_data, weight_data, output_data, batch_size, output_features, input_features,
+                   false, true, T(1.0), T(0.0));
 }
 
 template <typename T>
 void dense_wgrad_impl(const T* input_data, const T* gradient_data, T* grad_weight_data,
                       size_t batch_size, size_t input_features, size_t output_features) {
-  cpu::gemm<T>(gradient_data, input_data, grad_weight_data, output_features, input_features,
-               batch_size, true, false, T(1.0), T(1.0));
+  cpu::legacy_gemm(gradient_data, input_data, grad_weight_data, output_features, input_features,
+                   batch_size, true, false, T(1.0), T(1.0));
 }
 
 template <typename T>
 void dense_dgrad_impl(const T* gradient_data, const T* weight_data, T* grad_input_data,
                       size_t batch_size, size_t input_features, size_t output_features) {
-  cpu::gemm<T>(gradient_data, weight_data, grad_input_data, batch_size, input_features,
-               output_features, false, false, T(1.0), T(0.0));
+  cpu::legacy_gemm(gradient_data, weight_data, grad_input_data, batch_size, input_features,
+                   output_features, false, false, T(1.0), T(0.0));
 }
 
 template <typename T>
@@ -101,9 +101,9 @@ void CPUEngine::legacy_dense_fwd(engine_handle backend_handle, const void* input
                                  size_t in_features, size_t out_features, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
-    cpu::gemm<T>(static_cast<const T*>(input), static_cast<const T*>(weight),
-                 static_cast<T*>(output), batch_size, out_features, in_features, false, true,
-                 T(1.0), T(0.0));
+    cpu::legacy_gemm(static_cast<const T*>(input), static_cast<const T*>(weight),
+                     static_cast<T*>(output), batch_size, out_features, in_features, false, true,
+                     T(1.0), T(0.0));
   });
 }
 
@@ -112,9 +112,9 @@ void CPUEngine::legacy_dense_wgrad(engine_handle backend_handle, const void* inp
                                    size_t in_features, size_t out_features, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
-    cpu::gemm<T>(static_cast<const T*>(grad_output), static_cast<const T*>(input),
-                 static_cast<T*>(grad_weight), out_features, in_features, batch_size, true, false,
-                 T(1.0), T(0.0));
+    cpu::legacy_gemm(static_cast<const T*>(grad_output), static_cast<const T*>(input),
+                     static_cast<T*>(grad_weight), out_features, in_features, batch_size, true, false,
+                     T(1.0), T(0.0));
   });
 }
 
@@ -123,9 +123,9 @@ void CPUEngine::legacy_dense_dgrad(engine_handle backend_handle, const void* gra
                                    size_t in_features, size_t out_features, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
-    cpu::gemm<T>(static_cast<const T*>(grad_output), static_cast<const T*>(weight),
-                 static_cast<T*>(grad_input), batch_size, in_features, out_features, false, false,
-                 T(1.0), T(0.0));
+    cpu::legacy_gemm(static_cast<const T*>(grad_output), static_cast<const T*>(weight),
+                     static_cast<T*>(grad_input), batch_size, in_features, out_features, false, false,
+                     T(1.0), T(0.0));
   });
 }
 

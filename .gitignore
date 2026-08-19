@@ -73,7 +73,7 @@ CMakeDoxygenDefaults.cmake
 install_manifest.txt
 
 # logs
-/logs/
+logs/
 
 # temp files
 /temp/
@@ -111,3 +111,9 @@ doc/Doxyfile.doxygen_xml
 
 # private
 private/
+
+# agents
+/.agents/
+
+# github
+/.github/

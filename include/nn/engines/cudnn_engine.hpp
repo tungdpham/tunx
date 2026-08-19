@@ -10,6 +10,7 @@
 #include "device/stream.hpp"
 #include "nn/engines/engine_handle.hpp"
 #include "nn/engines/iengine.hpp"
+#include "nn/engines/cuda_engine.hpp"
 #include "nn/stats/stats.hpp"
 
 namespace tunx {
@@ -169,6 +170,8 @@ public:
                                 DTypeDesc type_desc) override;
   WorkspaceReq query_transpose_graph(engine_handle backend_handle, const TransposeStats& stats,
                                      DTypeDesc type_desc) override;
+  WorkspaceReq query_slice_graph(engine_handle backend_handle, const SliceStats& stats,
+                                 DTypeDesc type_desc) override;
 
   /**
    * @brief Forward pass for a Dense (Linear) layer.
@@ -375,7 +378,7 @@ public:
    * @param type_desc Data type descriptors.
    */
   void relu_fwd(engine_handle backend_handle, const ReLUStats& stats, const void* input,
-                void* output, bool* mask, void* workspace, DTypeDesc type_desc) override;
+                void* output, void* workspace, DTypeDesc type_desc) override;
 
   /**
    * @brief Forward pass for a ReLU activation (inference mode).
@@ -401,7 +404,7 @@ public:
    * @param type_desc Data type descriptors.
    */
   void relu_bwd(engine_handle backend_handle, const ReLUStats& stats, const void* grad_output,
-                void* grad_input, const bool* mask, void* workspace, DTypeDesc type_desc) override;
+                void* grad_input, const void* output, void* workspace, DTypeDesc type_desc) override;
 
   /**
    * @brief Forward pass for an Embedding layer.
@@ -716,10 +719,15 @@ public:
 
   void transpose(engine_handle backend_handle, const TransposeStats& stats, const void* input,
                  void* output, void* workspace, DTypeDesc type_desc) override;
+  void slice_fwd(engine_handle backend_handle, const SliceStats& stats, const void* input,
+                 void* output, void* workspace, DTypeDesc type_desc) override;
+  void slice_bwd(engine_handle backend_handle, const SliceStats& stats, const void* grad_output,
+                 void* grad_input, void* workspace, DTypeDesc type_desc) override;
 
   // --- Legacy APIs ---
 private:
   std::unordered_map<GraphCacheKey, std::any> graph_cache_;
+  CUDAEngine cuda_engine_;
 };
 
 }  // namespace tunx

@@ -1,0 +1,53 @@
+/*
+ * Copyright (c) 2025 Tung D. Pham
+ *
+ * This software is licensed under the MIT License. See the LICENSE file in the
+ * project root for the full license text.
+ */
+#pragma once
+
+#include <string>
+
+#include "nn/functional_layer.hpp"
+#include "nn/param.hpp"
+#include "tensor/tensor.hpp"
+#include "type/type.hpp"
+
+namespace tunx {
+
+struct ConvTranspose2DOp {
+  static constexpr const char *TYPE_NAME = "conv2d_transpose";
+
+  struct Config {
+    size_t in_channels;
+    size_t out_channels;
+    size_t kernel_h;
+    size_t kernel_w;
+    size_t stride_h = 1;
+    size_t stride_w = 1;
+    size_t pad_h = 0;
+    size_t pad_w = 0;
+    bool use_bias = false;
+  };
+
+  static Tensor forward(OpContext &ctx, const Tensor &input, const Param &weight, const Param &bias,
+                        const Config &config);
+
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, Param &weight, Param &bias,
+                         const Config &config);
+
+  static void init(OpContext &ctx, const Config &config);
+
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config);
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
+};
+
+class ConvTranspose2D : public FunctionalLayer<ConvTranspose2DOp> {
+public:
+  ConvTranspose2D(size_t in_channels, size_t out_channels, size_t kernel_h, size_t kernel_w,
+                  size_t stride_h = 1, size_t stride_w = 1, size_t pad_h = 0, size_t pad_w = 0,
+                  bool use_bias = false, const std::string &name = "conv2d_transpose");
+};
+
+}  // namespace tunx

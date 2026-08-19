@@ -6,47 +6,42 @@
  */
 #include "nn/layers_impl/gelu.hpp"
 
-#include <memory>
 #include <stdexcept>
 
+#include "nn/activations_impl/gelu.hpp"
+
 namespace tunx {
-namespace internal {
 
-GELUImpl::GELUImpl(const std::string &name)
-    : SISOLayerImpl(name),
-      activation_(std::make_unique<func::GELU>()) {}
+Vec<Vec<size_t>> GELUOp::output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config) {
+  if (input_shapes.size() != 1) {
+    throw std::runtime_error("GELUOp: expected exactly 1 input");
+  }
+  return {input_shapes[0]};
+}
 
-Tensor GELUImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  if (this->is_training_) {
-    residuals["input"] = input;
+Tensor GELUOp::forward(OpContext &ctx, const Tensor &input) {
+  if (ctx.is_training) {
+    ctx.residuals["input"] = input;
   }
 
-  Tensor output = make_tensor(input.shape(), io_dtype_);
-  activation_->apply(input, output);
+  Tensor output = ctx.make_tensor(input.shape(), ctx.io_dtype);
+  func::GELU().apply(input, output);
   return output;
 }
 
-Tensor GELUImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  const Tensor &input = residuals["input"];
-  if (!input) {
-    throw std::runtime_error("No cached input found for backward pass in GELUImpl");
-  }
+Tensor GELUOp::backward(OpContext &ctx, const Tensor &grad_output) {
+  const Tensor &input = ctx.residuals["input"];
 
-  Tensor grad_input = make_tensor(input.shape(), io_dtype_);
-  activation_->compute_gradient(input, grad_output, grad_input);
+  Tensor grad_input = ctx.make_tensor(input.shape(), ctx.io_dtype);
+  func::GELU().compute_gradient(input, grad_output, grad_input);
   return grad_input;
 }
 
-LayerConfig GELUImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  return config;
+LayerConfig GELUOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.type = TYPE_NAME;
+  lcfg.name = name;
+  return lcfg;
 }
 
-std::shared_ptr<GELUImpl> GELUImpl::create_from_config(const LayerConfig &config) {
-  return std::make_shared<GELUImpl>(config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

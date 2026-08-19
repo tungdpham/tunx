@@ -5,14 +5,18 @@
 #include "device/device_manager.hpp"
 #include "device/pool_allocator.hpp"
 #include "device/stream.hpp"
+#include "nn/example_graphs.hpp"
 #include "nn/graph.hpp"
+#include "nn/graph_executor.hpp"
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/batchnorm.hpp"
 #include "nn/layers_impl/conv2d.hpp"
 #include "nn/layers_impl/layer_norm.hpp"
+#include "nn/layers_impl/maxpool2d.hpp"
 #include "nn/loss.hpp"
 #include "nn/metrics.hpp"
 #include "nn/optimizers.hpp"
+#include "nn/tensor_bundle.hpp"
 #include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
@@ -25,15 +29,12 @@ Graph make_mlp(Device& device) {
 
   auto input = graph.input();
 
-  auto conv2d_1 = Conv2D(1, 8, 5, 5, 1, 1, 0, 0, false, "conv2d_1");
-  auto bn1 = BatchNorm(8, 1e-5, 0.1f, true, true, "bn1");
   auto flatten = Flatten(1, -1, "flatten");
-  auto fc1 = Dense(24 * 24 * 8, 100, true, "fc1");
+  auto fc1 = Dense(28 * 28 * 1, 100, true, "fc1");
   auto layer_norm = LayerNorm(100, 1e-5, true, "layer_norm");
   auto fc2 = Dense(100, 10, false, "fc2");
 
-  auto x = conv2d_1(input);
-  x = bn1(x);
+  auto x = input;
   x = flatten(x);
   x = fc1(x);
   x = layer_norm(x);
@@ -92,12 +93,13 @@ Graph make_mnist_model(Device& device) {
 }
 
 signed main() {
+  ExampleGraphs::register_defaults();
   cout << "Testing Graph API v2" << endl;
 
   Device& device = getGPU();
-  auto graph = make_mnist_model(device);
-
   // auto graph = make_mlp(device);
+
+  auto graph = make_mnist_model(device);
 
   auto [train_dataset, val_dataset] =
       DatasetFactory::create("mnist", "../data/mnist", DType_t::BF16);
@@ -113,6 +115,7 @@ signed main() {
   auto optimizer = OptimizerFactory::create_adam(0.01f, 0.9f, 0.999f);
 
   optimizer->attach(graph);
+  GraphExecutor executor(graph);
 
   int epochs = 20;
   for (int i = 0; i < epochs; ++i) {
@@ -130,7 +133,7 @@ signed main() {
           {"input", data},
       });
 
-      auto output_map = graph.forward(input_map);
+      auto output_map = executor.forward(input_map);
 
       Tensor output = output_map.get("output");
 
@@ -144,7 +147,7 @@ signed main() {
           {"output", grad_output},
       });
 
-      auto grad_input_map = graph.backward(output_grad_map);
+      auto grad_input_map = executor.backward(output_grad_map);
 
       // DEBUGGING
       // for (auto& edges : graph.edges()) {
@@ -183,7 +186,7 @@ signed main() {
           {"input", data},
       });
 
-      auto output_map = graph.forward(input_map);
+      auto output_map = executor.forward(input_map);
       Tensor output = output_map.get("output");
       float val_loss;
       criterion->compute_loss(output, labels, val_loss);

@@ -19,6 +19,8 @@ import datetime
 import math
 import os
 import time
+import json
+import re
 from pathlib import Path
 from typing import Callable, Dict, Any
 
@@ -649,6 +651,12 @@ TINY_STD = [0.2770, 0.2691, 0.2821]
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
+def _cifar10_transform(img):
+    return (img - CIFAR10_MEAN) / CIFAR10_STD
+
+def _cifar100_transform(img):
+    return (img - CIFAR100_MEAN) / CIFAR100_STD
+
 
 def get_model_config(model_name: str) -> Dict[str, Any]:
     """
@@ -674,12 +682,12 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
             "train_dataset": lambda: CIFAR10Bin(
                 root=os.getenv("CIFAR10_BIN_ROOT", "data/cifar-10-batches-bin"),
                 train=True,
-                transform=lambda img: (img - CIFAR10_MEAN) / CIFAR10_STD
+                transform=_cifar10_transform
             ),
             "test_dataset": lambda: CIFAR10Bin(
                 root=os.getenv("CIFAR10_BIN_ROOT", "data/cifar-10-batches-bin"),
                 train=False,
-                transform=lambda img: (img - CIFAR10_MEAN) / CIFAR10_STD
+                transform=_cifar10_transform
             ),
             "criterion": nn.CrossEntropyLoss(),
             "epochs": int(os.getenv("EPOCHS", "10")),
@@ -696,12 +704,12 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
             "train_dataset": lambda: CIFAR100Bin(
                 root=os.getenv("CIFAR100_BIN_ROOT", "data/cifar-100-binary"),
                 train=True,
-                transform=lambda img: (img - CIFAR100_MEAN) / CIFAR100_STD
+                transform=_cifar100_transform
             ),
             "test_dataset": lambda: CIFAR100Bin(
                 root=os.getenv("CIFAR100_BIN_ROOT", "data/cifar-100-binary"),
                 train=False,
-                transform=lambda img: (img - CIFAR100_MEAN) / CIFAR100_STD
+                transform=_cifar100_transform
             ),
             "criterion": nn.CrossEntropyLoss(),
             "epochs": int(os.getenv("EPOCHS", "50")),
@@ -788,7 +796,7 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
                 seq_len=1024
             ),
             "test_dataset": lambda: OpenWebTextDataset(
-                path=os.getenv("OPENWEBTEXT_VAL_PATH", "data/open-web-text/val.bin"),
+                path=os.getenv("OPENWEBTEXT_VAL_PATH", "data/open-web-text/train.bin"),
                 seq_len=1024
             ),
             "criterion": nn.CrossEntropyLoss(),
@@ -810,6 +818,40 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
 
 # ======================== Training ========================
 
+class WarmupCosineAnnealing(optim.lr_scheduler._LRScheduler):
+    def __init__(self, optimizer, warmup_steps, total_steps, start_lr=0.0, base_lr=0.001, eta_min=0.0, last_epoch=-1):
+        self.warmup_steps = warmup_steps
+        self.total_steps = total_steps
+        self.start_lr = start_lr
+        self.base_lr = base_lr
+        self.eta_min = eta_min
+        self.current_step = 0
+        super().__init__(optimizer, last_epoch)
+        if self.warmup_steps > 0:
+            initial_lr = self.start_lr + (self.base_lr - self.start_lr) / float(self.warmup_steps)
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = initial_lr
+                
+    def get_lr(self):
+        pass
+
+    def step(self, epoch=None):
+        self.current_step += 1
+        
+        if self.current_step < self.warmup_steps:
+            progress = float(self.current_step + 1) / float(self.warmup_steps)
+            new_lr = self.start_lr + progress * (self.base_lr - self.start_lr)
+        else:
+            decay_steps = self.total_steps - self.warmup_steps
+            current_decay_step = self.current_step - self.warmup_steps
+            progress = float(current_decay_step) / float(max(1, decay_steps))
+            progress = min(progress, 1.0)
+            new_lr = self.eta_min + (self.base_lr - self.eta_min) * (1.0 + math.cos(math.pi * progress)) / 2.0
+            
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = new_lr
+
+
 def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, batch_writer):
     """Train for one epoch."""
     model.train()
@@ -823,26 +865,36 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
         step_start = time.time()
         inputs, targets = inputs.to(device), targets.to(device)
         
+        if inputs.is_floating_point():
+            inputs = inputs.to(cfg.get("io_dtype", torch.float32))
+            
         optimizer.zero_grad()
-        outputs = model(inputs)
         
-        if is_lm:
-            # GPT-2: outputs (B, T, vocab_size), targets (B, T)
-            B, T, V = outputs.shape
-            loss = criterion(outputs.view(B * T, V), targets.view(B * T))
-            # For accuracy, use the predictions
-            _, predicted = outputs.view(B * T, V).max(1)
-            correct = predicted.eq(targets.view(B * T)).sum().item()
-            total = B * T
-        else:
-            # Classification: outputs (B, num_classes), targets (B,)
-            loss = criterion(outputs, targets)
-            _, predicted = outputs.max(1)
-            correct = predicted.eq(targets).sum().item()
-            total = targets.size(0)
+        compute_dtype = cfg.get("compute_dtype", torch.float32)
+        with torch.autocast(device_type=device.type, dtype=compute_dtype, enabled=(compute_dtype != torch.float32)):
+            outputs = model(inputs)
+            
+            if is_lm:
+                # GPT-2: outputs (B, T, vocab_size), targets (B, T)
+                B, T, V = outputs.shape
+                loss = criterion(outputs.view(B * T, V), targets.view(B * T))
+                # For accuracy, use the predictions
+                _, predicted = outputs.view(B * T, V).max(1)
+                correct = predicted.eq(targets.view(B * T)).sum().item()
+                total = B * T
+            else:
+                # Classification: outputs (B, num_classes), targets (B,)
+                loss = criterion(outputs, targets)
+                _, predicted = outputs.max(1)
+                correct = predicted.eq(targets).sum().item()
+                total = targets.size(0)
+
         
         loss.backward()
         optimizer.step()
+        
+        if cfg.get("scheduler_type") == "warmup_cosine_annealing" and "scheduler_obj" in cfg:
+            cfg["scheduler_obj"].step()
         
         step_ms = int((time.time() - step_start) * 1000)
         
@@ -881,19 +933,26 @@ def validate(model, test_loader, criterion, device, cfg, epoch, val_writer):
     with torch.no_grad():
         for val_step, (inputs, targets) in enumerate(test_loader):
             inputs, targets = inputs.to(device), targets.to(device)
-            outputs = model(inputs)
             
-            if is_lm:
-                B, T, V = outputs.shape
-                loss = criterion(outputs.view(B * T, V), targets.view(B * T))
-                _, predicted = outputs.view(B * T, V).max(1)
-                correct = predicted.eq(targets.view(B * T)).sum().item()
-                total = B * T
-            else:
-                loss = criterion(outputs, targets)
-                _, predicted = outputs.max(1)
-                correct = predicted.eq(targets).sum().item()
-                total = targets.size(0)
+            if inputs.is_floating_point():
+                inputs = inputs.to(cfg.get("io_dtype", torch.float32))
+                
+            compute_dtype = cfg.get("compute_dtype", torch.float32)
+            with torch.autocast(device_type=device.type, dtype=compute_dtype, enabled=(compute_dtype != torch.float32)):
+                outputs = model(inputs)
+                
+                if is_lm:
+                    B, T, V = outputs.shape
+                    loss = criterion(outputs.view(B * T, V), targets.view(B * T))
+                    _, predicted = outputs.view(B * T, V).max(1)
+                    correct = predicted.eq(targets.view(B * T)).sum().item()
+                    total = B * T
+                else:
+                    loss = criterion(outputs, targets)
+                    _, predicted = outputs.max(1)
+                    correct = predicted.eq(targets).sum().item()
+                    total = targets.size(0)
+
             
             val_loss_sum += loss.item() * total
             val_correct += correct
@@ -908,42 +967,79 @@ def validate(model, test_loader, criterion, device, cfg, epoch, val_writer):
     return val_loss, val_acc
 
 
+def str_to_dtype(dtype_str: str):
+    if not dtype_str:
+        return torch.float32
+    dtype_str = str(dtype_str).upper()
+    if dtype_str in ("FP32", "FLOAT32"):
+        return torch.float32
+    elif dtype_str in ("FP16", "FLOAT16"):
+        return torch.float16
+    elif dtype_str in ("BF16", "BFLOAT16"):
+        return torch.bfloat16
+    elif dtype_str == "INT8":
+        return torch.int8
+    else:
+        return torch.float32
+
+def load_jsonc(path):
+    with open(path, "r") as f:
+        content = f.read()
+    content = re.sub(r'//.*', '', content)
+    content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
+    return json.loads(content)
+
 def main():
     parser = argparse.ArgumentParser(description="Unified tunx PyTorch Trainer")
-    parser.add_argument("--model", type=str, required=True,
-                        choices=["resnet9_cifar10", "wrn16_8_cifar100",
-                                 "resnet50_tiny_imagenet", "resnet50_imagenet100",
-                                 "gpt2_small"],
-                        help="Model to train")
-    parser.add_argument("--epochs", type=int, default=None,
-                        help="Number of epochs (overrides config default)")
-    parser.add_argument("--batch-size", type=int, default=None,
-                        help="Batch size (overrides config default)")
-    parser.add_argument("--lr", type=float, default=None,
-                        help="Learning rate (overrides config default)")
-    parser.add_argument("--device", type=str, default=None,
-                        help="Device to use (e.g., 'cuda:0', 'cpu')")
+    parser.add_argument("--config", type=str, required=True, help="Path to JSON config file")
     args = parser.parse_args()
     
-    # Get model configuration
-    cfg = get_model_config(args.model)
-    
-    # Override config with command-line arguments
-    if args.epochs is not None:
-        cfg["epochs"] = args.epochs
-    if args.batch_size is not None:
-        cfg["batch_size"] = args.batch_size
-    if args.lr is not None:
-        cfg["lr"] = args.lr
-    
-    # Device setup
-    if args.device:
-        device = torch.device(args.device)
+    json_cfg = load_jsonc(args.config)
+    model_name_mapped = json_cfg.get("model_name", "")
+    # Map from json config model_name to python internal model name
+    if "resnet9" in model_name_mapped and "cifar10" in model_name_mapped:
+        internal_model_name = "resnet9_cifar10"
+    elif "wrn16_8" in model_name_mapped and "cifar100" in model_name_mapped:
+        internal_model_name = "wrn16_8_cifar100"
+    elif "resnet50" in model_name_mapped and "tiny_imagenet" in model_name_mapped:
+        internal_model_name = "resnet50_tiny_imagenet"
+    elif "resnet50" in model_name_mapped and "imagenet100" in model_name_mapped:
+        internal_model_name = "resnet50_imagenet100"
+    elif "gpt2" in model_name_mapped:
+        internal_model_name = "gpt2_small"
     else:
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        internal_model_name = "resnet9_cifar10" # Default fallback
+        
+    cfg = get_model_config(internal_model_name)
+    
+    # Override with JSON config
+    cfg["epochs"] = json_cfg.get("epochs", cfg["epochs"])
+    if json_cfg.get("max_steps", -1) > 0:
+        cfg["epochs"] = 1 # We will handle max_steps later or rely on epochs for now
+    
+    cfg["batch_size"] = json_cfg.get("batch_size", cfg["batch_size"])
+    cfg["num_workers"] = json_cfg.get("num_threads", cfg["num_workers"])
+    
+    opt_cfg = json_cfg.get("optimizer", {})
+    cfg["optimizer_type"] = opt_cfg.get("type", cfg["optimizer_type"])
+    cfg["lr"] = opt_cfg.get("learning_rate", cfg.get("lr", 0.001))
+    cfg["weight_decay"] = opt_cfg.get("weight_decay", 0.0)
+    
+    sched_cfg = json_cfg.get("scheduler", {})
+    cfg["scheduler_type"] = sched_cfg.get("type", cfg.get("scheduler_type", "step_lr"))
+    cfg["scheduler_params"] = sched_cfg
+    
+    device_str = json_cfg.get("device", "cuda:0").lower()
+    device = torch.device(device_str if torch.cuda.is_available() else "cpu")
+    
+    cfg["io_dtype"] = str_to_dtype(json_cfg.get("io_dtype", "FP32"))
+    cfg["param_dtype"] = str_to_dtype(json_cfg.get("param_dtype", "FP32"))
+    cfg["compute_dtype"] = str_to_dtype(json_cfg.get("compute_dtype", "FP32"))
+    
+    args.model = internal_model_name
     
     print(f">>> Running on device: {device}")
-    print(f">>> Model: {args.model}")
+    print(f">>> Model: {args.model} from config {args.config}")
     print(f">>> Epochs: {cfg['epochs']}")
     print(f">>> Batch size: {cfg['batch_size']}")
     print(f">>> Learning rate: {cfg['lr']}")
@@ -973,15 +1069,15 @@ def main():
     
     # Create model
     print(">>> Creating model...")
-    model = cfg["model_cls"]().to(device)
+    model = cfg["model_cls"]().to(device).to(cfg["param_dtype"])
     total_params = sum(p.numel() for p in model.parameters())
     print(f">>> Parameters: {total_params:,}")
 
-    if hasattr(torch, "compile"):
-        print(">>> Compiling model with torch.compile...")
-        model = torch.compile(model, mode="max-autotune")
-    else:
-        print(">>> torch.compile is not supported in this PyTorch version.")
+    # if hasattr(torch, "compile"):
+    #     print(">>> Compiling model with torch.compile...")
+    #     model = torch.compile(model, mode="reduce-overhead")
+    # else:
+    #     print(">>> torch.compile is not supported in this PyTorch version.")
     
     # Loss function
     criterion = cfg["criterion"]
@@ -1006,19 +1102,32 @@ def main():
         )
     
     # Scheduler
-    if cfg["scheduler_type"] == "cosine":
-        warmup_steps = 2000
-        total_steps = len(train_loader) * cfg["epochs"]
+    sched_type = cfg.get("scheduler_type", "step_lr")
+    sched_params = cfg.get("scheduler_params", {})
+    
+    if sched_type == "warmup_cosine_annealing":
+        warmup_steps = sched_params.get("warmup_steps", int(0.1 * len(train_loader) * cfg["epochs"]))
+        total_steps = sched_params.get("total_steps", sched_params.get("T_max", len(train_loader) * cfg["epochs"]))
+        start_lr = sched_params.get("start_lr", 0.0)
+        base_lr = sched_params.get("base_lr", cfg["lr"])
+        eta_min = sched_params.get("eta_min", 0.0)
         
-        def lr_lambda(step):
-            if step < warmup_steps:
-                return float(step) / max(1, warmup_steps)
-            progress = float(step - warmup_steps) / max(1, total_steps - warmup_steps)
-            return max(0.1, 0.5 * (1.0 + math.cos(math.pi * progress)))
-        
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+        scheduler = WarmupCosineAnnealing(
+            optimizer, 
+            warmup_steps=warmup_steps, 
+            total_steps=total_steps, 
+            start_lr=start_lr, 
+            base_lr=base_lr, 
+            eta_min=eta_min
+        )
+        cfg["scheduler_obj"] = scheduler
+    elif sched_type == "step_lr":
+        step_size = sched_params.get("step_size", 1000)
+        gamma = sched_params.get("gamma", 0.1)
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
     else:
-        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
+        # Fallback
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.1)
     
     # Logging setup
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1055,9 +1164,8 @@ def main():
         batch_csv_file.flush()
         
         # Learning rate schedule step
-        if cfg["scheduler_type"] == "cosine":
-            # For cosine, step after each batch (already done in train_epoch if needed)
-            # But for simplicity, we'll step per epoch here
+        if cfg["scheduler_type"] == "warmup_cosine_annealing":
+            # Already stepped per batch in train_epoch
             pass
         else:
             scheduler.step()

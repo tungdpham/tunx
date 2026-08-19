@@ -67,7 +67,7 @@ bool parse_arguments(int argc, char *argv[], Config &cfg) {
         }
         break;
       case 'G':
-        cfg.device_str = "GPU:" + std::string(optarg);
+        cfg.device_str = "CUDA:" + std::string(optarg);
         break;
       case 'h':
         print_usage(argv[0]);

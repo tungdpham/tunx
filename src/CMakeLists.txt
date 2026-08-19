@@ -95,7 +95,7 @@ target_include_directories(tunx_common PUBLIC
     $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(tunx_common PUBLIC tunx_type)
-target_link_libraries(tunx_common PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(tunx_common PUBLIC nlohmann_json::nlohmann_json spdlog::spdlog)
 if(NOT MSVC)
     target_link_libraries(tunx_common PUBLIC m)
 endif()

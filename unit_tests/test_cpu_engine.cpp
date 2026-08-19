@@ -361,9 +361,10 @@ TEST_F(CPUEngineTest, BatchNormBwdReturnsCorrectResult) {
   compare_tensor(grad_beta, expected_grad_beta);
 }
 
-TEST_F(CPUEngineTest, LayerNormBwdReturnsCorrectResult) {
+TEST_F(CPUEngineTest, LayerNormFwdReturnsCorrectResult) {
   LayerNormStats stats{
       .batch_size = 2,
+      .seq_len = 32,
       .channels = 4,
       .epsilon = 1e-5f,
   };
@@ -374,19 +375,66 @@ TEST_F(CPUEngineTest, LayerNormBwdReturnsCorrectResult) {
       .compute_dtype = DType_t::FP32,
   };
 
-  Tensor input({stats.batch_size, stats.channels}, DType_t::FP32, getHost());
+  Tensor input({stats.batch_size, stats.seq_len, stats.channels}, DType_t::FP32, getHost());
   fill_normal(input, 0.0, 0.5, 12345ULL);
-  Tensor grad_output({stats.batch_size, stats.channels}, DType_t::FP32, getHost());
+  Tensor gamma({stats.channels}, DType_t::FP32, getHost());
+  fill_normal(gamma, 1.0, 0.1, 12345ULL);
+  Tensor beta({stats.channels}, DType_t::FP32, getHost());
+  fill_normal(beta, 0.0, 0.1, 12345ULL);
+
+  Tensor output({stats.batch_size, stats.seq_len, stats.channels}, DType_t::FP32, getHost());
+  Tensor mean({stats.batch_size, stats.seq_len, 1}, DType_t::FP32, getHost());
+  Tensor invar({stats.batch_size, stats.seq_len, 1}, DType_t::FP32, getHost());
+
+  WorkspaceReq req = engine_->query_layernorm_graph(engine_handle_, stats, type_desc);
+  Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getHost());
+
+  engine_->layernorm_fwd(engine_handle_, stats, input.data_as<void>(), gamma.data_as<void>(),
+                         beta.data_as<void>(), output.data_as<void>(), mean.data_as<void>(),
+                         invar.data_as<void>(), workspace.data_as<void>(), type_desc);
+
+  Tensor expected_output(output.shape(), output.dtype(), getHost());
+  Tensor expected_mean(mean.shape(), mean.dtype(), getHost());
+  Tensor expected_invar(invar.shape(), invar.dtype(), getHost());
+
+  math_layernorm_fwd(input.data_as<float>(), gamma.data_as<float>(),
+                     beta.data_as<float>(), expected_output.data_as<float>(),
+                     expected_mean.data_as<float>(), expected_invar.data_as<float>(),
+                     stats.batch_size, stats.seq_len, stats.channels,
+                     static_cast<float>(stats.epsilon));
+
+  compare_tensor(output, expected_output);
+  compare_tensor(mean, expected_mean);
+  compare_tensor(invar, expected_invar);
+}
+
+TEST_F(CPUEngineTest, LayerNormBwdReturnsCorrectResult) {
+  LayerNormStats stats{
+      .batch_size = 2,
+      .seq_len = 32,
+      .channels = 4,
+      .epsilon = 1e-5f,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::FP32,
+      .param_dtype = DType_t::FP32,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor input({stats.batch_size, stats.seq_len, stats.channels}, DType_t::FP32, getHost());
+  fill_normal(input, 0.0, 0.5, 12345ULL);
+  Tensor grad_output({stats.batch_size, stats.seq_len, stats.channels}, DType_t::FP32, getHost());
   fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor gamma({stats.channels}, DType_t::FP32, getHost());
   fill_normal(gamma, 1.0, 0.1, 12345ULL);
 
   Tensor beta({stats.channels}, DType_t::FP32, getHost());
   fill(beta, 0.0f);
-  Tensor mean({stats.batch_size, 1}, DType_t::FP32, getHost());
-  Tensor invar({stats.batch_size, 1}, DType_t::FP32, getHost());
+  Tensor mean({stats.batch_size, stats.seq_len, 1}, DType_t::FP32, getHost());
+  Tensor invar({stats.batch_size, stats.seq_len, 1}, DType_t::FP32, getHost());
 
-  Tensor grad_input({stats.batch_size, stats.channels}, DType_t::FP32, getHost());
+  Tensor grad_input({stats.batch_size, stats.seq_len, stats.channels}, DType_t::FP32, getHost());
   Tensor grad_gamma_temp({stats.channels}, DType_t::FP32, getHost());
   Tensor grad_beta_temp({stats.channels}, DType_t::FP32, getHost());
   fill(grad_gamma_temp, 0.0f);
@@ -405,7 +453,7 @@ TEST_F(CPUEngineTest, LayerNormBwdReturnsCorrectResult) {
                          grad_input.data_as<void>(), grad_gamma.data_as<void>(),
                          grad_beta.data_as<void>(), workspace.data_as<void>(), type_desc);
 
-  Tensor expected_grad_input({stats.batch_size, stats.channels}, DType_t::FP32, getHost());
+  Tensor expected_grad_input({stats.batch_size, stats.seq_len, stats.channels}, DType_t::FP32, getHost());
   Tensor expected_grad_gamma({stats.channels}, DType_t::FP32, getHost());
   Tensor expected_grad_beta({stats.channels}, DType_t::FP32, getHost());
   fill(expected_grad_gamma, 0.0f);
@@ -413,7 +461,7 @@ TEST_F(CPUEngineTest, LayerNormBwdReturnsCorrectResult) {
 
   math_layernorm_bwd(grad_output.data_as<float>(), input.data_as<float>(), gamma.data_as<float>(),
                      expected_grad_input.data_as<float>(), expected_grad_gamma.data_as<float>(),
-                     expected_grad_beta.data_as<float>(), stats.batch_size, stats.channels,
+                     expected_grad_beta.data_as<float>(), stats.batch_size, stats.seq_len, stats.channels,
                      static_cast<float>(stats.epsilon));
 
   compare_tensor(grad_input, expected_grad_input);
@@ -671,8 +719,8 @@ TEST_F(CPUEngineTest, EmbeddingFwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getHost());
 
-  Tensor input({4}, DType_t::FP32, getHost());
-  float host_input[] = {1.0f, 2.0f, 1.0f, 0.0f};
+  Tensor input({4}, DType_t::INT32, getHost());
+  int32_t host_input[] = {1, 2, 1, 0};
   std::memcpy(input.data_as<void>(), host_input, sizeof(host_input));
   Tensor weight({10, 8}, DType_t::FP32, getHost());
   fill_normal(weight, 0.0, 0.5, 12345ULL);
@@ -682,7 +730,7 @@ TEST_F(CPUEngineTest, EmbeddingFwdReturnsCorrectResult) {
                          output.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   Tensor expected_output({4, 8}, DType_t::FP32, getHost());
-  math_embedding_fwd(input.data_as<float>(), weight.data_as<float>(),
+  math_embedding_fwd(input.data_as<int32_t>(), weight.data_as<float>(),
                      expected_output.data_as<float>(), stats.num_indices, stats.vocab_size,
                      stats.embed_dim, stats.padding_idx);
 
@@ -705,8 +753,8 @@ TEST_F(CPUEngineTest, EmbeddingBwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getHost());
 
-  Tensor input({4}, DType_t::FP32, getHost());
-  float host_input[] = {1.0f, 2.0f, 1.0f, 0.0f};
+  Tensor input({4}, DType_t::INT32, getHost());
+  int32_t host_input[] = {1, 2, 1, 0};
   std::memcpy(input.data_as<void>(), host_input, sizeof(host_input));
   Tensor grad_output({4, 8}, DType_t::FP32, getHost());
   fill_normal(grad_output, 0.0, 0.2, 12345ULL);
@@ -720,7 +768,7 @@ TEST_F(CPUEngineTest, EmbeddingBwdReturnsCorrectResult) {
 
   Tensor expected_grad_weight({10, 8}, DType_t::FP32, getHost());
   fill(expected_grad_weight, 0.0f);
-  math_embedding_bwd(input.data_as<float>(), grad_output.data_as<float>(),
+  math_embedding_bwd(input.data_as<int32_t>(), grad_output.data_as<float>(),
                      expected_grad_weight.data_as<float>(), stats.num_indices, stats.vocab_size,
                      stats.embed_dim, stats.padding_idx);
 
@@ -745,18 +793,15 @@ TEST_F(CPUEngineTest, ReLUFwdReturnsCorrectResult) {
   Tensor input({16, 256}, DType_t::FP32, getHost());
   fill_normal(input, 0.0, 1.0, 12345ULL);
   Tensor output({16, 256}, DType_t::FP32, getHost());
-  Tensor mask({16, 256}, DType_t::BOOL, getHost());
 
   engine_->relu_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
-                    mask.data_as<bool>(), workspace.data_as<void>(), type_desc);
+                    workspace.data_as<void>(), type_desc);
 
   Tensor expected_output({16, 256}, DType_t::FP32, getHost());
-  Tensor expected_mask({16, 256}, DType_t::BOOL, getHost());
   math_relu_fwd(input.data_as<float>(), expected_output.data_as<float>(),
-                expected_mask.data_as<bool>(), 16 * 256);
+                static_cast<bool*>(nullptr), 16 * 256);
 
   compare_tensor(output, expected_output);
-  compare_array_t<bool>(mask.data_as<bool>(), expected_mask.data_as<bool>(), mask.size());
 }
 
 TEST_F(CPUEngineTest, ReLUBwdReturnsCorrectResult) {
@@ -776,22 +821,24 @@ TEST_F(CPUEngineTest, ReLUBwdReturnsCorrectResult) {
 
   Tensor grad_output({16, 256}, DType_t::FP32, getHost());
   fill(grad_output, 1.0f);
-  Tensor mask({16, 256}, DType_t::BOOL, getHost());
 
-  // Fill mask deterministically: every other element is active
-  size_t mask_elements = 16 * 256;
-  std::vector<uint8_t> mask_raw(mask_elements);
-  for (size_t i = 0; i < mask_elements; ++i) mask_raw[i] = static_cast<uint8_t>(i % 2 == 0);
-  std::memcpy(mask.data_as<bool>(), mask_raw.data(), mask_elements * sizeof(bool));
+  // Construct a fake cached output that mimics the activation pattern:
+  // every other element is positive (i.e., was active during forward).
+  size_t num_elements = 16 * 256;
+  Tensor cached_output({16, 256}, DType_t::FP32, getHost());
+  float* co_data = cached_output.data_as<float>();
+  for (size_t i = 0; i < num_elements; ++i) co_data[i] = (i % 2 == 0) ? 1.0f : -1.0f;
 
   Tensor grad_input({16, 256}, DType_t::FP32, getHost());
 
   engine_->relu_bwd(engine_handle_, stats, grad_output.data_as<void>(), grad_input.data_as<void>(),
-                    mask.data_as<bool>(), workspace.data_as<void>(), type_desc);
+                    cached_output.data_as<void>(), workspace.data_as<void>(), type_desc);
 
   Tensor expected_grad_input({16, 256}, DType_t::FP32, getHost());
-  math_relu_bwd(grad_output.data_as<float>(), expected_grad_input.data_as<float>(),
-                mask.data_as<bool>(), 16 * 256);
+  float* egi_data = expected_grad_input.data_as<float>();
+  const float* go_data = grad_output.data_as<float>();
+  for (size_t i = 0; i < num_elements; ++i)
+    egi_data[i] = co_data[i] > 0.0f ? go_data[i] : 0.0f;
 
   compare_tensor(grad_input, expected_grad_input);
 }
@@ -878,3 +925,109 @@ TEST_F(CPUEngineTest, DropoutBwdReturnsCorrectResult) {
 }
 
 engine_handle CPUEngineTest::engine_handle_;
+
+TEST_F(CPUEngineTest, TransposeReturnsCorrectResults) {
+  size_t batch_size = 2;
+  size_t num_heads = 4;
+  size_t seq_len = 8;
+  size_t head_dim = 16;
+  
+  TransposeStats stats{
+      .shape = {batch_size, num_heads, seq_len, head_dim, 0, 0, 0, 0},
+      .ndim = 4,
+      .dim0 = 1,
+      .dim1 = 2,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::FP32,
+      .param_dtype = DType_t::FP32,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor input({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+  fill_normal(input, 0.0, 1.0, 12345ULL);
+  Tensor output({batch_size, seq_len, num_heads, head_dim}, DType_t::FP32, getHost());
+
+  WorkspaceReq req = engine_->query_transpose_graph(engine_handle_, stats, type_desc);
+  size_t ws_size = req.fwd_workspace > 0 ? req.fwd_workspace : 1;
+  Tensor workspace({ws_size}, DType_t::BYTE, getHost());
+
+  engine_->transpose(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
+                     workspace.data_as<void>(), type_desc);
+
+  Tensor expected_output({batch_size, seq_len, num_heads, head_dim}, DType_t::FP32, getHost());
+  math_transpose(input.data_as<float>(), expected_output.data_as<float>(), stats.shape, stats.ndim,
+                 stats.dim0, stats.dim1);
+
+  compare_tensor(output, expected_output);
+}
+
+TEST_F(CPUEngineTest, SliceFwdReturnsCorrectResults) {
+  SliceStats stats{
+      .outer_size = 2,
+      .inner_size = 8,
+      .axis_size = 10,
+      .start = 2,
+      .length = 4,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::FP32,
+      .param_dtype = DType_t::FP32,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor input({stats.outer_size, stats.axis_size, stats.inner_size}, DType_t::FP32, getHost());
+  fill_normal(input, 0.0, 1.0, 12345ULL);
+  Tensor output({stats.outer_size, stats.length, stats.inner_size}, DType_t::FP32, getHost());
+
+  WorkspaceReq req = engine_->query_slice_graph(engine_handle_, stats, type_desc);
+  size_t ws_size = req.fwd_workspace > 0 ? req.fwd_workspace : 1;
+  Tensor workspace({ws_size}, DType_t::BYTE, getHost());
+
+  engine_->slice_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
+                     workspace.data_as<void>(), type_desc);
+
+  Tensor expected_output({stats.outer_size, stats.length, stats.inner_size}, DType_t::FP32, getHost());
+  math_slice_fwd(input.data_as<float>(), expected_output.data_as<float>(), stats.outer_size,
+                 stats.inner_size, stats.axis_size, stats.start, stats.length);
+
+  compare_tensor(output, expected_output);
+}
+
+TEST_F(CPUEngineTest, SliceBwdReturnsCorrectResults) {
+  SliceStats stats{
+      .outer_size = 2,
+      .inner_size = 8,
+      .axis_size = 10,
+      .start = 2,
+      .length = 4,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::FP32,
+      .param_dtype = DType_t::FP32,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor grad_output({stats.outer_size, stats.length, stats.inner_size}, DType_t::FP32, getHost());
+  fill_normal(grad_output, 0.0, 1.0, 12345ULL);
+  
+  Tensor grad_input({stats.outer_size, stats.axis_size, stats.inner_size}, DType_t::FP32, getHost());
+  fill(grad_input, 0.0f); // Initialize to 0
+
+  WorkspaceReq req = engine_->query_slice_graph(engine_handle_, stats, type_desc);
+  size_t ws_size = req.bwd_workspace > 0 ? req.bwd_workspace : 1;
+  Tensor workspace({ws_size}, DType_t::BYTE, getHost());
+
+  engine_->slice_bwd(engine_handle_, stats, grad_output.data_as<void>(), grad_input.data_as<void>(),
+                     workspace.data_as<void>(), type_desc);
+
+  Tensor expected_grad_input({stats.outer_size, stats.axis_size, stats.inner_size}, DType_t::FP32, getHost());
+  fill(expected_grad_input, 0.0f);
+  math_slice_bwd(grad_output.data_as<float>(), expected_grad_input.data_as<float>(), stats.outer_size,
+                 stats.inner_size, stats.axis_size, stats.start, stats.length);
+
+  compare_tensor(grad_input, expected_grad_input);
+}

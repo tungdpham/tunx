@@ -1,3 +1,4 @@
+#include "math/cuda/axpy.hpp"
 #ifdef TUNX_USE_CUDNN
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
@@ -23,22 +24,18 @@ namespace tunx {
 
 struct dense_fwd_graph {
   std::shared_ptr<fe::graph::Graph> graph;
-  std::shared_ptr<fe::graph::Tensor_attributes> x;
-  std::shared_ptr<fe::graph::Tensor_attributes> w;
-  std::shared_ptr<fe::graph::Tensor_attributes> b;
-  std::shared_ptr<fe::graph::Tensor_attributes> y;
-
+  std::shared_ptr<fe::graph::Tensor_attributes> x, w, b, y;
   size_t workspace_size;
 
   dense_fwd_graph(cudnnHandle_t handle, const DenseStats& stats, DTypeDesc& type_desc) {
-    const int64 batch = static_cast<int64>(1);
-    const int64 m = static_cast<int64>(stats.batch_size);
-    const int64 n = static_cast<int64>(stats.out_features);
-    const int64 k = static_cast<int64>(stats.in_features);
+    const int64_t batch = 1;
+    const int64_t m = static_cast<int64_t>(stats.batch_size);
+    const int64_t n = static_cast<int64_t>(stats.out_features);
+    const int64_t k = static_cast<int64_t>(stats.in_features);
 
-    fe::DataType_t io_type = to_fe_data_type(type_desc.io_dtype);
-    fe::DataType_t param_type = to_fe_data_type(type_desc.param_dtype);
-    fe::DataType_t compute_type = to_fe_compute_type(type_desc.compute_dtype);
+    auto io_type = to_fe_data_type(type_desc.io_dtype);
+    auto param_type = to_fe_data_type(type_desc.param_dtype);
+    auto compute_type = to_fe_compute_type(type_desc.compute_dtype);
 
     graph = std::make_shared<fe::graph::Graph>();
     graph->set_io_data_type(io_type)
@@ -54,69 +51,54 @@ struct dense_fwd_graph {
     w = graph->tensor(fe::graph::Tensor_attributes()
                           .set_name("Weight")
                           .set_dim({batch, k, n})
-                          .set_stride({0, 1, k})
+                          .set_stride({k * n, 1, k})
                           .set_data_type(param_type));
 
-    b = graph->tensor(fe::graph::Tensor_attributes()
-                          .set_name("Bias")
-                          .set_dim({batch, 1, n})
-                          .set_stride({0, 0, 1})
-                          .set_data_type(param_type));
-
-    auto weight_cast = w;
-
-    {
-      auto identity_attributes = fe::graph::Pointwise_attributes()
-                                     .set_name("Cast_Weight")
-                                     .set_mode(fe::PointwiseMode_t::IDENTITY)
-                                     .set_compute_data_type(compute_type);
-      weight_cast = graph->pointwise(w, identity_attributes);
-      weight_cast->set_data_type(io_type);
-    }
-
-    auto matmul_attributes =
+    auto matmul_attr =
         fe::graph::Matmul_attributes().set_name("FWD_GEMM").set_compute_data_type(compute_type);
-    y = graph->matmul(x, weight_cast, matmul_attributes);
+    y = graph->matmul(x, w, matmul_attr);
+
     if (stats.use_bias) {
       y->set_is_virtual(true);
 
-      auto add_bias_attributes = fe::graph::Pointwise_attributes()
-                                     .set_name("Add_Bias")
-                                     .set_mode(fe::PointwiseMode_t::ADD)
-                                     .set_compute_data_type(compute_type);
+      b = graph->tensor(fe::graph::Tensor_attributes()
+                            .set_name("Bias")
+                            .set_dim({batch, 1, n})
+                            .set_stride({n, n, 1})
+                            .set_data_type(param_type));
 
-      y = graph->pointwise(y, b, add_bias_attributes);
+      auto add_bias_attr = fe::graph::Pointwise_attributes()
+                               .set_name("Add_Bias")
+                               .set_mode(fe::PointwiseMode_t::ADD)
+                               .set_compute_data_type(compute_type);
+      y = graph->pointwise(y, b, add_bias_attr);
     }
 
     y->set_output(true).set_data_type(io_type);
 
-    ensure_ok(graph->validate(), "fwd_gemm validate");
-    ensure_ok(graph->build_operation_graph(handle), "fwd_gemm build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
-              "fwd_gemm create plans");
-    ensure_ok(graph->check_support(), "fwd_gemm check support");
-    ensure_ok(graph->build_plans(), "fwd_gemm build plans");
+    ensure_ok(graph->validate(), "dense_fwd validate");
+    ensure_ok(graph->build_operation_graph(handle), "dense_fwd build op graph");
+    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK}),
+              "dense_fwd create plans");
+    ensure_ok(graph->check_support(), "dense_fwd check support");
+    ensure_ok(graph->build_plans(), "dense_fwd build plans");
 
-    int64 ws = 0;
-    ensure_ok(graph->get_workspace_size(ws), "fwd_gemm workspace");
-    assert(ws >= 0);
-    workspace_size = ws;
+    int64_t ws = 0;
+    ensure_ok(graph->get_workspace_size(ws), "dense_fwd workspace");
+    workspace_size = static_cast<size_t>(ws);
   }
 };
 
 struct dense_dgrad_graph {
   std::shared_ptr<fe::graph::Graph> graph;
-  std::shared_ptr<fe::graph::Tensor_attributes> dy;
-  std::shared_ptr<fe::graph::Tensor_attributes> w;
-  std::shared_ptr<fe::graph::Tensor_attributes> dx;
-
+  std::shared_ptr<fe::graph::Tensor_attributes> dy, w, dx;
   size_t workspace_size;
 
   dense_dgrad_graph(cudnnHandle_t handle, const DenseStats& stats, DTypeDesc& type_desc) {
-    const int64 batch = static_cast<int64>(1);
-    const int64 m = static_cast<int64>(stats.batch_size);
-    const int64 n = static_cast<int64>(stats.out_features);
-    const int64 k = static_cast<int64>(stats.in_features);
+    const int64_t batch = 1;
+    const int64_t m = static_cast<int64_t>(stats.batch_size);
+    const int64_t n = static_cast<int64_t>(stats.out_features);
+    const int64_t k = static_cast<int64_t>(stats.in_features);
 
     auto io_type = to_fe_data_type(type_desc.io_dtype);
     auto param_type = to_fe_data_type(type_desc.param_dtype);
@@ -127,62 +109,51 @@ struct dense_dgrad_graph {
         .set_intermediate_data_type(compute_type)
         .set_compute_data_type(compute_type);
 
+    // dY: [1, M, N]
     dy = graph->tensor(fe::graph::Tensor_attributes()
-                           .set_name("Gradient")
+                           .set_name("dY")
                            .set_dim({batch, m, n})
                            .set_stride({m * n, n, 1})
                            .set_data_type(io_type));
 
+    // W: [N, K] in memory.
+    // We want to compute dX = dY * W
+    // dY is [M, N], W is [N, K].
+    // So logical shape for W is [1, N, K] and it's row-major in memory.
     w = graph->tensor(fe::graph::Tensor_attributes()
-                          .set_name("Weight")
+                          .set_name("W")
                           .set_dim({batch, n, k})
-                          .set_stride({0, k, 1})
+                          .set_stride({n * k, k, 1})
                           .set_data_type(param_type));
 
-    auto weight_cast = w;
-
-    {
-      auto identity_attributes = fe::graph::Pointwise_attributes()
-                                     .set_name("Cast_Weight")
-                                     .set_mode(fe::PointwiseMode_t::IDENTITY)
-                                     .set_compute_data_type(compute_type);
-      weight_cast = graph->pointwise(w, identity_attributes);
-      weight_cast->set_data_type(io_type);
-    }
-
-    auto matmul_attributes =
+    auto matmul_attr =
         fe::graph::Matmul_attributes().set_name("DGRAD_GEMM").set_compute_data_type(compute_type);
-    dx = graph->matmul(dy, weight_cast, matmul_attributes);
+    dx = graph->matmul(dy, w, matmul_attr);
     dx->set_output(true).set_data_type(io_type);
 
-    ensure_ok(graph->validate(), "dgrad_gemm validate");
-    ensure_ok(graph->build_operation_graph(handle), "dgrad_gemm build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
-              "dgrad_gemm create plans");
-    ensure_ok(graph->check_support(), "dgrad_gemm check support");
-    ensure_ok(graph->build_plans(), "dgrad_gemm build plans");
+    ensure_ok(graph->validate(), "dense_dgrad validate");
+    ensure_ok(graph->build_operation_graph(handle), "dense_dgrad build op graph");
+    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK}),
+              "dense_dgrad create plans");
+    ensure_ok(graph->check_support(), "dense_dgrad check support");
+    ensure_ok(graph->build_plans(), "dense_dgrad build plans");
 
-    int64 ws = 0;
-    ensure_ok(graph->get_workspace_size(ws), "dgrad_gemm workspace");
-    assert(ws >= 0);
-    workspace_size = ws;
+    int64_t ws = 0;
+    ensure_ok(graph->get_workspace_size(ws), "dense_dgrad workspace");
+    workspace_size = static_cast<size_t>(ws);
   }
 };
 
 struct dense_wgrad_graph {
   std::shared_ptr<fe::graph::Graph> graph;
-  std::shared_ptr<fe::graph::Tensor_attributes> x;
-  std::shared_ptr<fe::graph::Tensor_attributes> dy;
-  std::shared_ptr<fe::graph::Tensor_attributes> dw;
-  std::shared_ptr<fe::graph::Tensor_attributes> dw_temp;
-
+  std::shared_ptr<fe::graph::Tensor_attributes> x, dy, dw;
   size_t workspace_size;
 
   dense_wgrad_graph(cudnnHandle_t handle, const DenseStats& stats, DTypeDesc& type_desc) {
-    const int64 batch = static_cast<int64>(1);
-    const int64 m = static_cast<int64>(stats.batch_size);
-    const int64 n = static_cast<int64>(stats.out_features);
-    const int64 k = static_cast<int64>(stats.in_features);
+    const int64_t batch = 1;
+    const int64_t m = static_cast<int64_t>(stats.batch_size);
+    const int64_t n = static_cast<int64_t>(stats.out_features);
+    const int64_t k = static_cast<int64_t>(stats.in_features);
 
     auto io_type = to_fe_data_type(type_desc.io_dtype);
     auto param_type = to_fe_data_type(type_desc.param_dtype);
@@ -193,70 +164,40 @@ struct dense_wgrad_graph {
         .set_intermediate_data_type(compute_type)
         .set_compute_data_type(compute_type);
 
+    // dY^T: Transposed view of dY [M, N] -> Logical shape [1, N, M], Strides {M*N, 1, N}
     dy = graph->tensor(fe::graph::Tensor_attributes()
-                           .set_name("Gradient")
+                           .set_name("dY_transposed")
                            .set_dim({batch, n, m})
                            .set_stride({m * n, 1, n})
                            .set_data_type(io_type));
 
+    // X: [1, M, K]
     x = graph->tensor(fe::graph::Tensor_attributes()
-                          .set_name("Input")
+                          .set_name("X")
                           .set_dim({batch, m, k})
                           .set_stride({m * k, k, 1})
                           .set_data_type(io_type));
 
-    dw = graph->tensor(fe::graph::Tensor_attributes()
-                           .set_name("dw")
-                           .set_dim({batch, n, k})
-                           .set_stride({n * k, k, 1})
-                           .set_data_type(param_type));
-
-    auto matmul_attributes =
+    // dW = dY^T * X -> [1, N, K]
+    auto matmul_attr =
         fe::graph::Matmul_attributes().set_name("WGRAD_GEMM").set_compute_data_type(compute_type);
-    auto matmul_output = graph->matmul(dy, x, matmul_attributes);
-    matmul_output->set_data_type(param_type);
+    dw = graph->matmul(dy, x, matmul_attr);
+    dw->set_output(true).set_data_type(param_type);
 
-    auto add_attributes = fe::graph::Pointwise_attributes()
-                              .set_name("DW_accumulate")
-                              .set_mode(fe::PointwiseMode_t::ADD);
+    ensure_ok(graph->validate(), "dense_wgrad validate");
+    ensure_ok(graph->build_operation_graph(handle), "dense_wgrad build op graph");
+    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK}),
+              "dense_wgrad create plans");
+    ensure_ok(graph->check_support(), "dense_wgrad check support");
+    ensure_ok(graph->build_plans(), "dense_wgrad build plans");
 
-    dw_temp = graph->pointwise(dw, matmul_output, add_attributes);
-    dw_temp->set_output(true).set_data_type(param_type);
-
-    ensure_ok(graph->validate(), "wgrad_gemm validate");
-    ensure_ok(graph->build_operation_graph(handle), "wgrad_gemm build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
-              "wgrad_gemm create plans");
-    ensure_ok(graph->check_support(), "wgrad_gemm check support");
-    ensure_ok(graph->build_plans(), "wgrad_gemm build plans");
-
-    int64 ws = 0;
-    ensure_ok(graph->get_workspace_size(ws), "wgrad_gemm workspace");
-
+    int64_t ws = 0;
+    ensure_ok(graph->get_workspace_size(ws), "dense_wgrad workspace");
     workspace_size = static_cast<size_t>(ws);
   }
 };
 
-template <typename T>
-__global__ void bgrad_reduce_accumulate_kernel(const T* __restrict__ dy, T* __restrict__ db,
-                                               int batch_size, int out_features) {
-  int warp_id = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
-  int lane_id = threadIdx.x % 32;
-
-  if (warp_id >= out_features) return;
-
-  float sum = 0.0f;
-  for (int b = lane_id; b < batch_size; b += 32) {
-    int idx = b * out_features + warp_id;
-    sum += (float)dy[idx];
-  }
-
-  sum = warp_reduce_sum(sum);
-
-  if (lane_id == 0) {
-    db[warp_id] = (T)(sum + (float)db[warp_id]);
-  }
-}
+// bgrad_reduce_accumulate_kernel delegated to cuda_engine_
 
 WorkspaceReq CuDNNEngine::query_dense_graph(engine_handle backend_handle, const DenseStats& stats,
                                             DTypeDesc type_desc) {
@@ -297,9 +238,14 @@ WorkspaceReq CuDNNEngine::query_dense_graph(engine_handle backend_handle, const 
   auto& dgrad_graph = std::any_cast<dense_dgrad_graph&>(it_dgrad->second);
   auto& wgrad_graph = std::any_cast<dense_wgrad_graph&>(it_wgrad->second);
   size_t fwd_workspace = fwd_graph.workspace_size;
-  size_t bwd_workspace = std::max({dgrad_graph.workspace_size, wgrad_graph.workspace_size});
+
+  size_t temp_dw_size =
+      stats.in_features * stats.out_features * get_dtype_size(type_desc.param_dtype);
+  size_t bwd_workspace =
+      std::max({dgrad_graph.workspace_size, wgrad_graph.workspace_size + temp_dw_size});
+
   // TODO: add inf graph
-  return {fwd_workspace, bwd_workspace, fwd_workspace};
+  return {fwd_workspace, bwd_workspace, 0};
 }
 
 void CuDNNEngine::dense_fwd(engine_handle backend_handle, const DenseStats& stats,
@@ -321,9 +267,11 @@ void CuDNNEngine::dense_fwd(engine_handle backend_handle, const DenseStats& stat
   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = {
       {graph_struct.x, const_cast<void*>(input)},
       {graph_struct.w, const_cast<void*>(weight)},
-      {graph_struct.b, const_cast<void*>(bias)},
       {graph_struct.y, output},
   };
+  if (stats.use_bias) {
+    variant_pack[graph_struct.b] = const_cast<void*>(bias);
+  }
   auto status = graph_struct.graph->execute(handle, variant_pack, workspace);
   ensure_ok(status, "dense_fwd execute");
 }
@@ -332,6 +280,11 @@ void CuDNNEngine::dense_wgrad(engine_handle backend_handle, const DenseStats& st
                               const void* grad_output, const void* input, void* grad_weight,
                               void* workspace, DTypeDesc type_desc) {
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
+
+  size_t dw_bytes = stats.in_features * stats.out_features * get_dtype_size(type_desc.param_dtype);
+  void* dw_temp = workspace;
+  void* cudnn_workspace = static_cast<char*>(workspace) + dw_bytes;
+
   GraphCacheKey key{
       .op_type = OpType::DENSE_WGRAD,
       .dtype_desc = type_desc,
@@ -341,18 +294,24 @@ void CuDNNEngine::dense_wgrad(engine_handle backend_handle, const DenseStats& st
   auto it = graph_cache_.find(key);
   if (it == graph_cache_.end()) {
     throw std::runtime_error(
-        "cuDNN Graph not found for dense wgrad. Please call query_dense_graph first.");
+        "cuDNN Graph not found for dense wgrad. Call query_dense_graph first.");
   }
   auto& graph_struct = std::any_cast<dense_wgrad_graph&>(it->second);
-  // for cudnn gemm, in-place accumulation is possible.
+
   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = {
-      {graph_struct.dy, const_cast<void*>(grad_output)},
       {graph_struct.x, const_cast<void*>(input)},
-      {graph_struct.dw, const_cast<void*>(grad_weight)},
-      {graph_struct.dw_temp, grad_weight},
+      {graph_struct.dy, const_cast<void*>(grad_output)},
+      {graph_struct.dw, dw_temp},
   };
-  auto status = graph_struct.graph->execute(handle, variant_pack, workspace);
+
+  cudaStream_t stream;
+  cudnnGetStream(handle, &stream);
+
+  auto status = graph_struct.graph->execute(handle, variant_pack, cudnn_workspace);
   ensure_ok(status, "dense_wgrad execute");
+
+  size_t num_elements = stats.in_features * stats.out_features;
+  cuda::axpy(dw_temp, grad_weight, num_elements, type_desc.param_dtype, stream);
 }
 
 void CuDNNEngine::dense_dgrad(engine_handle backend_handle, const DenseStats& stats,
@@ -382,26 +341,7 @@ void CuDNNEngine::dense_dgrad(engine_handle backend_handle, const DenseStats& st
 void CuDNNEngine::dense_bgrad(engine_handle backend_handle, const DenseStats& stats,
                               const void* grad_output, void* grad_bias, void* workspace,
                               DTypeDesc type_desc) {
-  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
-  cudaStream_t stream = nullptr;
-  cudnnGetStream(handle, &stream);
-
-  size_t out_features = stats.out_features;
-  int threads_per_block = 128;
-  int warps_per_block = threads_per_block / 32;
-  int num_blocks = (out_features + warps_per_block - 1) / warps_per_block;
-
-  DISPATCH_DTYPE(type_desc.io_dtype, T, {
-    bgrad_reduce_accumulate_kernel<<<num_blocks, threads_per_block, 0, stream>>>(
-        static_cast<const T*>(grad_output), static_cast<T*>(grad_bias),
-        static_cast<int>(stats.batch_size), static_cast<int>(stats.out_features));
-  });
-
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    throw std::runtime_error(std::string("Failed to launch bgrad custom kernel: ") +
-                             cudaGetErrorString(err));
-  }
+  cuda_engine_.dense_bgrad(backend_handle, stats, grad_output, grad_bias, workspace, type_desc);
 }
 
 }  // namespace tunx

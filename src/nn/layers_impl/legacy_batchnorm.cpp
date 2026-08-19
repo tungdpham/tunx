@@ -7,143 +7,125 @@
 #include "nn/layers_impl/legacy_batchnorm.hpp"
 
 #include <cmath>
-#include <memory>
 #include <stdexcept>
 
-#include "nn/engines/iengine.hpp"
 #include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
-namespace internal {
 
-LegacyBatchNormImpl::LegacyBatchNormImpl(size_t num_features, float epsilon, float momentum,
-                                         bool affine, const std::string &name)
-    : SISOLayerImpl(name),
-      num_features_(num_features),
-      epsilon_(epsilon),
-      momentum_(momentum),
-      affine_(affine) {}
-
-void LegacyBatchNormImpl::init_impl() {
-  fill(gamma_, 1.0f);
-  fill(beta_, 0.0f);
-
-  fill(running_mean_, 0.0f);
-  fill(running_var_, 1.0f);
-
-  fill(grad_gamma_, 0.0f);
-  fill(grad_beta_, 0.0f);
-
-  fill(grad_dummy_mean_, 0.0f);
-  fill(grad_dummy_var_, 0.0f);
+Vec<Vec<size_t>> LegacyBatchNormOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                                  const Config &config) {
+  return input_shapes;
 }
 
-Tensor LegacyBatchNormImpl::forward_impl(const Tensor &input, Residuals &residuals) {
+Tensor LegacyBatchNormOp::forward(OpContext &ctx, const Tensor &input, Param &gamma, Param &beta,
+                                  Param &running_mean, Param &running_var, const Config &config) {
   if (input.dims() < 3) {
     throw std::invalid_argument("BatchNorm: Input tensor must have at least 3 dimensions");
   }
-  if (input.dim(1) != num_features_) {
+  if (input.dim(1) != config.num_features) {
     throw std::invalid_argument("BatchNorm: Input channels must match num_features");
   }
 
-  return def_forward(input, residuals);
-}
-
-Tensor LegacyBatchNormImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  return def_backward(grad_output, residuals);
-}
-
-Tensor LegacyBatchNormImpl::def_forward(const Tensor &input, Residuals &residuals) {
   size_t batch_size, channels, spatial_size;
   batch_size = input.dim(0);
   channels = input.dim(1);
   spatial_size = input.stride(1);
 
-  if (num_features_ != channels) {
-    throw std::invalid_argument("BatchNorm: Input channels must match num_features.");
-  }
+  Tensor output = ctx.make_tensor(input.shape(), ctx.io_dtype);
 
-  Tensor output = make_tensor(input.shape(), io_dtype_);
+  Tensor norm = ctx.make_tensor(input.shape(), ctx.io_dtype);
+  Tensor batch_inv_std = ctx.make_tensor({config.num_features}, ctx.io_dtype);
+  Tensor batch_mean = ctx.make_tensor({config.num_features}, ctx.io_dtype);
 
-  Tensor norm = this->make_tensor(input.shape(), io_dtype_);
-  Tensor batch_inv_std = this->make_tensor({num_features_}, io_dtype_);
-  Tensor batch_mean = this->make_tensor({num_features_}, io_dtype_);
-
-  residuals["norm"] = norm;
-  residuals["inv_std"] = batch_inv_std;
-  residuals["mean"] = batch_mean;
+  ctx.residuals["norm"] = norm;
+  ctx.residuals["inv_std"] = batch_inv_std;
+  ctx.residuals["mean"] = batch_mean;
 
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  if (this->is_training_) {
-    engine_->legacy_batchnorm_fwd(
-        engine_handle_, input.data_as<void>(), batch_mean.data_as<void>(),
-        batch_inv_std.data_as<void>(), running_mean_.data_as<void>(), running_var_.data_as<void>(),
-        gamma_.data_as<void>(), beta_.data_as<void>(), output.data_as<void>(), norm.data_as<void>(),
-        batch_size, channels, spatial_size, momentum_, epsilon_, affine_, type_desc);
+  if (ctx.is_training) {
+    ctx.engine->legacy_batchnorm_fwd(ctx.handle, input.data_as<void>(), batch_mean.data_as<void>(),
+                                     batch_inv_std.data_as<void>(), running_mean.data_as<void>(),
+                                     running_var.data_as<void>(), gamma.data_as<void>(),
+                                     beta.data_as<void>(), output.data_as<void>(),
+                                     norm.data_as<void>(), batch_size, channels, spatial_size,
+                                     config.momentum, config.epsilon, config.affine, type_desc);
   } else {
-    engine_->legacy_batchnorm_infer(
-        engine_handle_, input.data_as<void>(), running_mean_.data_as<void>(),
-        running_var_.data_as<void>(), gamma_.data_as<void>(), beta_.data_as<void>(),
-        output.data_as<void>(), batch_size, channels, spatial_size, epsilon_, affine_, type_desc);
+    ctx.engine->legacy_batchnorm_infer(ctx.handle, input.data_as<void>(),
+                                       running_mean.data_as<void>(), running_var.data_as<void>(),
+                                       gamma.data_as<void>(), beta.data_as<void>(),
+                                       output.data_as<void>(), batch_size, channels, spatial_size,
+                                       config.epsilon, config.affine, type_desc);
   }
 
   return output;
 }
 
-Tensor LegacyBatchNormImpl::def_backward(const Tensor &grad_output, Residuals &residuals) {
-  const Tensor &norm = residuals["norm"];
-  const Tensor &inv_std = residuals["inv_std"];
+Tensor LegacyBatchNormOp::backward(OpContext &ctx, const Tensor &grad_output, Param &gamma,
+                                   Param &beta, const Config &config) {
+  const Tensor &norm = ctx.residuals["norm"];
+  const Tensor &inv_std = ctx.residuals["inv_std"];
 
   size_t batch_size = grad_output.dim(0);
   size_t channels = grad_output.dim(1);
   size_t spatial_size = grad_output.stride(1);
 
-  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
+  Tensor grad_input = ctx.make_tensor(grad_output.shape(), ctx.io_dtype);
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  engine_->legacy_batchnorm_bwd(
-      engine_handle_, grad_output.data_as<void>(), norm.data_as<void>(), inv_std.data_as<void>(),
-      gamma_.data_as<void>(), grad_gamma_.data_as<void>(), grad_beta_.data_as<void>(),
-      grad_input.data_as<void>(), batch_size, channels, spatial_size, affine_, type_desc);
+  ctx.engine->legacy_batchnorm_bwd(
+      ctx.handle, grad_output.data_as<void>(), norm.data_as<void>(), inv_std.data_as<void>(),
+      gamma.data_as<void>(), gamma.grad_as<void>(), beta.grad_as<void>(),
+      grad_input.data_as<void>(), batch_size, channels, spatial_size, config.affine, type_desc);
 
   return grad_input;
 }
 
-LayerConfig LegacyBatchNormImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  config.set("num_features", num_features_);
-  config.set("epsilon", epsilon_);
-  config.set("momentum", momentum_);
-  config.set("affine", affine_);
-  return config;
+LayerConfig LegacyBatchNormOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.name = name;
+  lcfg.type = TYPE_NAME;
+  lcfg.set("num_features", config.num_features);
+  lcfg.set("epsilon", config.epsilon);
+  lcfg.set("momentum", config.momentum);
+  lcfg.set("affine", config.affine);
+  return lcfg;
 }
 
-Vec<size_t> LegacyBatchNormImpl::compute_output_shape(const Vec<size_t> &input_shape) const {
-  return input_shape;
+LegacyBatchNormOp::Config LegacyBatchNormOp::parse_config(const LayerConfig &config) {
+  Config c;
+  c.num_features = config.get<size_t>("num_features");
+  c.epsilon = config.get<float>("epsilon");
+  c.momentum = config.get<float>("momentum");
+  c.affine = config.get<bool>("affine");
+  return c;
 }
 
-std::shared_ptr<LegacyBatchNormImpl> LegacyBatchNormImpl::create_from_config(
-    const LayerConfig &config) {
-  size_t num_features = config.get<size_t>("num_features");
-  float epsilon = config.get<float>("epsilon");
-  float momentum = config.get<float>("momentum");
-  bool affine = config.get<bool>("affine");
-
-  return std::make_shared<LegacyBatchNormImpl>(num_features, epsilon, momentum, affine,
-                                               config.name);
+LegacyBatchNorm::LegacyBatchNorm(size_t num_features, float epsilon, float momentum, bool affine,
+                                 const std::string &name)
+    : FunctionalLayer(LegacyBatchNormOp::Config{num_features, epsilon, momentum, affine}, name) {
+  impl_->register_param("gamma", {num_features},
+                        [](Param &p, OpContext &ctx) { fill(p.data(), 1.0f); });
+  impl_->register_param("beta", {num_features},
+                        [](Param &p, OpContext &ctx) { fill(p.data(), 0.0f); });
+  impl_->register_param("running_mean", {num_features}, [](Param &p, OpContext &ctx) {
+    p.set_requires_grad(false);
+    fill(p.data(), 0.0f);
+  });
+  impl_->register_param("running_var", {num_features}, [](Param &p, OpContext &ctx) {
+    p.set_requires_grad(false);
+    fill(p.data(), 1.0f);
+  });
 }
 
-}  // namespace internal
 }  // namespace tunx

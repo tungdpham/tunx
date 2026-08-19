@@ -17,12 +17,12 @@ namespace tunx {
 #define BLOCK_SIZE 256
 #define WARP_SIZE 32
 
-template <typename T>
-__global__ void avgpool_nchw_fwd_kernel(const T* input, T* output, size_t batch_size,
+template <typename IO_T, typename COMPUTE_T>
+__global__ void avgpool_nchw_fwd_kernel(const IO_T* input, IO_T* output, size_t batch_size,
                                         size_t channels, size_t input_h, size_t input_w,
                                         size_t output_h, size_t output_w, size_t pool_h,
                                         size_t pool_w, size_t stride_h, size_t stride_w,
-                                        size_t pad_h, size_t pad_w, T pool_size_inv) {
+                                        size_t pad_h, size_t pad_w, COMPUTE_T pool_size_inv) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int total_outputs = batch_size * channels * output_h * output_w;
 
@@ -44,23 +44,23 @@ __global__ void avgpool_nchw_fwd_kernel(const T* input, T* output, size_t batch_
   long w_end_valid = min(static_cast<long>(input_w), w_start + static_cast<long>(pool_w));
 
   size_t input_offset = (n * channels + c) * input_h * input_w;
-  T sum = T(0);
+  COMPUTE_T sum = COMPUTE_T(0);
 
   for (long ih = h_start_valid; ih < h_end_valid; ++ih) {
     for (long iw = w_start_valid; iw < w_end_valid; ++iw) {
-      sum += input[input_offset + ih * input_w + iw];
+      sum += static_cast<COMPUTE_T>(input[input_offset + ih * input_w + iw]);
     }
   }
 
-  output[idx] = sum * pool_size_inv;
+  output[idx] = static_cast<IO_T>(sum * pool_size_inv);
 }
 
-template <typename T>
-__global__ void avgpool_nchw_dgrad_kernel(const T* gradient, T* grad_input, size_t batch_size,
+template <typename IO_T, typename COMPUTE_T>
+__global__ void avgpool_nchw_dgrad_kernel(const IO_T* gradient, IO_T* grad_input, size_t batch_size,
                                           size_t channels, size_t input_h, size_t input_w,
                                           size_t output_h, size_t output_w, size_t pool_h,
                                           size_t pool_w, size_t stride_h, size_t stride_w,
-                                          size_t pad_h, size_t pad_w, T pool_size_inv) {
+                                          size_t pad_h, size_t pad_w, COMPUTE_T pool_size_inv) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   int total_outputs = batch_size * channels * output_h * output_w;
 
@@ -73,7 +73,7 @@ __global__ void avgpool_nchw_dgrad_kernel(const T* gradient, T* grad_input, size
   int out_h = remaining / output_w;
   int out_w = remaining % output_w;
 
-  const T grad_val = gradient[idx] * pool_size_inv;
+  const COMPUTE_T grad_val = static_cast<COMPUTE_T>(gradient[idx]) * pool_size_inv;
 
   long h_start = static_cast<long>(out_h * stride_h) - static_cast<long>(pad_h);
   long w_start = static_cast<long>(out_w * stride_w) - static_cast<long>(pad_w);
@@ -87,13 +87,13 @@ __global__ void avgpool_nchw_dgrad_kernel(const T* gradient, T* grad_input, size
 
   for (long ih = h_start_valid; ih < h_end_valid; ++ih) {
     for (long iw = w_start_valid; iw < w_end_valid; ++iw) {
-      gpu_atomic_add(&grad_input[input_offset + ih * input_w + iw], grad_val);
+      gpu_atomic_add(&grad_input[input_offset + ih * input_w + iw], static_cast<IO_T>(grad_val));
     }
   }
 }
 
-template <typename T>
-void avgpool_nchw_fwd(const T* input, T* output, size_t batch_size, size_t channels, size_t input_h,
+template <typename IO_T, typename COMPUTE_T>
+void avgpool_nchw_fwd(const IO_T* input, IO_T* output, size_t batch_size, size_t channels, size_t input_h,
                       size_t input_w, size_t output_h, size_t output_w, size_t pool_h,
                       size_t pool_w, size_t stride_h, size_t stride_w, size_t pad_h, size_t pad_w,
                       cudaStream_t stream) {
@@ -101,15 +101,15 @@ void avgpool_nchw_fwd(const T* input, T* output, size_t batch_size, size_t chann
   int threads_per_block = 256;
   int num_blocks = (total_outputs + threads_per_block - 1) / threads_per_block;
 
-  T pool_size_inv = T(1.0) / T(pool_h * pool_w);
+  COMPUTE_T pool_size_inv = COMPUTE_T(1) / static_cast<COMPUTE_T>(pool_h * pool_w);
 
-  avgpool_nchw_fwd_kernel<<<num_blocks, threads_per_block, 0, stream>>>(
+  avgpool_nchw_fwd_kernel<IO_T, COMPUTE_T><<<num_blocks, threads_per_block, 0, stream>>>(
       input, output, batch_size, channels, input_h, input_w, output_h, output_w, pool_h, pool_w,
       stride_h, stride_w, pad_h, pad_w, pool_size_inv);
 }
 
-template <typename T>
-void avgpool_nchw_bwd(const T* gradient, T* grad_input, size_t batch_size, size_t channels,
+template <typename IO_T, typename COMPUTE_T>
+void avgpool_nchw_bwd(const IO_T* gradient, IO_T* grad_input, size_t batch_size, size_t channels,
                       size_t input_h, size_t input_w, size_t output_h, size_t output_w,
                       size_t pool_h, size_t pool_w, size_t stride_h, size_t stride_w, size_t pad_h,
                       size_t pad_w, cudaStream_t stream) {
@@ -117,15 +117,15 @@ void avgpool_nchw_bwd(const T* gradient, T* grad_input, size_t batch_size, size_
   int threads_per_block = 256;
   int num_blocks = (total_outputs + threads_per_block - 1) / threads_per_block;
 
-  T pool_size_inv = T(1.0) / T(pool_h * pool_w);
+  COMPUTE_T pool_size_inv = COMPUTE_T(1) / static_cast<COMPUTE_T>(pool_h * pool_w);
 
-  avgpool_nchw_dgrad_kernel<<<num_blocks, threads_per_block, 0, stream>>>(
+  avgpool_nchw_dgrad_kernel<IO_T, COMPUTE_T><<<num_blocks, threads_per_block, 0, stream>>>(
       gradient, grad_input, batch_size, channels, input_h, input_w, output_h, output_w, pool_h,
       pool_w, stride_h, stride_w, pad_h, pad_w, pool_size_inv);
 }
 
-template <typename T>
-__global__ void avgpool_fwd_kernel(const T* input, T* output, size_t batch_size, size_t height,
+template <typename IO_T, typename COMPUTE_T>
+__global__ void avgpool_fwd_kernel(const IO_T* input, IO_T* output, size_t batch_size, size_t height,
                                    size_t width, size_t channels, size_t pool_h, size_t pool_w,
                                    size_t stride_h, size_t stride_w, size_t pad_h, size_t pad_w,
                                    size_t output_h, size_t output_w) {
@@ -146,21 +146,21 @@ __global__ void avgpool_fwd_kernel(const T* input, T* output, size_t batch_size,
   h_start = max(h_start, 0);
   w_start = max(w_start, 0);
 
-  float sum = 0.0f;
+  COMPUTE_T sum = COMPUTE_T(0);
   int count = 0;
   for (int h = h_start; h < h_end; ++h) {
     for (int w = w_start; w < w_end; ++w) {
       size_t input_idx = ((b * height + h) * width + w) * channels + c;
-      sum += static_cast<float>(input[input_idx]);
+      sum += static_cast<COMPUTE_T>(input[input_idx]);
       ++count;
     }
   }
 
-  output[idx] = static_cast<T>(count > 0 ? sum / count : 0.0f);
+  output[idx] = static_cast<IO_T>(count > 0 ? sum / static_cast<COMPUTE_T>(count) : COMPUTE_T(0));
 }
 
-template <typename T>
-__global__ void avgpool_dgrad_kernel(const T* grad_output, T* grad_input, size_t batch_size,
+template <typename IO_T, typename COMPUTE_T>
+__global__ void avgpool_dgrad_kernel(const IO_T* grad_output, IO_T* grad_input, size_t batch_size,
                                      size_t input_h, size_t input_w, size_t channels, size_t pool_h,
                                      size_t pool_w, size_t stride_h, size_t stride_w, size_t pad_h,
                                      size_t pad_w, size_t output_h, size_t output_w) {
@@ -174,7 +174,7 @@ __global__ void avgpool_dgrad_kernel(const T* grad_output, T* grad_input, size_t
   size_t oh = (idx / (channels * output_w)) % output_h;
   size_t b = idx / (channels * output_w * output_h);
 
-  float grad = static_cast<float>(grad_output[idx]);
+  COMPUTE_T grad = static_cast<COMPUTE_T>(grad_output[idx]);
 
   int h_start = static_cast<int>(oh * stride_h) - static_cast<int>(pad_h);
   int w_start = static_cast<int>(ow * stride_w) - static_cast<int>(pad_w);
@@ -186,17 +186,17 @@ __global__ void avgpool_dgrad_kernel(const T* grad_output, T* grad_input, size_t
   int count = (h_end - h_start) * (w_end - w_start);
   if (count == 0) return;
 
-  float grad_per_element = grad / count;
+  COMPUTE_T grad_per_element = grad / static_cast<COMPUTE_T>(count);
   for (int h = h_start; h < h_end; ++h) {
     for (int w = w_start; w < w_end; ++w) {
       size_t input_idx = ((b * input_h + h) * input_w + w) * channels + c;
-      cuda::gpu_atomic_add(&grad_input[input_idx], static_cast<T>(grad_per_element));
+      cuda::gpu_atomic_add(&grad_input[input_idx], static_cast<IO_T>(grad_per_element));
     }
   }
 }
 
-template <typename T>
-__global__ void maxpool_nchw_fwd_kernel(const T* input, T* output, size_t batch_size,
+template <typename IO_T>
+__global__ void maxpool_nchw_fwd_kernel(const IO_T* input, IO_T* output, size_t batch_size,
                                         size_t channels, size_t input_h, size_t input_w,
                                         size_t output_h, size_t output_w, size_t pool_h,
                                         size_t pool_w, size_t stride_h, size_t stride_w,
@@ -225,13 +225,13 @@ __global__ void maxpool_nchw_fwd_kernel(const T* input, T* output, size_t batch_
   long h_end_valid = min(static_cast<long>(input_h), h_end);
   long w_end_valid = min(static_cast<long>(input_w), w_end);
 
-  T max_val = -INFINITY;
+  IO_T max_val = cuda::lowest_value<IO_T>();
   size_t max_idx = 0;
 
   for (long ih = h_start_valid; ih < h_end_valid; ++ih) {
     for (long iw = w_start_valid; iw < w_end_valid; ++iw) {
       size_t cur_input_idx = input_offset + ih * input_w + iw;
-      T val = input[cur_input_idx];
+      IO_T val = input[cur_input_idx];
 
       if (val > max_val || (ih == h_start_valid && iw == w_start_valid)) {
         max_val = val;
@@ -244,8 +244,8 @@ __global__ void maxpool_nchw_fwd_kernel(const T* input, T* output, size_t batch_
   mask_indices[idx] = max_idx;
 }
 
-template <typename T>
-__global__ void maxpool_nchw_dgrad_kernel(const T* gradient, T* grad_input, size_t batch_size,
+template <typename IO_T>
+__global__ void maxpool_nchw_dgrad_kernel(const IO_T* gradient, IO_T* grad_input, size_t batch_size,
                                           size_t channels, size_t output_h, size_t output_w,
                                           const size_t* mask_indices) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -253,14 +253,14 @@ __global__ void maxpool_nchw_dgrad_kernel(const T* gradient, T* grad_input, size
 
   if (idx >= total_outputs) return;
 
-  const T grad_val = gradient[idx];
+  const IO_T grad_val = gradient[idx];
   size_t input_idx = mask_indices[idx];
 
   gpu_atomic_add(&grad_input[input_idx], grad_val);
 }
 
-template <typename T>
-__global__ void maxpool_fwd_kernel(const T* input, T* output, int* mask_indices, size_t batch_size,
+template <typename IO_T>
+__global__ void maxpool_fwd_kernel(const IO_T* input, IO_T* output, int* mask_indices, size_t batch_size,
                                    size_t height, size_t width, size_t channels, size_t pool_h,
                                    size_t pool_w, size_t stride_h, size_t stride_w, size_t pad_h,
                                    size_t pad_w, size_t output_h, size_t output_w) {
@@ -281,12 +281,12 @@ __global__ void maxpool_fwd_kernel(const T* input, T* output, int* mask_indices,
   h_start = max(h_start, 0);
   w_start = max(w_start, 0);
 
-  float max_val = -INFINITY;
+  IO_T max_val = cuda::lowest_value<IO_T>();
   int max_idx = -1;
   for (int h = h_start; h < h_end; ++h) {
     for (int w = w_start; w < w_end; ++w) {
       size_t input_idx = ((b * height + h) * width + w) * channels + c;
-      float val = static_cast<float>(input[input_idx]);
+      IO_T val = input[input_idx];
       if (val > max_val) {
         max_val = val;
 
@@ -299,12 +299,12 @@ __global__ void maxpool_fwd_kernel(const T* input, T* output, int* mask_indices,
     }
   }
 
-  output[idx] = static_cast<T>(max_val);
+  output[idx] = max_val;
   mask_indices[idx] = max_idx;
 }
 
-template <typename T>
-__global__ void maxpool_dgrad_kernel(const T* grad_output, T* grad_input, const int* mask_indices,
+template <typename IO_T>
+__global__ void maxpool_dgrad_kernel(const IO_T* grad_output, IO_T* grad_input, const int* mask_indices,
                                      size_t batch_size, size_t channels, size_t output_h,
                                      size_t output_w, size_t input_h, size_t input_w, size_t pool_w,
                                      size_t stride_h, size_t stride_w, size_t pad_h, size_t pad_w) {
@@ -331,7 +331,7 @@ __global__ void maxpool_dgrad_kernel(const T* grad_output, T* grad_input, const 
 
     if (h >= 0 && h < static_cast<int>(input_h) && w >= 0 && w < static_cast<int>(input_w)) {
       size_t in_idx = ((b * input_h + h) * input_w + w) * channels + c;
-      cuda::gpu_atomic_add(&grad_input[in_idx], static_cast<T>(grad_output[idx]));
+      cuda::gpu_atomic_add(&grad_input[in_idx], grad_output[idx]);
     }
   }
 }
@@ -352,12 +352,12 @@ void CUDAEngine::avgpool_fwd(engine_handle backend_handle, const AvgPool2DStats&
   cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
-  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
+  DISPATCH_DTYPE2(type_desc.io_dtype, type_desc.compute_dtype, IO_T, COMPUTE_T, {
     size_t total_outputs = stats.batch_size * output_h * output_w * stats.channels;
     int threads = 256;
     int blocks = (total_outputs + threads - 1) / threads;
-    avgpool_fwd_kernel<<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(input), static_cast<T*>(output), stats.batch_size, stats.height,
+    avgpool_fwd_kernel<IO_T, COMPUTE_T><<<blocks, threads, 0, stream>>>(
+        static_cast<const IO_T*>(input), static_cast<IO_T*>(output), stats.batch_size, stats.height,
         stats.width, stats.channels, stats.pool_h, stats.pool_w, stats.stride_h, stats.stride_w,
         stats.pad_h, stats.pad_w, output_h, output_w);
   });
@@ -369,12 +369,12 @@ void CUDAEngine::avgpool_bwd(engine_handle backend_handle, const AvgPool2DStats&
   cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
-  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
+  DISPATCH_DTYPE2(type_desc.io_dtype, type_desc.compute_dtype, IO_T, COMPUTE_T, {
     size_t total_outputs = stats.batch_size * output_h * output_w * stats.channels;
     int threads = 256;
     int blocks = (total_outputs + threads - 1) / threads;
-    avgpool_dgrad_kernel<<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(grad_output), static_cast<T*>(grad_input), stats.batch_size,
+    avgpool_dgrad_kernel<IO_T, COMPUTE_T><<<blocks, threads, 0, stream>>>(
+        static_cast<const IO_T*>(grad_output), static_cast<IO_T*>(grad_input), stats.batch_size,
         stats.height, stats.width, stats.channels, stats.pool_h, stats.pool_w, stats.stride_h,
         stats.stride_w, stats.pad_h, stats.pad_w, output_h, output_w);
   });
@@ -386,12 +386,12 @@ void CUDAEngine::maxpool2d_fwd(engine_handle backend_handle, const MaxPool2DStat
   cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
-  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
+  DISPATCH_DTYPE(type_desc.io_dtype, IO_T, {
     size_t total_outputs = stats.batch_size * output_h * output_w * stats.channels;
     int threads = 256;
     int blocks = (total_outputs + threads - 1) / threads;
-    maxpool_fwd_kernel<<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(input), static_cast<T*>(output), static_cast<int*>(mask),
+    maxpool_fwd_kernel<IO_T><<<blocks, threads, 0, stream>>>(
+        static_cast<const IO_T*>(input), static_cast<IO_T*>(output), static_cast<int*>(mask),
         stats.batch_size, stats.height, stats.width, stats.channels, stats.pool_h, stats.pool_w,
         stats.stride_h, stats.stride_w, stats.pad_h, stats.pad_w, output_h, output_w);
   });
@@ -403,12 +403,12 @@ void CUDAEngine::maxpool2d_infer(engine_handle backend_handle, const MaxPool2DSt
   cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
-  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
+  DISPATCH_DTYPE(type_desc.io_dtype, IO_T, {
     size_t total_outputs = stats.batch_size * output_h * output_w * stats.channels;
     int threads = 256;
     int blocks = (total_outputs + threads - 1) / threads;
-    maxpool_fwd_kernel<<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(input), static_cast<T*>(output), static_cast<int*>(nullptr),
+    maxpool_fwd_kernel<IO_T><<<blocks, threads, 0, stream>>>(
+        static_cast<const IO_T*>(input), static_cast<IO_T*>(output), static_cast<int*>(nullptr),
         stats.batch_size, stats.height, stats.width, stats.channels, stats.pool_h, stats.pool_w,
         stats.stride_h, stats.stride_w, stats.pad_h, stats.pad_w, output_h, output_w);
   });
@@ -420,12 +420,12 @@ void CUDAEngine::maxpool2d_bwd(engine_handle backend_handle, const MaxPool2DStat
   cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
   size_t output_h = (stats.height + 2 * stats.pad_h - stats.pool_h) / stats.stride_h + 1;
   size_t output_w = (stats.width + 2 * stats.pad_w - stats.pool_w) / stats.stride_w + 1;
-  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
+  DISPATCH_DTYPE(type_desc.io_dtype, IO_T, {
     size_t total_outputs = stats.batch_size * output_h * output_w * stats.channels;
     int threads = 256;
     int blocks = (total_outputs + threads - 1) / threads;
-    maxpool_dgrad_kernel<<<blocks, threads, 0, stream>>>(
-        static_cast<const T*>(grad_output), static_cast<T*>(grad_input),
+    maxpool_dgrad_kernel<IO_T><<<blocks, threads, 0, stream>>>(
+        static_cast<const IO_T*>(grad_output), static_cast<IO_T*>(grad_input),
         static_cast<const int*>(mask), stats.batch_size, stats.channels, output_h, output_w,
         stats.height, stats.width, stats.pool_w, stats.stride_h, stats.stride_w, stats.pad_h,
         stats.pad_w);

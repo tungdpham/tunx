@@ -9,6 +9,7 @@ set(TEST_FILES
     test_gpu_tensor_ops.cpp
     test_cuda_loss_funcs.cpp
     test_residual_block.cpp
+    test_flash_attention_block.cpp
     test_partitioner.cpp
     test_archiver.cpp
     test_bf16.cpp
@@ -16,6 +17,7 @@ set(TEST_FILES
     test_cpu_engine.cpp
     test_cuda_engine.cpp
     test_cudnn_engine.cpp
+    test_del_allocator_v2.cpp
 )
 
 foreach(test_file IN LISTS TEST_FILES)

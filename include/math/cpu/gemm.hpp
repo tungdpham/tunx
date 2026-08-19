@@ -10,12 +10,14 @@
 #endif
 #include <type_traits>
 
+#include "type/type.hpp"
+
 namespace tunx {
 namespace cpu {
 
 template <typename T>
-void gemm(const T *A, const T *B, T *C, size_t M, size_t N, size_t K, const bool trans_A,
-          const bool trans_B, const T alpha, const T beta) {
+void legacy_gemm(const T *A, const T *B, T *C, size_t M, size_t N, size_t K, const bool trans_A,
+                 const bool trans_B, const T alpha, const T beta) {
 #ifdef TUNX_USE_MKL
   if constexpr (std::is_same_v<T, float> || std::is_same_v<T, double>) {
     char transa = trans_A ? 'T' : 'N';
@@ -44,6 +46,9 @@ void gemm(const T *A, const T *B, T *C, size_t M, size_t N, size_t K, const bool
   }
 #endif
 }
+
+void gemm(const void *A, const void *B, void *C, size_t M, size_t N, size_t K, const bool trans_A,
+          const bool trans_B, float alpha, float beta, DTypeDesc type_desc);
 
 }  // namespace cpu
 }  // namespace tunx

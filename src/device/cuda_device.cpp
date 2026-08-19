@@ -23,7 +23,9 @@ CUDADevice::CUDADevice(int id)
                              cudaGetErrorString(err));
   }
   nvmlInit_v2();
-  create_stream(default_stream_);
+  cudaStream_t default_cu_stream = cudaStreamDefault;
+  auto impl = std::make_shared<cuda_stream>(*this, default_cu_stream);
+  default_stream_ = stream(impl);
 }
 
 CUDADevice::~CUDADevice() = default;

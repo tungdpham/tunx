@@ -26,7 +26,19 @@ void GELU::apply(const Tensor &input, Tensor &output, stream s) const {
     throw std::runtime_error("Input and output must be on the same device for GELU");
   }
 
-  DISPATCH_DTYPE(input.dtype(), T, return apply_impl<T>(input, output, s));
+  size_t size = input.size();
+  auto &device = input.device();
+  if (input.device_type() == DeviceType::CPU) {
+    create_cpu_task(device, s, cpu::gelu, input.dtype(), input.data_as(), output.data_as(), size);
+  }
+#ifdef TUNX_USE_CUDA
+  else if (input.device_type() == DeviceType::CUDA) {
+    create_cuda_task(device, s, cuda::gelu, input.dtype(), input.data_as(), output.data_as(), size);
+  }
+#endif
+  else {
+    throw std::runtime_error("Unsupported device type for GELU apply");
+  }
 }
 
 void GELU::compute_gradient(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
@@ -37,51 +49,16 @@ void GELU::compute_gradient(const Tensor &input, const Tensor &grad_output, Tens
     throw std::runtime_error("Tensors must be on the same device for GELU");
   }
 
-  DISPATCH_DTYPE(input.dtype(), T,
-                 return compute_gradient_impl<T>(input, grad_output, grad_input, s));
-}
-
-template <typename Compute_T>
-void GELU::apply_impl(const Tensor &input, Tensor &output, stream handle) const {
-  if (input.dtype() != dtype_of<Compute_T>() || output.dtype() != dtype_of<Compute_T>()) {
-    throw std::runtime_error("GELU tensor dtype mismatch with dispatch type");
-  }
-
   size_t size = input.size();
   auto &device = input.device();
   if (input.device_type() == DeviceType::CPU) {
-    create_cpu_task(device, handle, cpu::gelu<Compute_T>, input.data_as<Compute_T>(),
-                    output.data_as<Compute_T>(), size);
+    create_cpu_task(device, s, cpu::gelu_gradient, input.dtype(), input.data_as(),
+                    grad_output.data_as(), grad_input.data_as(), size);
   }
 #ifdef TUNX_USE_CUDA
   else if (input.device_type() == DeviceType::CUDA) {
-    create_cuda_task(device, handle, cuda::gelu<Compute_T>, input.data_as<Compute_T>(),
-                     output.data_as<Compute_T>(), size);
-  }
-#endif
-  else {
-    throw std::runtime_error("Unsupported device type for GELU apply");
-  }
-}
-
-template <typename Compute_T>
-void GELU::compute_gradient_impl(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
-                                 stream handle) const {
-  if (input.dtype() != dtype_of<Compute_T>() || grad_output.dtype() != dtype_of<Compute_T>() ||
-      grad_input.dtype() != dtype_of<Compute_T>()) {
-    throw std::runtime_error("GELU tensor dtype mismatch with dispatch type");
-  }
-
-  size_t size = input.size();
-  auto &device = input.device();
-  if (input.device_type() == DeviceType::CPU) {
-    create_cpu_task(device, handle, cpu::gelu_gradient<Compute_T>, input.data_as<Compute_T>(),
-                    grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size);
-  }
-#ifdef TUNX_USE_CUDA
-  else if (input.device_type() == DeviceType::CUDA) {
-    create_cuda_task(device, handle, cuda::gelu_gradient<Compute_T>, input.data_as<Compute_T>(),
-                     grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size);
+    create_cuda_task(device, s, cuda::gelu_gradient, input.dtype(), input.data_as(),
+                     grad_output.data_as(), grad_input.data_as(), size);
   }
 #endif
   else {

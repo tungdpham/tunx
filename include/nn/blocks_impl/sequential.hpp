@@ -11,72 +11,48 @@
 #include <cstddef>
 #include <memory>
 #include <nlohmann/json.hpp>
-#include <string>
-#include <utility>
 
-#include "nn/block.hpp"
-#include "nn/graph.hpp"
+#include "nn/functional_layer.hpp"
 #include "nn/layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
-class SequentialImpl : public Block {
-private:
-  Vec<Layer> layers_;
 
-protected:
-  Vec<Tensor> forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) override;
-  Vec<Tensor> backward_impl(const Vec<Tensor> &grad_outputs, Residuals &residuals) override;
-
-public:
-  explicit SequentialImpl(Vec<Layer> layers = {}, const std::string &name = "sequential");
-
-  explicit SequentialImpl(std::initializer_list<Layer> layers,
-                          const std::string &name = "sequential")
-      : SequentialImpl(Vec<Layer>(layers), name) {}
-
-  explicit SequentialImpl(Vec<std::shared_ptr<LayerImpl>> layers,
-                          const std::string &name = "sequential")
-      : SequentialImpl(Vec<Layer>(layers.begin(), layers.end()), name) {}
-
+struct SequentialOp {
   static constexpr const char *TYPE_NAME = "sequential";
+  struct Config {};
 
-  std::string type() const override { return TYPE_NAME; }
+  static Vec<Tensor> forward(OpContext &ctx, const Vec<Tensor> &inputs, Vec<Layer> layers,
+                             const Config &config);
+  static Vec<Tensor> backward(OpContext &ctx, const Vec<Tensor> &grad_outputs, Vec<Layer> layers,
+                              const Config &config);
 
-  Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const override;
-  void print_summary(const Vec<size_t> &input_shape) const;
-  LayerConfig get_config() const override;
-  static std::shared_ptr<SequentialImpl> create_from_config(const LayerConfig &config);
-
-  const Vec<Layer> layers() const override { return layers_; }
-
-  Node operator()(const Node &input) {
-    if (!input) {
-      throw std::runtime_error("Input node is null");
-    }
-    Graph *graph = input->graph();
-    Node output = graph->make_node();
-
-    std::shared_ptr<LayerImpl> self = shared_from_this();
-
-    graph->add_edge(self, {input}, {output});
-    return output;
-  }
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config) { return Config{}; }
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-class Sequential : public LayerRef<SequentialImpl> {
+class Sequential : public FunctionalLayer<SequentialOp> {
 public:
-  explicit Sequential(Vec<Layer> layers, const std::string &name = "sequential")
-      : LayerRef(std::make_shared<SequentialImpl>(std::move(layers), name)) {}
+  explicit Sequential(Vec<Layer> layers = {}, const std::string &name = "sequential");
 
   explicit Sequential(std::initializer_list<Layer> layers, const std::string &name = "sequential")
       : Sequential(Vec<Layer>(layers), name) {}
 
-  Vec<Layer> layers() { return impl_->layers(); }
+  Vec<Layer> layers() const {
+    Vec<Layer> res;
+    for (const auto &l : impl_->layers()) {
+      res.push_back(Layer(l));
+    }
+    return res;
+  }
 
-  void print_summary(const Vec<size_t> &input_shape) const { impl_->print_summary(input_shape); }
+  void print_summary(const Vec<size_t> &input_shape) const;
 
-  using LayerRef<SequentialImpl>::LayerRef;
+  Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const;
+  LayerConfig get_config() const;
+
+  static Layer create_from_config(const LayerConfig &config);
 };
 
 }  // namespace tunx

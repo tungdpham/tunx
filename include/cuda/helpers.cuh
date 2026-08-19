@@ -57,6 +57,24 @@ __device__ __forceinline__ int lowest_value<int>() {
   return -2147483648;
 }
 
+template <>
+__device__ __forceinline__ __half lowest_value<__half>() {
+#if __CUDA_ARCH__ >= 530
+  return __float2half(-65504.0f);
+#else
+  return __half();
+#endif
+}
+
+template <>
+__device__ __forceinline__ __nv_bfloat16 lowest_value<__nv_bfloat16>() {
+#if __CUDA_ARCH__ >= 800
+  return __float2bfloat16(-3.389531389251535e38f);
+#else
+  return __nv_bfloat16();
+#endif
+}
+
 template <typename T>
 __device__ __forceinline__ T device_exp(T value);
 

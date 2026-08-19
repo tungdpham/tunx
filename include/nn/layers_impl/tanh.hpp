@@ -6,46 +6,26 @@
  */
 #pragma once
 
-#include <memory>
 #include <string>
 
-#include "nn/activations_impl/tanh.hpp"
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
 
-namespace internal {
-class TanhImpl : public SISOLayerImpl {
-private:
-  std::unique_ptr<func::Tanh> activation_;
-
-protected:
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
-
-public:
+struct TanhOp {
   static constexpr const char *TYPE_NAME = "tanh";
 
-  explicit TanhImpl(const std::string &name = "tanh");
+  struct Config {};
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
-  static std::shared_ptr<TanhImpl> create_from_config(const LayerConfig &config);
+  static Tensor forward(OpContext &ctx, const Tensor &input);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output);
 
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override {
-    return input_shape;
-  }
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config) { return Config{}; }
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class Tanh : public LayerRef<internal::TanhImpl> {
-public:
-  explicit Tanh(const std::string &name = "tanh")
-      : LayerRef(std::make_shared<internal::TanhImpl>(name)) {}
-
-  using LayerRef<internal::TanhImpl>::LayerRef;
-};
+using Tanh = FunctionalLayer<TanhOp>;
 
 }  // namespace tunx

@@ -29,7 +29,7 @@ public:
       : optimizer_(optimizer),
         current_step_(0) {
     if (optimizer_) {
-      base_lr_ = optimizer_->get_learning_rate();
+      base_lr_ = optimizer_->get_lr();
     }
   }
   virtual ~Scheduler() = default;
@@ -42,7 +42,7 @@ public:
   /**
    * @brief Get the current learning rate.
    */
-  float get_lr() const { return optimizer_ ? optimizer_->get_learning_rate() : base_lr_; }
+  float get_lr() const { return optimizer_ ? optimizer_->get_lr() : base_lr_; }
 
   /**
    * @brief Get the base learning rate.
@@ -60,7 +60,7 @@ public:
   virtual void reset() {
     current_step_ = 0;
     if (optimizer_) {
-      optimizer_->set_learning_rate(base_lr_);
+      optimizer_->set_lr(base_lr_);
     }
   }
 
@@ -75,7 +75,7 @@ protected:
 
   void set_lr(float lr) {
     if (optimizer_) {
-      optimizer_->set_learning_rate(lr);
+      optimizer_->set_lr(lr);
     }
   }
 };

@@ -71,6 +71,26 @@ struct VectoredTraits<unsigned long> {
   static constexpr int size = 1;
 };
 
+struct Int64Vec {
+  int64_t x;
+};
+
+template <>
+struct VectoredTraits<int64_t> {
+  using type = Int64Vec;
+  static constexpr int size = 1;
+};
+
+struct BoolVec {
+  bool x;
+};
+
+template <>
+struct VectoredTraits<bool> {
+  using type = BoolVec;
+  static constexpr int size = 1;
+};
+
 namespace functors {
 
 template <typename T>
@@ -248,7 +268,7 @@ struct Sqrt<float> {
 };
 template <>
 struct Sqrt<double> {
-  __device__ double operator()(double a) const { return sqrt(a); }
+  __device__ double operator()(double a) const { return ::sqrt(a); }
 };
 template <>
 struct Sqrt<unsigned long> {

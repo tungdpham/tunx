@@ -7,13 +7,13 @@
 #pragma once
 
 #include <fcntl.h>
-#include <device/stream.hpp>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <cmath>
+#include <device/stream.hpp>
 #include <fstream>
 #include <iostream>
 #include <numeric>
@@ -213,7 +213,7 @@ public:
   }
 
   bool get_batch(size_t batch_size, Tensor &batch_data, Tensor &batch_labels) override {
-    DISPATCH_DTYPE(dtype_, T, return get_batch_impl<T>(batch_size, batch_data, batch_labels));
+    DISPATCH_ANY_DTYPE(dtype_, T, return get_batch_impl<T>(batch_size, batch_data, batch_labels));
   }
 
   void reset() override { this->current_index_ = 0; }

@@ -142,7 +142,7 @@ void batchnorm_bwd_impl(const T* grad_output, const T* input, const float* mean,
 
 template <typename T, typename ParamT>
 void layernorm_fwd_impl(const T* input, T* output, const ParamT* gamma, const ParamT* beta,
-                        size_t batch_size, size_t channels, T epsilon) {
+                        T* mean_out, T* inv_variance_out, size_t batch_size, size_t channels, T epsilon) {
   size_t batch_stride = channels;
   parallel_for<size_t>(0, batch_size, [&](size_t n) {
     T sum = 0;
@@ -153,12 +153,14 @@ void layernorm_fwd_impl(const T* input, T* output, const ParamT* gamma, const Pa
       sum += val;
     }
     T mean = sum / static_cast<T>(channels);
+    if (mean_out) mean_out[n] = mean;
     for (size_t c = 0; c < channels; ++c) {
       T val = input[base_idx + c];
       sq_sum += (val - mean) * (val - mean);
     }
     T var = sq_sum / static_cast<T>(channels);
     T inv_std = T(1) / static_cast<T>(std::sqrt(static_cast<double>(var + epsilon)));
+    if (inv_variance_out) inv_variance_out[n] = inv_std;
     for (size_t c = 0; c < channels; ++c) {
       size_t idx = base_idx + c;
       T val = input[idx];
@@ -469,7 +471,8 @@ void CPUEngine::layernorm_fwd(engine_handle backend_handle, const LayerNormStats
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     layernorm_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output),
                           static_cast<const T*>(gamma), static_cast<const T*>(beta),
-                          stats.batch_size, stats.channels, static_cast<T>(stats.epsilon));
+                          static_cast<T*>(mean), static_cast<T*>(inv_variance),
+                          stats.batch_size * stats.seq_len, stats.channels, static_cast<T>(stats.epsilon));
   });
 }
 
@@ -480,7 +483,8 @@ void CPUEngine::layernorm_infer(engine_handle backend_handle, const LayerNormSta
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     layernorm_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output),
                           static_cast<const T*>(gamma), static_cast<const T*>(beta),
-                          stats.batch_size, stats.channels, static_cast<T>(stats.epsilon));
+                          nullptr, nullptr,
+                          stats.batch_size * stats.seq_len, stats.channels, static_cast<T>(stats.epsilon));
   });
 }
 
@@ -493,8 +497,8 @@ void CPUEngine::layernorm_bwd(engine_handle backend_handle, const LayerNormStats
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
     layernorm_bwd_impl<T>(static_cast<const T*>(grad_output), static_cast<const T*>(input),
                           static_cast<const T*>(gamma), static_cast<T*>(grad_input),
-                          static_cast<T*>(grad_gamma), static_cast<T*>(grad_beta), stats.batch_size,
-                          stats.channels, static_cast<T>(stats.epsilon));
+                          static_cast<T*>(grad_gamma), static_cast<T*>(grad_beta),
+                          stats.batch_size * stats.seq_len, stats.channels, static_cast<T>(stats.epsilon));
   });
 }
 

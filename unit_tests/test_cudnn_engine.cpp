@@ -29,6 +29,7 @@ class CuDNNEngineTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
     initializeDefaultDevices();
+
     DeviceManager& manager = DeviceManager::instance();
     Vec<DeviceID> device_ids = manager.get_all();
 
@@ -230,11 +231,32 @@ protected:
     math_layernorm_bwd(grad_out_host.data_as<float>(), input_host.data_as<float>(),
                        gamma_host.data_as<float>(), expected_grad_input.data_as<float>(),
                        expected_grad_gamma.data_as<float>(), expected_grad_beta.data_as<float>(),
-                       stats.batch_size, stats.channels, static_cast<float>(stats.epsilon));
+                       stats.batch_size, stats.seq_len, stats.channels, static_cast<float>(stats.epsilon));
 
     compare_tensor(to_host(grad_input), expected_grad_input);
     compare_tensor(to_host(grad_gamma), expected_grad_gamma);
     compare_tensor(to_host(grad_beta), expected_grad_beta);
+  }
+  void check_layernorm_fwd(const Tensor& input, const Tensor& gamma, const Tensor& beta,
+                           const Tensor& output, const Tensor& mean, const Tensor& invar,
+                           const LayerNormStats& stats) {
+    Tensor expected_output(output.shape(), output.dtype(), DeviceAllocator::instance(getHost()));
+    Tensor expected_mean(mean.shape(), mean.dtype(), DeviceAllocator::instance(getHost()));
+    Tensor expected_invar(invar.shape(), invar.dtype(), DeviceAllocator::instance(getHost()));
+
+    Tensor input_host = to_host(input);
+    Tensor gamma_host = to_host(gamma);
+    Tensor beta_host = to_host(beta);
+
+    math_layernorm_fwd(input_host.data_as<float>(), gamma_host.data_as<float>(),
+                       beta_host.data_as<float>(), expected_output.data_as<float>(),
+                       expected_mean.data_as<float>(), expected_invar.data_as<float>(),
+                       stats.batch_size, stats.seq_len, stats.channels,
+                       static_cast<float>(stats.epsilon));
+
+    compare_tensor(to_host(output), expected_output);
+    compare_tensor(to_host(mean), expected_mean);
+    compare_tensor(to_host(invar), expected_invar);
   }
 
   void check_avgpool_fwd(const Tensor& input, const Tensor& output, const AvgPool2DStats& stats) {
@@ -379,7 +401,7 @@ protected:
     Tensor input_host = to_host(input);
     Tensor weight_host = to_host(weight);
 
-    math_embedding_fwd(input_host.data_as<float>(), weight_host.data_as<float>(),
+    math_embedding_fwd(input_host.data_as<int32_t>(), weight_host.data_as<float>(),
                        expected_output.data_as<float>(), stats.num_indices, stats.vocab_size,
                        stats.embed_dim, stats.padding_idx);
 
@@ -395,7 +417,7 @@ protected:
     Tensor input_host = to_host(input);
     Tensor grad_out_host = to_host(grad_output);
 
-    math_embedding_bwd(input_host.data_as<float>(), grad_out_host.data_as<float>(),
+    math_embedding_bwd(input_host.data_as<int32_t>(), grad_out_host.data_as<float>(),
                        expected_grad_weight.data_as<float>(), stats.num_indices, stats.vocab_size,
                        stats.embed_dim, stats.padding_idx);
 
@@ -727,13 +749,15 @@ TEST_F(CuDNNEngineTest, BatchNormBwdReturnsCorrectResult) {
                       stats);
 }
 
-TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
+TEST_F(CuDNNEngineTest, LayerNormFwdReturnsCorrectResult) {
   size_t batch_size = 2;
+  size_t seq_len = 32;
   size_t channels = 4;
   float epsilon = 1e-5f;
 
   LayerNormStats stats{
       .batch_size = batch_size,
+      .seq_len = seq_len,
       .channels = channels,
       .epsilon = epsilon,
   };
@@ -744,9 +768,49 @@ TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
       .compute_dtype = DType_t::FP32,
   };
 
-  Tensor input({batch_size, channels}, DType_t::FP32, getGPU());
+  Tensor input({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
   fill_normal(input, 0.0, 0.5, 12345ULL);
-  Tensor grad_output({batch_size, channels}, DType_t::FP32, getGPU());
+  Tensor gamma({channels}, DType_t::FP32, getGPU());
+  fill_normal(gamma, 1.0, 0.1, 12345ULL);
+  Tensor beta({channels}, DType_t::FP32, getGPU());
+  fill_normal(beta, 0.0, 0.1, 12345ULL);
+
+  Tensor output({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
+  Tensor mean({batch_size, seq_len, 1}, DType_t::FP32, getGPU());
+  Tensor invar({batch_size, seq_len, 1}, DType_t::FP32, getGPU());
+
+  WorkspaceReq req = engine_->query_layernorm_graph(engine_handle_, stats, type_desc);
+  Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
+
+  engine_->layernorm_fwd(engine_handle_, stats, input.data_as<void>(), gamma.data_as<void>(),
+                         beta.data_as<void>(), output.data_as<void>(), mean.data_as<void>(),
+                         invar.data_as<void>(), workspace.data_as<void>(), type_desc);
+
+  check_layernorm_fwd(input, gamma, beta, output, mean, invar, stats);
+}
+
+TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
+  size_t batch_size = 2;
+  size_t seq_len = 32;
+  size_t channels = 4;
+  float epsilon = 1e-5f;
+
+  LayerNormStats stats{
+      .batch_size = batch_size,
+      .seq_len = seq_len,
+      .channels = channels,
+      .epsilon = epsilon,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::FP32,
+      .param_dtype = DType_t::FP32,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor input({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
+  fill_normal(input, 0.0, 0.5, 12345ULL);
+  Tensor grad_output({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
   fill_normal(grad_output, 0.0, 0.2, 12345ULL);
   Tensor gamma({channels}, DType_t::FP32, getGPU());
   fill_normal(gamma, 1.0, 0.1, 12345ULL);
@@ -754,9 +818,9 @@ TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
   // Run layernorm forward first to capture real mean and inv_variance
   Tensor beta({channels}, DType_t::FP32, getGPU());
   fill(beta, 0.0f);
-  Tensor ln_output({batch_size, channels}, DType_t::FP32, getGPU());
-  Tensor mean({batch_size, 1}, DType_t::FP32, getGPU());
-  Tensor invar({batch_size, 1}, DType_t::FP32, getGPU());
+  Tensor ln_output({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
+  Tensor mean({batch_size, seq_len, 1}, DType_t::FP32, getGPU());
+  Tensor invar({batch_size, seq_len, 1}, DType_t::FP32, getGPU());
   {
     WorkspaceReq fwd_req = engine_->query_layernorm_graph(engine_handle_, stats, type_desc);
     Tensor fwd_workspace({fwd_req.fwd_workspace > 0 ? fwd_req.fwd_workspace : 1}, DType_t::BYTE,
@@ -766,7 +830,7 @@ TEST_F(CuDNNEngineTest, LayerNormBwdReturnsCorrectResult) {
                            invar.data_as<void>(), fwd_workspace.data_as<void>(), type_desc);
   }
 
-  Tensor grad_input({batch_size, channels}, DType_t::FP32, getGPU());
+  Tensor grad_input({batch_size, seq_len, channels}, DType_t::FP32, getGPU());
   Tensor grad_gamma({channels}, DType_t::FP32, getGPU());
   Tensor grad_beta({channels}, DType_t::FP32, getGPU());
   fill(grad_gamma, 0.0f);
@@ -1144,7 +1208,7 @@ TEST_F(CuDNNEngineTest, EmbeddingFwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.fwd_workspace > 0 ? req.fwd_workspace : 1}, DType_t::BYTE, getGPU());
 
-  Tensor input({4}, DType_t::FP32, getGPU());
+  Tensor input({4}, DType_t::INT32, getGPU());
   Tensor weight({10, 8}, DType_t::FP32, getGPU());
   Tensor output({4, 8}, DType_t::FP32, getGPU());
 
@@ -1161,7 +1225,7 @@ TEST_F(CuDNNEngineTest, EmbeddingBwdReturnsCorrectResult) {
   size_t vocab_size = 10;
   size_t embed_dim = 8;
   size_t padding_idx = 0;
-  float host_input[] = {1.0f, 2.0f, 1.0f, 0.0f};
+  int32_t host_input[] = {1, 2, 1, 0};
 
   EmbeddingStats stats{
       .num_indices = num_indices,
@@ -1177,7 +1241,7 @@ TEST_F(CuDNNEngineTest, EmbeddingBwdReturnsCorrectResult) {
   WorkspaceReq req = engine_->query_embedding_graph(engine_handle_, stats, type_desc);
   Tensor workspace({req.bwd_workspace > 0 ? req.bwd_workspace : 1}, DType_t::BYTE, getGPU());
 
-  Tensor input({num_indices}, DType_t::FP32, getGPU());
+  Tensor input({num_indices}, DType_t::INT32, getGPU());
   cudaMemcpy(input.data_as<void>(), host_input, sizeof(host_input), cudaMemcpyHostToDevice);
   Tensor grad_output({num_indices, embed_dim}, DType_t::FP32, getGPU());
   fill_normal(grad_output, 0.0, 0.2, 12345ULL);
@@ -1210,11 +1274,10 @@ TEST_F(CuDNNEngineTest, ReLUFwdReturnsCorrectResult) {
   fill_normal(input, 0.0, 1.0, 12345ULL);
 
   Tensor output({batch_size, spatial_size}, DType_t::FP32, getGPU());
-  Tensor mask({batch_size, spatial_size}, DType_t::BOOL, getGPU());
 
   EXPECT_NO_THROW({
     engine_->relu_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
-                      mask.data_as<bool>(), workspace.data_as<void>(), type_desc);
+                      workspace.data_as<void>(), type_desc);
   });
 
   Tensor input_host = to_host(input);
@@ -1247,22 +1310,21 @@ TEST_F(CuDNNEngineTest, ReLUBwdReturnsCorrectResult) {
   Tensor workspace({ws_size > 0 ? ws_size : 1}, DType_t::BYTE, getGPU());
   Tensor grad_output({batch_size, spatial_size}, DType_t::FP32, getGPU());
   fill(grad_output, 1.0f);
-  Tensor mask({batch_size, spatial_size}, DType_t::BOOL, getGPU());
-  // Fill mask deterministically: every other element is active
+
+  // Construct a fake cached output on host then upload: every other element is positive.
   size_t mask_elements = batch_size * spatial_size;
-  {
-    std::vector<uint8> mask_raw(mask_elements);
-    for (size_t i = 0; i < mask_elements; ++i) mask_raw[i] = static_cast<uint8>(i % 2 == 0);
-    cudaMemcpy(mask.data_as<bool>(), mask_raw.data(), mask_elements * sizeof(bool),
-               cudaMemcpyHostToDevice);
-  }
+  std::vector<float> cached_output_host(mask_elements);
+  for (size_t i = 0; i < mask_elements; ++i) cached_output_host[i] = (i % 2 == 0) ? 1.0f : -1.0f;
+  Tensor cached_output({batch_size, spatial_size}, DType_t::FP32, getGPU());
+  cudaMemcpy(cached_output.data_as<float>(), cached_output_host.data(),
+             mask_elements * sizeof(float), cudaMemcpyHostToDevice);
 
   Tensor grad_input({batch_size, spatial_size}, DType_t::FP32, getGPU());
 
   EXPECT_NO_THROW({
     engine_->relu_bwd(engine_handle_, stats, grad_output.data_as<void>(),
-                      grad_input.data_as<void>(), mask.data_as<bool>(), workspace.data_as<void>(),
-                      type_desc);
+                      grad_input.data_as<void>(), cached_output.data_as<void>(),
+                      workspace.data_as<void>(), type_desc);
   });
 
   Tensor grad_input_host = to_host(grad_input);
@@ -1274,6 +1336,203 @@ TEST_F(CuDNNEngineTest, ReLUBwdReturnsCorrectResult) {
   }
 }
 
+TEST_F(CuDNNEngineTest, TransposeReturnsCorrectResults) {
+  size_t batch_size = 2;
+  size_t num_heads = 4;
+  size_t seq_len = 8;
+  size_t head_dim = 16;
+
+  TransposeStats stats{
+      .shape = {batch_size, num_heads, seq_len, head_dim, 0, 0, 0, 0},
+      .ndim = 4,
+      .dim0 = 1,
+      .dim1 = 2,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::FP32,
+      .param_dtype = DType_t::FP32,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor input({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getGPU());
+  fill_normal(input, 0.0, 1.0, 12345ULL);
+  Tensor output({batch_size, seq_len, num_heads, head_dim}, DType_t::FP32, getGPU());
+
+  WorkspaceReq req = engine_->query_transpose_graph(engine_handle_, stats, type_desc);
+  size_t ws_size = req.fwd_workspace > 0 ? req.fwd_workspace : 1;
+  Tensor workspace({ws_size}, DType_t::BYTE, getGPU());
+
+  engine_->transpose(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
+                     workspace.data_as<void>(), type_desc);
+  cudaDeviceSynchronize();
+
+  Tensor expected_output({batch_size, seq_len, num_heads, head_dim}, DType_t::FP32, getHost());
+  Tensor host_input = to_host(input);
+  math_transpose(host_input.data_as<float>(), expected_output.data_as<float>(), stats.shape,
+                 stats.ndim, stats.dim0, stats.dim1);
+
+  compare_tensor(output, expected_output, 1e-4);
+}
+
+TEST_F(CuDNNEngineTest, SDPAFwdReturnsCorrectResults) {
+  cudaGetLastError();
+  size_t batch_size = 2;
+  size_t num_heads = 4;
+  size_t seq_len = 8;
+  size_t head_dim = 16;
+
+  AttentionStats stats{
+      .batch_size = batch_size,
+      .num_heads = num_heads,
+      .seq_len = seq_len,
+      .head_dim = head_dim,
+      .attn_scale = 1.0f / static_cast<float>(sqrt(head_dim)),
+      .is_causal = true,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::BF16,
+      .param_dtype = DType_t::BF16,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor q({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+  Tensor k({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+  Tensor v({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+  fill_normal(q, 0.0, 1.0, 12345ULL);
+  fill_normal(k, 0.0, 1.0, 12346ULL);
+  fill_normal(v, 0.0, 1.0, 12347ULL);
+  Tensor output({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+  Tensor stats_tensor({batch_size, num_heads, seq_len}, DType_t::FP32, getGPU());
+
+  WorkspaceReq req = engine_->query_sdpa_graph(engine_handle_, stats, type_desc);
+  size_t ws_size = req.fwd_workspace > 0 ? req.fwd_workspace : 1;
+  Tensor workspace({ws_size}, DType_t::BYTE, getGPU());
+
+  engine_->sdpa_fwd(engine_handle_, stats, q.data_as<void>(), k.data_as<void>(), v.data_as<void>(),
+                    output.data_as<void>(), stats_tensor.data_as<void>(), workspace.data_as<void>(),
+                    type_desc);
+  cudaDeviceSynchronize();
+
+  Tensor expected_output({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+  Tensor expected_stats_tensor({batch_size, num_heads, seq_len}, DType_t::FP32, getHost());
+
+  Tensor host_q = to_host(q);
+  Tensor host_k = to_host(k);
+  Tensor host_v = to_host(v);
+  Tensor host_q_fp32({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+  Tensor host_k_fp32({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+  Tensor host_v_fp32({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+  cast(host_q, host_q_fp32);
+  cast(host_k, host_k_fp32);
+  cast(host_v, host_v_fp32);
+
+  math_sdpa_fwd(host_q_fp32.data_as<float>(), host_k_fp32.data_as<float>(),
+                host_v_fp32.data_as<float>(), expected_output.data_as<float>(),
+                expected_stats_tensor.data_as<float>(), batch_size, num_heads, seq_len, head_dim,
+                1.0f / sqrt(head_dim), true);
+
+  Tensor expected_output_bf16({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getHost());
+  cast(expected_output, expected_output_bf16);
+
+  compare_tensor(output, expected_output_bf16, 5e-2);
+  compare_tensor(stats_tensor, expected_stats_tensor, 5e-2);
+}
+TEST_F(CuDNNEngineTest, SDPABwdReturnsCorrectResults) {
+  size_t batch_size = 2;
+  size_t num_heads = 4;
+  size_t seq_len = 8;
+  size_t head_dim = 16;
+
+  AttentionStats stats{
+      .batch_size = batch_size,
+      .num_heads = num_heads,
+      .seq_len = seq_len,
+      .head_dim = head_dim,
+      .attn_scale = 1.0f / static_cast<float>(sqrt(head_dim)),
+      .is_causal = true,
+  };
+
+  DTypeDesc type_desc{
+      .io_dtype = DType_t::BF16,
+      .param_dtype = DType_t::BF16,
+      .compute_dtype = DType_t::FP32,
+  };
+
+  Tensor q({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+  Tensor k({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+  Tensor v({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+  Tensor do_({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+  fill_normal(q, 0.0, 1.0, 12345ULL);
+  fill_normal(k, 0.0, 1.0, 12346ULL);
+  fill_normal(v, 0.0, 1.0, 12347ULL);
+  fill_normal(do_, 0.0, 1.0, 12348ULL);
+  Tensor output({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+  Tensor stats_tensor({batch_size, num_heads, seq_len}, DType_t::FP32, getGPU());
+
+  WorkspaceReq req = engine_->query_sdpa_graph(engine_handle_, stats, type_desc);
+  size_t ws_size = req.fwd_workspace > 0 ? req.fwd_workspace : 1;
+  Tensor workspace({ws_size}, DType_t::BYTE, getGPU());
+
+  engine_->sdpa_fwd(engine_handle_, stats, q.data_as<void>(), k.data_as<void>(), v.data_as<void>(),
+                    output.data_as<void>(), stats_tensor.data_as<void>(), workspace.data_as<void>(),
+                    type_desc);
+  cudaDeviceSynchronize();
+
+  Tensor dq({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+  Tensor dk({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+  Tensor dv({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getGPU());
+
+  size_t bwd_ws_size = req.bwd_workspace > 0 ? req.bwd_workspace : 1;
+  Tensor bwd_workspace({bwd_ws_size}, DType_t::BYTE, getGPU());
+
+  engine_->sdpa_bwd(engine_handle_, stats, q.data_as<void>(), k.data_as<void>(), v.data_as<void>(),
+                    output.data_as<void>(), do_.data_as<void>(), stats_tensor.data_as<void>(),
+                    dq.data_as<void>(), dk.data_as<void>(), dv.data_as<void>(),
+                    bwd_workspace.data_as<void>(), type_desc);
+  cudaDeviceSynchronize();
+
+  Tensor expected_dq({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+  Tensor expected_dk({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+  Tensor expected_dv({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+
+  Tensor host_q = to_host(q);
+  Tensor host_k = to_host(k);
+  Tensor host_v = to_host(v);
+  Tensor host_do = to_host(do_);
+  Tensor host_output = to_host(output);
+
+  Tensor host_q_fp32({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+  Tensor host_k_fp32({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+  Tensor host_v_fp32({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+  Tensor host_do_fp32({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+  Tensor host_output_fp32({batch_size, num_heads, seq_len, head_dim}, DType_t::FP32, getHost());
+
+  cast(host_q, host_q_fp32);
+  cast(host_k, host_k_fp32);
+  cast(host_v, host_v_fp32);
+  cast(host_do, host_do_fp32);
+  cast(host_output, host_output_fp32);
+
+  math_sdpa_bwd(host_q_fp32.data_as<float>(), host_k_fp32.data_as<float>(),
+                host_v_fp32.data_as<float>(), host_output_fp32.data_as<float>(),
+                host_do_fp32.data_as<float>(), expected_dq.data_as<float>(),
+                expected_dk.data_as<float>(), expected_dv.data_as<float>(), batch_size, num_heads,
+                seq_len, head_dim, 1.0f / sqrt(head_dim), true);
+
+  Tensor expected_dq_bf16({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getHost());
+  Tensor expected_dk_bf16({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getHost());
+  Tensor expected_dv_bf16({batch_size, num_heads, seq_len, head_dim}, DType_t::BF16, getHost());
+
+  cast(expected_dq, expected_dq_bf16);
+  cast(expected_dk, expected_dk_bf16);
+  cast(expected_dv, expected_dv_bf16);
+
+  compare_tensor(dq, expected_dq_bf16, 5e-2);
+  compare_tensor(dk, expected_dk_bf16, 5e-2);
+  compare_tensor(dv, expected_dv_bf16, 5e-2);
+}
 int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();

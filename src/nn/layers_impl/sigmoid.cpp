@@ -6,38 +6,36 @@
  */
 #include "nn/layers_impl/sigmoid.hpp"
 
-#include <memory>
 #include <stdexcept>
 
+#include "nn/activations_impl/sigmoid.hpp"
+
 namespace tunx {
-namespace internal {
 
-SigmoidImpl::SigmoidImpl(const std::string &name)
-    : SISOLayerImpl(name),
-      activation_(std::make_unique<func::Sigmoid>()) {}
+Vec<Vec<size_t>> SigmoidOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                          const Config &config) {
+  if (input_shapes.size() != 1) {
+    throw std::runtime_error("SigmoidOp: expected exactly 1 input");
+  }
+  return {input_shapes[0]};
+}
 
-Tensor SigmoidImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  Tensor output = make_tensor(input.shape(), io_dtype_);
-  activation_->apply(input, output);
+Tensor SigmoidOp::forward(OpContext &ctx, const Tensor &input) {
+  Tensor output = ctx.make_tensor(input.shape(), ctx.io_dtype);
+  func::Sigmoid().apply(input, output, ctx.handle.get_stream());
 
-  if (this->is_training_) {
-    // Cache output for efficient backward pass
-    // sigmoid'(x) = sigmoid(x) * (1 - sigmoid(x))
-    residuals["output"] = output;
+  if (ctx.is_training) {
+    ctx.residuals["output"] = output;
   }
 
   return output;
 }
 
-Tensor SigmoidImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  Tensor &output = residuals["output"];
-  if (!output) {
-    throw std::runtime_error("No cached output found for backward pass in SigmoidImpl");
-  }
+Tensor SigmoidOp::backward(OpContext &ctx, const Tensor &grad_output) {
+  const Tensor &output = ctx.residuals["output"];
 
-  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
+  Tensor grad_input = ctx.make_tensor(grad_output.shape(), ctx.io_dtype);
 
-  // Gradient: grad_input = grad_output * output * (1 - output)
   size_t num_elements = grad_output.size();
   if (grad_output.device_type() == DeviceType::CPU) {
     const float *grad_out_data = grad_output.data_as<float>();
@@ -50,23 +48,18 @@ Tensor SigmoidImpl::backward_impl(const Tensor &grad_output, Residuals &residual
   }
 #ifdef TUNX_USE_CUDA
   else if (grad_output.device_type() == DeviceType::CUDA) {
-    throw std::runtime_error("SigmoidImpl: CUDA backward not yet implemented");
+    throw std::runtime_error("SigmoidOp: CUDA backward not yet implemented");
   }
 #endif
 
   return grad_input;
 }
 
-LayerConfig SigmoidImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  return config;
+LayerConfig SigmoidOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.type = TYPE_NAME;
+  lcfg.name = name;
+  return lcfg;
 }
 
-std::shared_ptr<SigmoidImpl> SigmoidImpl::create_from_config(const LayerConfig &config) {
-  return std::make_shared<SigmoidImpl>(config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

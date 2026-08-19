@@ -649,6 +649,8 @@ inline void cd_copy(const Tensor &a, Tensor &c, stream stream = nullptr) {
     throw std::runtime_error("cd_copy: CUDA not enabled for CUDA to CPU copy");
 #endif
   } else {
+    (void)dtype;
+    (void)size;
     throw std::runtime_error("cd_copy: Unsupported device type combination");
   }
 }
@@ -987,7 +989,7 @@ inline void load(Tensor &input, std::istream &in) {
     Tensor host_tensor(shape, dtype, DeviceAllocator::instance(getHost()));
     in.read(reinterpret_cast<char *>(host_tensor.data_as<uchar>()),
             input.size() * get_dtype_size(dtype));
-    copy(host_tensor, input);
+    cd_copy(host_tensor, input);
   }
 }
 
@@ -1393,12 +1395,13 @@ inline void cnhw_to_nchw(const Tensor &input, Tensor &output, size_t n, size_t c
 
 inline void print_tensor(const Tensor &input, size_t num_elements_, std::string_view label) {
   auto host_tensor = to_host(input);
-  fmt::print("{}: ", label);
+  fmt::print(fmt::runtime("{}: "), label);
   for (size_t i = 0; i < num_elements_; i++) {
-    DISPATCH_ANY_DTYPE(input.dtype(), T,
-                       { fmt::print("{:.3f} ", static_cast<float>(host_tensor.data_as<T>()[i])); })
+    DISPATCH_ANY_DTYPE(input.dtype(), T, {
+      fmt::print(fmt::runtime("{:.4f} "), static_cast<double>(host_tensor.data_as<T>()[i]));
+    })
   }
-  fmt::print("\n");
+  fmt::print(fmt::runtime("\n"));
 }
 
 }  // namespace tunx

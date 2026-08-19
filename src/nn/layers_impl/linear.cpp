@@ -6,37 +6,34 @@
  */
 #include "nn/layers_impl/linear.hpp"
 
-#include <memory>
+#include "tensor/ops.hpp"
 
 namespace tunx {
-namespace internal {
 
-LinearImpl::LinearImpl(const std::string &name)
-    : SISOLayerImpl(name),
-      activation_(std::make_unique<func::Linear>()) {}
+Vec<Vec<size_t>> LinearOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                         const Config &config) {
+  return input_shapes;
+}
 
-Tensor LinearImpl::forward_impl(const Tensor &input, Residuals &residuals) {
-  Tensor output = make_tensor(input.shape(), io_dtype_);
-  copy(input, output, engine_handle_.get_stream());
+Tensor LinearOp::forward(OpContext &ctx, const Tensor &input, const Config &config) {
+  Tensor output = ctx.make_tensor(input.shape(), ctx.io_dtype);
+  copy(input, output, ctx.handle.get_stream());
   return output;
 }
 
-Tensor LinearImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  Tensor grad_input = make_tensor(grad_output.shape(), io_dtype_);
-  copy(grad_output, grad_input, engine_handle_.get_stream());
+Tensor LinearOp::backward(OpContext &ctx, const Tensor &grad_output, const Config &config) {
+  Tensor grad_input = ctx.make_tensor(grad_output.shape(), ctx.io_dtype);
+  copy(grad_output, grad_input, ctx.handle.get_stream());
   return grad_input;
 }
 
-LayerConfig LinearImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  return config;
+LayerConfig LinearOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.name = name;
+  lcfg.type = TYPE_NAME;
+  return lcfg;
 }
 
-std::shared_ptr<LinearImpl> LinearImpl::create_from_config(const LayerConfig &config) {
-  return std::make_shared<LinearImpl>(config.name);
-}
+LinearOp::Config LinearOp::parse_config(const LayerConfig &config) { return Config{}; }
 
-}  // namespace internal
 }  // namespace tunx

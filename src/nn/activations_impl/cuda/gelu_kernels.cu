@@ -28,7 +28,7 @@ __global__ void gelu_kernel(const T* input, T* output, size_t size) {
 }
 
 template <typename T>
-void gelu(const T* input, T* output, size_t size, cudaStream_t stream) {
+void gelu_impl(const T* input, T* output, size_t size, cudaStream_t stream) {
   int threads = 256;
   int blocks = (size + threads - 1) / threads;
   gelu_kernel<T><<<blocks, threads, 0, stream>>>(input, output, size);
@@ -59,21 +59,25 @@ __global__ void gelu_gradient_kernel(const T* input, const T* grad_output, T* gr
 }
 
 template <typename T>
-void gelu_gradient(const T* input, const T* grad_output, T* grad_input, size_t size,
-                   cudaStream_t stream) {
+void gelu_gradient_impl(const T* input, const T* grad_output, T* grad_input, size_t size,
+                        cudaStream_t stream) {
   int threads = 256;
   int blocks = (size + threads - 1) / threads;
   gelu_gradient_kernel<T><<<blocks, threads, 0, stream>>>(input, grad_output, grad_input, size);
 }
 
-#define INSTANTIATE(T)                                                                             \
-  template void gelu<T>(const T* input, T* output, size_t size, cudaStream_t stream);              \
-  template void gelu_gradient<T>(const T* input, const T* grad_output, T* grad_input, size_t size, \
-                                 cudaStream_t stream);
+void gelu(DType_t dtype, const void* input, void* output, size_t size, cudaStream_t stream) {
+  DISPATCH_DTYPE(dtype, T,
+                 gelu_impl<T>(static_cast<const T*>(input), static_cast<T*>(output), size, stream));
+}
 
-#include "macros/floating_type_instantiation.hpp"
-
-#undef INSTANTIATE
+void gelu_gradient(DType_t dtype, const void* input, const void* grad_output, void* grad_input,
+                   size_t size, cudaStream_t stream) {
+  DISPATCH_DTYPE(
+      dtype, T,
+      gelu_gradient_impl<T>(static_cast<const T*>(input), static_cast<const T*>(grad_output),
+                            static_cast<T*>(grad_input), size, stream));
+}
 
 }  // namespace cuda
 }  // namespace tunx

@@ -12,61 +12,43 @@
 #include "type/type.hpp"
 
 namespace tunx {
-namespace internal {
 
-Vec<Vec<size_t>> SubImpl::output_shapes(const Vec<Vec<size_t>> &input_shapes) const {
+Vec<Vec<size_t>> SubOp::output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config) {
   if (input_shapes.size() != 2) {
-    throw std::runtime_error("SubImpl: expected exactly 2 inputs");
+    throw std::runtime_error("SubOp: expected exactly 2 inputs");
   }
   if (input_shapes[0] != input_shapes[1]) {
-    throw std::runtime_error("SubImpl: both inputs must have the same shape");
+    throw std::runtime_error("SubOp: both inputs must have the same shape");
   }
   return {input_shapes[0]};
 }
 
-Vec<Tensor> SubImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) {
-  if (inputs.size() != 2) {
-    throw std::runtime_error("SubImpl: expected exactly 2 inputs");
-  }
-  const Tensor &a = inputs[0];
-  const Tensor &b = inputs[1];
-
+Tensor SubOp::forward(OpContext &ctx, const Tensor &a, const Tensor &b) {
   if (a.shape() != b.shape()) {
-    throw std::runtime_error("SubImpl: both inputs must have the same shape");
+    throw std::runtime_error("SubOp: both inputs must have the same shape");
   }
 
-  Tensor output = make_tensor(a.shape(), io_dtype_);
-  sub(a, b, output, engine_handle_.get_stream());
+  Tensor output = ctx.make_tensor(a.shape(), a.dtype());
+  sub(a, b, output, ctx.handle.get_stream());
 
-  return {output};
+  return output;
 }
 
-Vec<Tensor> SubImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &residuals) {
-  if (grad_outputs.size() != 1) {
-    throw std::runtime_error("SubImpl: expected exactly 1 grad output");
-  }
-  const Tensor &grad_out = grad_outputs[0];
+Vec<Tensor> SubOp::backward(OpContext &ctx, const Tensor &grad_out) {
+  Tensor grad_a = ctx.make_tensor(grad_out.shape(), ctx.io_dtype);
+  Tensor grad_b = ctx.make_tensor(grad_out.shape(), ctx.io_dtype);
 
-  // grad_a = grad_out, grad_b = -grad_out
-  Tensor grad_a = make_tensor(grad_out.shape(), this->io_dtype_);
-  Tensor grad_b = make_tensor(grad_out.shape(), this->io_dtype_);
-
-  copy(grad_out, grad_a, engine_handle_.get_stream());
-  mul_scalar(grad_out, -1.0, grad_b, engine_handle_.get_stream());
+  copy(grad_out, grad_a, ctx.handle.get_stream());
+  mul_scalar(grad_out, -1.0, grad_b, ctx.handle.get_stream());
 
   return {grad_a, grad_b};
 }
 
-LayerConfig SubImpl::get_config() const {
-  LayerConfig config;
-  config.type = TYPE_NAME;
-  config.name = this->name_;
-  return config;
+LayerConfig SubOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.type = TYPE_NAME;
+  lcfg.name = name;
+  return lcfg;
 }
 
-std::shared_ptr<SubImpl> SubImpl::create_from_config(const LayerConfig &config) {
-  return std::make_shared<SubImpl>(config.name.empty() ? "sub" : config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

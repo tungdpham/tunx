@@ -41,6 +41,7 @@ struct conv2d_fwd_graph {
     const int64 s = static_cast<int64>(stats.kernel_w);
 
     auto io_type = to_fe_data_type(type_desc.io_dtype);
+    auto param_type = to_fe_data_type(type_desc.param_dtype);
     auto compute_type = to_fe_compute_type(type_desc.compute_dtype);
 
     graph = std::make_shared<fe::graph::Graph>();
@@ -51,12 +52,14 @@ struct conv2d_fwd_graph {
     x = graph->tensor(fe::graph::Tensor_attributes()
                           .set_name("X")
                           .set_dim({n, c, h, w_dim})
-                          .set_stride({h * w_dim * c, 1, w_dim * c, c}));
+                          .set_stride({h * w_dim * c, 1, w_dim * c, c})
+                          .set_data_type(io_type));
 
     w = graph->tensor(fe::graph::Tensor_attributes()
                           .set_name("W")
                           .set_dim({k, c, r, s})
-                          .set_stride({r * s * c, 1, s * c, c}));
+                          .set_stride({r * s * c, 1, s * c, c})
+                          .set_data_type(param_type));
 
     auto conv_options =
         fe::graph::Conv_fprop_attributes()
@@ -116,6 +119,7 @@ struct conv2d_dgrad_graph {
     const int64 q = static_cast<int64>(output_w);
 
     auto io_type = to_fe_data_type(type_desc.io_dtype);
+    auto param_type = to_fe_data_type(type_desc.param_dtype);
     auto compute_type = to_fe_compute_type(type_desc.compute_dtype);
 
     graph = std::make_shared<fe::graph::Graph>();
@@ -126,12 +130,14 @@ struct conv2d_dgrad_graph {
     dy = graph->tensor(fe::graph::Tensor_attributes()
                            .set_name("DY")
                            .set_dim({n, k, p, q})
-                           .set_stride({p * q * k, 1, q * k, k}));
+                           .set_stride({p * q * k, 1, q * k, k})
+                           .set_data_type(io_type));
 
     w = graph->tensor(fe::graph::Tensor_attributes()
                           .set_name("W")
                           .set_dim({k, c, r, s})
-                          .set_stride({r * s * c, 1, s * c, c}));
+                          .set_stride({r * s * c, 1, s * c, c})
+                          .set_data_type(param_type));
 
     auto dgrad_options =
         fe::graph::Conv_dgrad_attributes()
@@ -192,12 +198,14 @@ struct conv2d_wgrad_graph {
     x = graph->tensor(fe::graph::Tensor_attributes()
                           .set_name("X")
                           .set_dim({n, c, h, w_dim})
-                          .set_stride({h * w_dim * c, 1, w_dim * c, c}));
+                          .set_stride({h * w_dim * c, 1, w_dim * c, c})
+                          .set_data_type(io_type));
 
     dy = graph->tensor(fe::graph::Tensor_attributes()
                            .set_name("DY")
                            .set_dim({n, k, p, q})
-                           .set_stride({p * q * k, 1, q * k, k}));
+                           .set_stride({p * q * k, 1, q * k, k})
+                           .set_data_type(io_type));
 
     auto wgrad_options =
         fe::graph::Conv_wgrad_attributes()
@@ -225,56 +233,7 @@ struct conv2d_wgrad_graph {
   }
 };
 
-struct conv2d_bgrad_graph {
-  std::shared_ptr<fe::graph::Graph> graph;
-  std::shared_ptr<fe::graph::Tensor_attributes> dy;
-  std::shared_ptr<fe::graph::Tensor_attributes> db;
-
-  size_t workspace_size;
-
-  conv2d_bgrad_graph(cudnnHandle_t handle, const Conv2DStats& stats, DTypeDesc& type_desc) {
-    const int64 n = static_cast<int64>(stats.batch_size);
-    const int64 k = static_cast<int64>(stats.out_channels);
-    const int64 output_h = (stats.input_h + stats.pad_h * 2 - stats.kernel_h) / stats.stride_h + 1;
-    const int64 output_w = (stats.input_w + stats.pad_w * 2 - stats.kernel_w) / stats.stride_w + 1;
-    const int64 p = static_cast<int64>(output_h);
-    const int64 q = static_cast<int64>(output_w);
-
-    auto io_type = to_fe_data_type(type_desc.io_dtype);
-    auto param_type = to_fe_data_type(type_desc.param_dtype);
-    auto compute_type = to_fe_compute_type(type_desc.compute_dtype);
-
-    graph = std::make_shared<fe::graph::Graph>();
-    graph->set_io_data_type(io_type)
-        .set_intermediate_data_type(compute_type)
-        .set_compute_data_type(compute_type);
-
-    dy = graph->tensor(fe::graph::Tensor_attributes()
-                           .set_name("DY")
-                           .set_dim({n, k, p, q})
-                           .set_stride({p * q * k, 1, q * k, k}));
-
-    auto reduction_options = fe::graph::Reduction_attributes().set_mode(fe::ReductionMode_t::ADD);
-
-    db = graph->reduction(dy, reduction_options);
-    db->set_output(true)
-        .set_dim({1, k, 1, 1})
-        .set_stride({k, 1, k, k})
-        .set_data_type(param_type)
-        .set_name("DB");
-
-    ensure_ok(graph->validate(), "grad_bias validate");
-    ensure_ok(graph->build_operation_graph(handle), "grad_bias build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
-              "grad_bias create plans");
-    ensure_ok(graph->check_support(), "grad_bias check support");
-    ensure_ok(graph->build_plans(), "grad_bias build plans");
-
-    int64 ws = 0;
-    ensure_ok(graph->get_workspace_size(ws), "grad_bias workspace");
-    workspace_size = (static_cast<size_t>(ws) + 255) & ~static_cast<size_t>(255);
-  }
-};
+// bgrad_reduce_accumulate_kernel delegated to cuda_engine_
 
 WorkspaceReq CuDNNEngine::query_conv2d_graph(engine_handle backend_handle, const Conv2DStats& stats,
                                              DTypeDesc type_desc) {
@@ -339,34 +298,11 @@ WorkspaceReq CuDNNEngine::query_conv2d_graph(engine_handle backend_handle, const
   auto& wgrad_graph = std::any_cast<conv2d_wgrad_graph&>(it_wgrad->second);
   size_t wgrad_temp_size = stats.out_channels * stats.in_channels * stats.kernel_h *
                            stats.kernel_w * get_dtype_size(type_desc.param_dtype);
+  wgrad_temp_size = (wgrad_temp_size + 255) & ~static_cast<size_t>(255);
 
   size_t fwd_ws = fwd_graph.workspace_size;
   size_t bwd_ws =
       std::max(dgrad_graph.workspace_size, wgrad_graph.workspace_size + wgrad_temp_size);
-
-  if (stats.use_bias) {
-    GraphCacheKey bgrad_key{
-        .op_type = OpType::CONV2D_BGRAD,
-        .dtype_desc = type_desc,
-        .dims = {stats.batch_size, stats.in_channels, stats.out_channels, stats.input_h,
-                 stats.input_w},
-        .attributes = {{"kernel_h", stats.kernel_h},
-                       {"kernel_w", stats.kernel_w},
-                       {"stride_h", stats.stride_h},
-                       {"stride_w", stats.stride_w},
-                       {"pad_h", stats.pad_h},
-                       {"pad_w", stats.pad_w},
-                       {"use_bias", stats.use_bias}},
-    };
-    auto it_bgrad = graph_cache_.find(bgrad_key);
-    if (it_bgrad == graph_cache_.end()) {
-      it_bgrad =
-          graph_cache_.emplace(bgrad_key, conv2d_bgrad_graph(handle, stats, type_desc)).first;
-    }
-    auto& bgrad_graph = std::any_cast<conv2d_bgrad_graph&>(it_bgrad->second);
-    size_t bgrad_temp_size = stats.out_channels * get_dtype_size(type_desc.param_dtype);
-    bwd_ws = std::max(bwd_ws, bgrad_graph.workspace_size + bgrad_temp_size);
-  }
 
   return {fwd_ws, bwd_ws, fwd_ws};
 }
@@ -484,43 +420,7 @@ void CuDNNEngine::conv2d_wgrad(engine_handle backend_handle, const Conv2DStats& 
 void CuDNNEngine::conv2d_bgrad(engine_handle backend_handle, const Conv2DStats& stats,
                                const void* grad_output, void* grad_bias, void* workspace,
                                DTypeDesc type_desc) {
-  size_t grad_bias_temp_size = stats.out_channels * get_dtype_size(type_desc.param_dtype);
-  void* grad_bias_temp = workspace;
-  workspace = static_cast<char*>(workspace) + grad_bias_temp_size;
-
-  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
-  GraphCacheKey key{
-      .op_type = OpType::CONV2D_BGRAD,
-      .dtype_desc = type_desc,
-      .dims = {stats.batch_size, stats.in_channels, stats.out_channels, stats.input_h,
-               stats.input_w},
-      .attributes = {{"kernel_h", stats.kernel_h},
-                     {"kernel_w", stats.kernel_w},
-                     {"stride_h", stats.stride_h},
-                     {"stride_w", stats.stride_w},
-                     {"pad_h", stats.pad_h},
-                     {"pad_w", stats.pad_w},
-                     {"use_bias", stats.use_bias}},
-  };
-  auto it = graph_cache_.find(key);
-  if (it == graph_cache_.end()) {
-    throw std::runtime_error("cuDNN Graph not found for conv2d bgrad.");
-  }
-  auto& graph_struct = std::any_cast<conv2d_bgrad_graph&>(it->second);
-  std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = {
-      {graph_struct.dy, const_cast<void*>(grad_output)},
-      {graph_struct.db, grad_bias_temp},
-  };
-
-  cudaStream_t stream;
-  cudnnGetStream(handle, &stream);
-
-  auto status = graph_struct.graph->execute(handle, variant_pack, workspace);
-  ensure_ok(status, "conv2d bgrad execute");
-
-  size_t num_elements = stats.out_channels;
-
-  cuda::axpy(grad_bias_temp, grad_bias, num_elements, type_desc.param_dtype, stream);
+  cuda_engine_.conv2d_bgrad(backend_handle, stats, grad_output, grad_bias, workspace, type_desc);
 }
 
 }  // namespace tunx

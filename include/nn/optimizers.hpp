@@ -26,16 +26,17 @@ public:
   // will dispatch the work on the graph's current stream
   void zero_grads();
 
-  void set_learning_rate(float lr) { learning_rate_ = lr; }
-  float get_learning_rate() const { return learning_rate_; }
+  void set_lr(float lr) { learning_rate_ = lr; }
+  float get_lr() const { return learning_rate_; }
 
   virtual std::string name() const = 0;
   virtual OptimizerConfig get_config() const = 0;
   virtual std::unique_ptr<Optimizer> clone() const = 0;
+  virtual Vec<Tensor> states() const = 0;
 
 protected:
   float learning_rate_;
-  Graph *graph_{nullptr};
+  Graph *graph_;
   Vec<Param> params_;
 
   virtual void on_attach() {}
@@ -56,6 +57,8 @@ public:
   std::unique_ptr<Optimizer> clone() const override {
     return std::make_unique<SGD>(this->learning_rate_, momentum_);
   }
+
+  Vec<Tensor> states() const override { return velocities_; }
 
 protected:
   void on_attach() override;
@@ -88,6 +91,12 @@ public:
   std::unique_ptr<Optimizer> clone() const override {
     return std::make_unique<Adam>(this->learning_rate_, beta1_, beta2_, epsilon_, weight_decay_,
                                   decouple_weight_decay_);
+  }
+
+  Vec<Tensor> states() const override {
+    Vec<Tensor> states = m_;
+    states.insert(states.end(), v_.begin(), v_.end());
+    return states;
   }
 
 protected:

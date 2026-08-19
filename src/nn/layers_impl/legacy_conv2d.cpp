@@ -6,238 +6,214 @@
  */
 #include "nn/layers_impl/legacy_conv2d.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <iostream>
-#include <memory>
 #include <stdexcept>
-#include <string>
 
-#include "nn/engines/iengine.hpp"
 #include "tensor/ops.hpp"
+#include "tensor/tensor.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
-namespace internal {
 
-LegacyConv2DImpl::LegacyConv2DImpl(size_t in_channels, size_t out_channels, size_t kernel_h,
-                                   size_t kernel_w, size_t stride_h, size_t stride_w, size_t pad_h,
-                                   size_t pad_w, bool use_bias, const std::string &name)
-    : SISOLayerImpl(name),
-      in_channels_(in_channels),
-      out_channels_(out_channels),
-      kernel_h_(kernel_h),
-      kernel_w_(kernel_w),
-      stride_h_(stride_h),
-      stride_w_(stride_w),
-      pad_h_(pad_h),
-      pad_w_(pad_w),
-      use_bias_(use_bias) {}
-
-LegacyConv2DImpl::~LegacyConv2DImpl() {}
-
-void LegacyConv2DImpl::init_impl() {
-  float stddev = static_cast<float>(
-      1.0 / std::sqrt(static_cast<double>(in_channels_ * kernel_h_ * kernel_w_)));
-
-  long long seed = this->use_seed_ ? this->srand_seed_
-                                   : std::chrono::system_clock::now().time_since_epoch().count();
-
-  fill_normal(weights_, 0, stddev, seed);
-
-  if (use_bias_) {
-    fill_normal(bias_, 0, stddev, seed);
+Vec<Vec<size_t>> LegacyConv2DOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                               const Config &config) {
+  if (input_shapes.size() != 1 || input_shapes[0].size() != 4) {
+    throw std::invalid_argument("LegacyConv2DOp expects 4D input including batch size");
   }
 
-  fill(grad_weights_, 0.0f);
-  if (use_bias_) {
-    fill(grad_bias_, 0.0f);
-  }
+  size_t batch_size = input_shapes[0][0];
+  size_t output_h = (input_shapes[0][2] + 2 * config.pad_h - config.kernel_h) / config.stride_h + 1;
+  size_t output_w = (input_shapes[0][3] + 2 * config.pad_w - config.kernel_w) / config.stride_w + 1;
+
+  return {{batch_size, config.out_channels, output_h, output_w}};
 }
 
-/**
- * @brief Perform convolution 2d forward on input and save it to output.
- * ! Support both CPU and CUDA devices but only NCHW data format.
- * @tparam T I/O data type
- * @param input input tensor in NCHW format
- * @param output input tensor in NCHW format
- * @param residuals micro batch id for caching input
- */
-
-Tensor LegacyConv2DImpl::forward_impl(const Tensor &input, Residuals &residuals) {
+Tensor LegacyConv2DOp::forward(OpContext &ctx, const Tensor &input, const Param &weights,
+                               const Param &bias, const Config &config) {
   if (input.dims() != 4) {
     throw std::invalid_argument("Conv2D: Input tensor must be 4-dimensional (NCHW)");
   }
 
   size_t channels = input.dim(1);
-
-  if (channels != in_channels_) {
-    std::cerr << "Input shape: " << channels << " channels, expected: " << in_channels_
+  if (channels != config.in_channels) {
+    std::cerr << "Input shape: " << channels << " channels, expected: " << config.in_channels
               << " channels" << std::endl;
-    throw std::invalid_argument("Input channel size mismatch in LegacyConv2DImpl");
+    throw std::invalid_argument("Input channel size mismatch in LegacyConv2DOp");
   }
 
-  return def_forward(input, residuals);
-}
-
-Tensor LegacyConv2DImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
-  if (grad_output.dims() != 4) {
-    throw std::invalid_argument("Conv2D: Input tensor must be 4-dimensional (NCHW)");
-  }
-
-  size_t channels = grad_output.dim(1);
-
-  if (channels != out_channels_) {
-    std::cerr << "Input shape: " << channels << " channels, expected: " << out_channels_
-              << " channels" << std::endl;
-    throw std::invalid_argument("Gradient channel size mismatch in LegacyConv2DImpl");
-  }
-
-  return def_backward(grad_output, residuals);
-}
-
-Tensor LegacyConv2DImpl::def_forward(const Tensor &input, Residuals &residuals) {
-  if (input.dims() != 4) {
-    throw std::invalid_argument("Conv2D: Input tensor must be 4-dimensional (NCHW)");
-  }
   size_t batch_size = input.dim(0);
   size_t input_h = input.dim(2);
   size_t input_w = input.dim(3);
 
-  size_t output_h = (input_h + 2 * pad_h_ - kernel_h_) / stride_h_ + 1;
-  size_t output_w = (input_w + 2 * pad_w_ - kernel_w_) / stride_w_ + 1;
+  size_t output_h = (input_h + 2 * config.pad_h - config.kernel_h) / config.stride_h + 1;
+  size_t output_w = (input_w + 2 * config.pad_w - config.kernel_w) / config.stride_w + 1;
 
-  Tensor output = make_tensor({batch_size, out_channels_, output_h, output_w}, input.dtype());
+  Tensor output =
+      ctx.make_tensor({batch_size, config.out_channels, output_h, output_w}, input.dtype());
 
-  size_t kernel_size = in_channels_ * kernel_h_ * kernel_w_;
+  size_t kernel_size = config.in_channels * config.kernel_h * config.kernel_w;
   size_t output_size = batch_size * output_h * output_w;
   size_t col_matrix_size = kernel_size * output_size;
 
-  Tensor col_buffer = make_tensor({col_matrix_size}, io_dtype_);
-  residuals["col_buffer"] = col_buffer;
+  Tensor col_buffer = ctx.make_tensor({col_matrix_size}, ctx.io_dtype);
+  if (ctx.is_training) {
+    ctx.residuals["col_buffer"] = col_buffer;
+  }
 
-  size_t output_buffer_size = out_channels_ * output_size;
-  Tensor temp_output_buffer = make_tensor({output_buffer_size}, io_dtype_);
+  size_t output_buffer_size = config.out_channels * output_size;
+  Tensor temp_output_buffer = ctx.make_tensor({output_buffer_size}, ctx.io_dtype);
 
-  im2col(input, col_buffer, kernel_h_, kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_,
-         engine_handle_.get_stream());
+  im2col(input, col_buffer, config.kernel_h, config.kernel_w, config.stride_h, config.stride_w,
+         config.pad_h, config.pad_w, ctx.handle.get_stream());
 
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  engine_->legacy_conv2d_fwd(engine_handle_, col_buffer.data_as<void>(), weights_.data_as<void>(),
-                             temp_output_buffer.data_as<void>(), output_size, kernel_size,
-                             out_channels_, type_desc);
+  ctx.engine->legacy_conv2d_fwd(ctx.handle, col_buffer.data_as<void>(), weights.data_as<void>(),
+                                temp_output_buffer.data_as<void>(), output_size, kernel_size,
+                                config.out_channels, type_desc);
 
-  cnhw_to_nchw(temp_output_buffer, output, batch_size, out_channels_, output_h, output_w,
-               engine_handle_.get_stream());
+  cnhw_to_nchw(temp_output_buffer, output, batch_size, config.out_channels, output_h, output_w,
+               ctx.handle.get_stream());
 
-  if (use_bias_) {
-    engine_->legacy_conv2d_add_bias(engine_handle_, output.data_as<void>(), bias_.data_as<void>(),
-                                    batch_size, output_h, output_w, out_channels_, type_desc);
+  if (config.use_bias) {
+    ctx.engine->legacy_conv2d_add_bias(ctx.handle, output.data_as<void>(), bias.data_as<void>(),
+                                       batch_size, output_h, output_w, config.out_channels,
+                                       type_desc);
   }
 
   return output;
 }
 
-Tensor LegacyConv2DImpl::def_backward(const Tensor &grad_output, Residuals &residuals) {
+Tensor LegacyConv2DOp::backward(OpContext &ctx, const Tensor &grad_output, Param &weights,
+                                Param &bias, const Config &config) {
+  if (grad_output.dims() != 4) {
+    throw std::invalid_argument("Conv2D: Input tensor must be 4-dimensional (NCHW)");
+  }
+  size_t channels = grad_output.dim(1);
+  if (channels != config.out_channels) {
+    std::cerr << "Input shape: " << channels << " channels, expected: " << config.out_channels
+              << " channels" << std::endl;
+    throw std::invalid_argument("Gradient channel size mismatch in LegacyConv2DOp");
+  }
+
   const Vec<size_t> &output_shape = grad_output.shape();
   size_t batch_size = output_shape[0];
-  size_t channels = output_shape[1];
   size_t output_h = output_shape[2];
   size_t output_w = output_shape[3];
-  size_t input_h = (output_h - 1) * stride_h_ + kernel_h_ - 2 * pad_h_;
-  size_t input_w = (output_w - 1) * stride_w_ + kernel_w_ - 2 * pad_w_;
+  size_t input_h = (output_h - 1) * config.stride_h + config.kernel_h - 2 * config.pad_h;
+  size_t input_w = (output_w - 1) * config.stride_w + config.kernel_w - 2 * config.pad_w;
 
-  Tensor grad_input = make_tensor({batch_size, channels, input_h, input_w}, io_dtype_);
+  Tensor grad_input =
+      ctx.make_tensor({batch_size, config.in_channels, input_h, input_w}, ctx.io_dtype);
   fill(grad_input, 0.0f);  // col2im accumulates, so we need to zero first
 
-  Tensor col_buffer = residuals["col_buffer"];
+  Tensor col_buffer = ctx.residuals["col_buffer"];
 
-  size_t kernel_size = in_channels_ * kernel_h_ * kernel_w_;
+  size_t kernel_size = config.in_channels * config.kernel_h * config.kernel_w;
   size_t output_size = batch_size * output_h * output_w;
   size_t col_grad_matrix_size = kernel_size * output_size;
 
-  size_t gradient_buffer_size = out_channels_ * output_size;
-  Tensor temp_gradient_buffer = make_tensor({gradient_buffer_size}, io_dtype_);
-  Tensor temp_col_grad_matrix_buffer = make_tensor({col_grad_matrix_size}, io_dtype_);
+  size_t gradient_buffer_size = config.out_channels * output_size;
+  Tensor temp_gradient_buffer = ctx.make_tensor({gradient_buffer_size}, ctx.io_dtype);
+  Tensor temp_col_grad_matrix_buffer = ctx.make_tensor({col_grad_matrix_size}, ctx.io_dtype);
 
-  nchw_to_cnhw(grad_output, temp_gradient_buffer, batch_size, out_channels_, output_h, output_w,
-               engine_handle_.get_stream());
+  nchw_to_cnhw(grad_output, temp_gradient_buffer, batch_size, config.out_channels, output_h,
+               output_w, ctx.handle.get_stream());
 
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  engine_->legacy_conv2d_wgrad(engine_handle_, col_buffer.data_as<void>(),
-                               temp_gradient_buffer.data_as<void>(), grad_weights_.data_as<void>(),
-                               output_size, kernel_size, out_channels_, type_desc);
+  ctx.engine->legacy_conv2d_wgrad(ctx.handle, col_buffer.data_as<void>(),
+                                  temp_gradient_buffer.data_as<void>(), weights.grad_as<void>(),
+                                  output_size, kernel_size, config.out_channels, type_desc);
 
-  engine_->legacy_conv2d_dgrad(engine_handle_, temp_gradient_buffer.data_as<void>(),
-                               weights_.data_as<void>(),
-                               temp_col_grad_matrix_buffer.data_as<void>(), output_size,
-                               kernel_size, out_channels_, type_desc);
+  ctx.engine->legacy_conv2d_dgrad(ctx.handle, temp_gradient_buffer.data_as<void>(),
+                                  weights.data_as<void>(),
+                                  temp_col_grad_matrix_buffer.data_as<void>(), output_size,
+                                  kernel_size, config.out_channels, type_desc);
 
-  col2im(temp_col_grad_matrix_buffer, grad_input, batch_size, in_channels_, input_h, input_w,
-         kernel_h_, kernel_w_, stride_h_, stride_w_, pad_h_, pad_w_, engine_handle_.get_stream());
+  col2im(temp_col_grad_matrix_buffer, grad_input, batch_size, config.in_channels, input_h, input_w,
+         config.kernel_h, config.kernel_w, config.stride_h, config.stride_w, config.pad_h,
+         config.pad_w, ctx.handle.get_stream());
 
-  if (use_bias_) {
-    engine_->legacy_conv2d_bgrad(engine_handle_, grad_output.data_as<void>(),
-                                 grad_bias_.data_as<void>(), batch_size, output_h, output_w,
-                                 out_channels_, type_desc);
+  if (config.use_bias) {
+    ctx.engine->legacy_conv2d_bgrad(ctx.handle, grad_output.data_as<void>(), bias.grad_as<void>(),
+                                    batch_size, output_h, output_w, config.out_channels, type_desc);
   }
 
   return grad_input;
 }
 
-LayerConfig LegacyConv2DImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  config.set("in_channels", in_channels_);
-  config.set("out_channels", out_channels_);
-  config.set("kernel_h", kernel_h_);
-  config.set("kernel_w", kernel_w_);
-  config.set("stride_h", stride_h_);
-  config.set("stride_w", stride_w_);
-  config.set("pad_h", pad_h_);
-  config.set("pad_w", pad_w_);
-  config.set("use_bias", use_bias_);
-  return config;
+LayerConfig LegacyConv2DOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.name = name;
+  lcfg.type = TYPE_NAME;
+  lcfg.set("in_channels", config.in_channels);
+  lcfg.set("out_channels", config.out_channels);
+  lcfg.set("kernel_h", config.kernel_h);
+  lcfg.set("kernel_w", config.kernel_w);
+  lcfg.set("stride_h", config.stride_h);
+  lcfg.set("stride_w", config.stride_w);
+  lcfg.set("pad_h", config.pad_h);
+  lcfg.set("pad_w", config.pad_w);
+  lcfg.set("use_bias", config.use_bias);
+  return lcfg;
 }
 
-Vec<size_t> LegacyConv2DImpl::compute_output_shape(const Vec<size_t> &input_shape) const {
-  if (input_shape.size() != 4) {
-    throw std::invalid_argument("LegacyConv2DImpl expects 4D input including batch size");
+LegacyConv2DOp::Config LegacyConv2DOp::parse_config(const LayerConfig &config) {
+  Config c;
+  c.in_channels = config.get<size_t>("in_channels");
+  c.out_channels = config.get<size_t>("out_channels");
+  c.kernel_h = config.get<size_t>("kernel_h");
+  c.kernel_w = config.get<size_t>("kernel_w");
+  c.stride_h = config.get<size_t>("stride_h", 1);
+  c.stride_w = config.get<size_t>("stride_w", 1);
+  c.pad_h = config.get<size_t>("pad_h", 0);
+  c.pad_w = config.get<size_t>("pad_w", 0);
+  c.use_bias = config.get<bool>("use_bias", true);
+  return c;
+}
+
+LegacyConv2D::LegacyConv2D(size_t in_channels, size_t out_channels, size_t kernel_h,
+                           size_t kernel_w, size_t stride_h, size_t stride_w, size_t pad_h,
+                           size_t pad_w, bool use_bias, const std::string &name)
+    : FunctionalLayer(LegacyConv2DOp::Config{in_channels, out_channels, kernel_h, kernel_w,
+                                             stride_h, stride_w, pad_h, pad_w, use_bias},
+                      name) {
+  impl_->register_param(
+      "weights", {in_channels, out_channels, kernel_h, kernel_w},
+      [in_channels, kernel_h, kernel_w](Param &p, OpContext &ctx) {
+        float stddev = static_cast<float>(
+            1.0 / std::sqrt(static_cast<double>(in_channels * kernel_h * kernel_w)));
+        long long seed = ctx.use_seed ? ctx.srand_seed
+                                      : std::chrono::system_clock::now().time_since_epoch().count();
+        fill_normal(p.data(), 0, stddev, seed);
+      });
+
+  if (use_bias) {
+    impl_->register_param(
+        "bias", {out_channels}, [in_channels, kernel_h, kernel_w](Param &p, OpContext &ctx) {
+          float stddev = static_cast<float>(
+              1.0 / std::sqrt(static_cast<double>(in_channels * kernel_h * kernel_w)));
+          long long seed = ctx.use_seed
+                               ? ctx.srand_seed
+                               : std::chrono::system_clock::now().time_since_epoch().count();
+          fill_normal(p.data(), 0, stddev, seed);
+        });
+  } else {
+    impl_->register_param("bias_dummy", {0}, nullptr);
   }
-
-  size_t batch_size = input_shape[0];
-
-  size_t output_h = (input_shape[2] + 2 * pad_h_ - kernel_h_) / stride_h_ + 1;
-  size_t output_w = (input_shape[3] + 2 * pad_w_ - kernel_w_) / stride_w_ + 1;
-
-  return {batch_size, out_channels_, output_h, output_w};
 }
 
-std::shared_ptr<LegacyConv2DImpl> LegacyConv2DImpl::create_from_config(const LayerConfig &config) {
-  size_t in_channels = config.get<size_t>("in_channels");
-  size_t out_channels = config.get<size_t>("out_channels");
-  size_t kernel_h = config.get<size_t>("kernel_h");
-  size_t kernel_w = config.get<size_t>("kernel_w");
-  size_t stride_h = config.get<size_t>("stride_h", 1);
-  size_t stride_w = config.get<size_t>("stride_w", 1);
-  size_t pad_h = config.get<size_t>("pad_h", 0);
-  size_t pad_w = config.get<size_t>("pad_w", 0);
-  bool use_bias = config.get<bool>("use_bias", true);
-  return std::make_shared<LegacyConv2DImpl>(in_channels, out_channels, kernel_h, kernel_w, stride_h,
-                                            stride_w, pad_h, pad_w, use_bias, config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

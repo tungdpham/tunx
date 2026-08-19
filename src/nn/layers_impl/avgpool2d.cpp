@@ -8,34 +8,31 @@
 
 #include <stdexcept>
 
-#include "nn/engines/iengine.hpp"
 #include "tensor/ops.hpp"
-#include "tensor/tensor.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
-namespace internal {
 
-AvgPool2DImpl::AvgPool2DImpl(size_t pool_h, size_t pool_w, size_t stride_h, size_t stride_w,
-                             size_t pad_h, size_t pad_w, const std::string &name)
-    : SISOLayerImpl(name),
-      pool_h_(pool_h),
-      pool_w_(pool_w),
-      stride_h_(stride_h == 0 ? pool_h : stride_h),
-      stride_w_(stride_w == 0 ? pool_w : stride_w),
-      pad_h_(pad_h),
-      pad_w_(pad_w) {
-  if (pool_h_ == 0 || pool_w_ == 0) {
-    throw std::invalid_argument("Pool dimensions must be positive");
+Vec<Vec<size_t>> AvgPool2DOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
+                                            const Config &config) {
+  if (input_shapes.size() != 1 || input_shapes[0].size() != 4) {
+    throw std::runtime_error("AvgPool2DOp: input shape must be 4D (NHWC format)");
   }
-  if (stride_h_ == 0 || stride_w_ == 0) {
-    throw std::invalid_argument("Stride dimensions must be positive");
-  }
+  const auto &shape = input_shapes[0];
+  size_t batch_size = shape[0];
+  size_t padded_h = shape[1] + 2 * config.pad_h;
+  size_t padded_w = shape[2] + 2 * config.pad_w;
+  size_t channels = shape[3];
+
+  size_t output_h = (padded_h - config.pool_h) / config.stride_h + 1;
+  size_t output_w = (padded_w - config.pool_w) / config.stride_w + 1;
+
+  return {{batch_size, output_h, output_w, channels}};
 }
 
-Tensor AvgPool2DImpl::forward_impl(const Tensor &input, Residuals &residuals) {
+Tensor AvgPool2DOp::forward(OpContext &ctx, const Tensor &input, const Config &config) {
   if (input.dims() != 4) {
-    throw std::runtime_error("AvgPool2DImpl: input must be 4D (NHWC format)");
+    throw std::runtime_error("AvgPool2DOp: input must be 4D (NHWC format)");
   }
 
   const auto &shape = input.shape();
@@ -44,121 +41,106 @@ Tensor AvgPool2DImpl::forward_impl(const Tensor &input, Residuals &residuals) {
   size_t input_w = shape[2];
   size_t channels = shape[3];
 
-  size_t output_h = (input_h + 2 * pad_h_ - pool_h_) / stride_h_ + 1;
-  size_t output_w = (input_w + 2 * pad_w_ - pool_w_) / stride_w_ + 1;
+  size_t output_h = (input_h + 2 * config.pad_h - config.pool_h) / config.stride_h + 1;
+  size_t output_w = (input_w + 2 * config.pad_w - config.pool_w) / config.stride_w + 1;
 
   AvgPool2DStats stats{.batch_size = batch_size,
                        .height = input_h,
                        .width = input_w,
                        .channels = channels,
-                       .pool_h = pool_h_,
-                       .pool_w = pool_w_,
-                       .stride_h = stride_h_,
-                       .stride_w = stride_w_,
-                       .pad_h = pad_h_,
-                       .pad_w = pad_w_};
+                       .pool_h = config.pool_h,
+                       .pool_w = config.pool_w,
+                       .stride_h = config.stride_h,
+                       .stride_w = config.stride_w,
+                       .pad_h = config.pad_h,
+                       .pad_w = config.pad_w};
 
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  WorkspaceReq ws_req = engine_->query_avgpool_graph(engine_handle_, stats, type_desc);
+  WorkspaceReq ws_req = ctx.engine->query_avgpool_graph(ctx.handle, stats, type_desc);
 
-  Tensor output = make_tensor({batch_size, output_h, output_w, channels}, input.dtype());
-  size_t ws_size = is_training_ ? ws_req.fwd_workspace : ws_req.inf_workspace;
-  Tensor ws = make_tensor({ws_size}, DType_t::BYTE);
+  Tensor output = ctx.make_tensor({batch_size, output_h, output_w, channels}, input.dtype());
+  size_t ws_size = ctx.is_training ? ws_req.fwd_workspace : ws_req.inf_workspace;
+  Tensor ws = ctx.make_tensor({ws_size}, DType_t::BYTE);
 
-  engine_->avgpool_fwd(engine_handle_, stats, input.data_as<void>(), output.data_as<void>(),
-                       ws.data_as<void>(), type_desc);
+  if (ctx.is_training) {
+    ctx.residuals["input_shape"] = input.shape();
+  }
 
+  ctx.engine->avgpool_fwd(ctx.handle, stats, input.data_as<void>(), output.data_as<void>(),
+                          ws.data_as<void>(), type_desc);
   return output;
 }
 
-Tensor AvgPool2DImpl::backward_impl(const Tensor &grad_output, Residuals &residuals) {
+Tensor AvgPool2DOp::backward(OpContext &ctx, const Tensor &grad_output, const Config &config) {
   if (grad_output.dims() != 4) {
-    throw std::runtime_error("AvgPool2DImpl: grad_output must be 4D (NHWC format)");
+    throw std::runtime_error("AvgPool2DOp: grad_output must be 4D (NHWC format)");
   }
 
   const auto &grad_shape = grad_output.shape();
   size_t batch_size = grad_shape[0];
-  size_t output_h = grad_shape[1];
-  size_t output_w = grad_shape[2];
   size_t channels = grad_shape[3];
-  size_t input_h = (output_h - 1) * stride_h_ + pool_h_ - 2 * pad_h_;
-  size_t input_w = (output_w - 1) * stride_w_ + pool_w_ - 2 * pad_w_;
+
+  Vec<size_t> &input_shape = ctx.residuals["input_shape"];
+  size_t input_h = input_shape[1];
+  size_t input_w = input_shape[2];
 
   AvgPool2DStats stats{.batch_size = batch_size,
                        .height = input_h,
                        .width = input_w,
                        .channels = channels,
-                       .pool_h = pool_h_,
-                       .pool_w = pool_w_,
-                       .stride_h = stride_h_,
-                       .stride_w = stride_w_,
-                       .pad_h = pad_h_,
-                       .pad_w = pad_w_};
+                       .pool_h = config.pool_h,
+                       .pool_w = config.pool_w,
+                       .stride_h = config.stride_h,
+                       .stride_w = config.stride_w,
+                       .pad_h = config.pad_h,
+                       .pad_w = config.pad_w};
 
   DTypeDesc type_desc{
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = ctx.io_dtype,
+      .param_dtype = ctx.param_dtype,
+      .compute_dtype = ctx.compute_dtype,
   };
 
-  Tensor grad_input = make_tensor({batch_size, input_h, input_w, channels}, grad_output.dtype());
-  fill(grad_input, 0.0f);
+  Tensor grad_input =
+      ctx.make_tensor({batch_size, input_h, input_w, channels}, grad_output.dtype());
+  fill(grad_input, 0.0f, ctx.handle.get_stream());
 
-  WorkspaceReq ws_req = engine_->query_avgpool_graph(engine_handle_, stats, type_desc);
-  Tensor ws = make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
+  WorkspaceReq ws_req = ctx.engine->query_avgpool_graph(ctx.handle, stats, type_desc);
+  Tensor ws = ctx.make_tensor({ws_req.bwd_workspace}, DType_t::BYTE);
 
-  engine_->avgpool_bwd(engine_handle_, stats, grad_output.data_as<void>(),
-                       grad_input.data_as<void>(), ws.data_as<void>(), type_desc);
+  ctx.engine->avgpool_bwd(ctx.handle, stats, grad_output.data_as<void>(),
+                          grad_input.data_as<void>(), ws.data_as<void>(), type_desc);
 
   return grad_input;
 }
 
-LayerConfig AvgPool2DImpl::get_config() const {
-  LayerConfig config;
-  config.name = this->name_;
-  config.type = this->type();
-  config.set("pool_h", pool_h_);
-  config.set("pool_w", pool_w_);
-  config.set("stride_h", stride_h_);
-  config.set("stride_w", stride_w_);
-  config.set("pad_h", pad_h_);
-  config.set("pad_w", pad_w_);
-  return config;
+LayerConfig AvgPool2DOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.name = name;
+  lcfg.type = TYPE_NAME;
+  lcfg.set("pool_h", config.pool_h);
+  lcfg.set("pool_w", config.pool_w);
+  lcfg.set("stride_h", config.stride_h);
+  lcfg.set("stride_w", config.stride_w);
+  lcfg.set("pad_h", config.pad_h);
+  lcfg.set("pad_w", config.pad_w);
+  return lcfg;
 }
 
-Vec<size_t> AvgPool2DImpl::compute_output_shape(const Vec<size_t> &input_shape) const {
-  if (input_shape.size() != 4) {
-    throw std::invalid_argument("AvgPool2DImpl: input shape must be 4D (NHWC format)");
-  }
-
-  // Check for underflow in the calculation
-  size_t batch_size = input_shape[0];
-  size_t padded_h = input_shape[1] + 2 * pad_h_;
-  size_t padded_w = input_shape[2] + 2 * pad_w_;
-  size_t channels = input_shape[3];
-
-  size_t output_h = (padded_h - pool_h_) / stride_h_ + 1;
-  size_t output_w = (padded_w - pool_w_) / stride_w_ + 1;
-
-  return {batch_size, output_h, output_w, channels};
+AvgPool2DOp::Config AvgPool2DOp::parse_config(const LayerConfig &config) {
+  Config c;
+  c.pool_h = config.get<size_t>("pool_h");
+  c.pool_w = config.get<size_t>("pool_w");
+  c.stride_h = config.get<size_t>("stride_h");
+  c.stride_w = config.get<size_t>("stride_w");
+  c.pad_h = config.get<size_t>("pad_h");
+  c.pad_w = config.get<size_t>("pad_w");
+  return c;
 }
 
-std::shared_ptr<AvgPool2DImpl> AvgPool2DImpl::create_from_config(const LayerConfig &config) {
-  size_t pool_h = config.get<size_t>("pool_h");
-  size_t pool_w = config.get<size_t>("pool_w");
-  size_t stride_h = config.get<size_t>("stride_h");
-  size_t stride_w = config.get<size_t>("stride_w");
-  size_t pad_h = config.get<size_t>("pad_h");
-  size_t pad_w = config.get<size_t>("pad_w");
-
-  return std::make_shared<AvgPool2DImpl>(pool_h, pool_w, stride_h, stride_w, pad_h, pad_w,
-                                         config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

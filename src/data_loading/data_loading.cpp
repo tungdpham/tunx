@@ -79,7 +79,7 @@ DatasetPair DatasetFactory::create(const std::string &dataset_type, const std::s
     if (val->load_data(dataset_path + "/test.bin")) {
       pair.val = std::move(val);
     }
-  } else if (dataset_type == "tiny_imagenet") {
+  } else if (dataset_type == "tiny-imagenet") {
     auto train = std::make_unique<TinyImageNet>(io_dtype_);
     auto val = std::make_unique<TinyImageNet>(io_dtype_);
 
@@ -123,14 +123,14 @@ DatasetPair DatasetFactory::create(const std::string &dataset_type, const std::s
       pair.val = std::move(val);
     }
   } else if (dataset_type == "open-web-text") {
-    auto train = std::make_unique<OpenWebText>(1024, io_dtype_);
-    auto val = std::make_unique<OpenWebText>(1024, io_dtype_);
+    auto train = std::make_unique<OpenWebText>(1024, DType_t::INT32);
+    auto val = std::make_unique<OpenWebText>(1024, DType_t::INT32);
 
-    if (train->load_data(dataset_path + "/train.bin")) {
+    if (train->load_data(dataset_path)) {
       pair.train = std::move(train);
     }
 
-    if (val->load_data(dataset_path + "/val.bin")) {
+    if (val->load_data(dataset_path)) {
       pair.val = std::move(val);
     }
   } else {

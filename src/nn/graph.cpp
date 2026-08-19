@@ -7,11 +7,13 @@
 
 #include "nn/graph.hpp"
 
+#include <fmt/core.h>
+
 #include <array>
 #include <cstdint>
+#include <fstream>
 #include <istream>
 #include <ostream>
-#include <queue>
 #include <unordered_map>
 
 #include "device/device_type.hpp"
@@ -63,18 +65,15 @@ void Graph::compile(IAllocator &allocator, GraphOpts opts) {
   param_allocator_ = &allocator;
   workspace_allocator_ = DELAllocatorV2::create(allocator.device(), s);
   engine_handle_ = engine_->create_handle(s);
-  io_dtype_ = opts.io_dtype;
-  param_dtype_ = opts.param_dtype;
-  compute_dtype_ = opts.compute_dtype;
 
   InitOptions layer_opts{
       .ws_allocator = workspace_allocator_.get(),
       .engine = engine_,
       .handle = engine_handle_,
       .seed = opts.seed,
-      .io_dtype = io_dtype_,
-      .param_dtype = param_dtype_,
-      .compute_dtype = compute_dtype_,
+      .io_dtype = opts.io_dtype,
+      .param_dtype = opts.param_dtype,
+      .compute_dtype = opts.compute_dtype,
   };
 
   for (LayerImpl *layer_ptr : unique_layers) {
@@ -112,15 +111,19 @@ Vec<std::string> Graph::output_uids() const {
 void Graph::add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producers,
                      const Vec<Node> &consumers) {
   Edge edge = std::make_shared<EdgeImpl>(layer, producers, consumers);
+  std::string uid = edge->layer()->name();
+  if (used_edge_uids_.count(uid) > 0) {
+    uid = generate_edge_uid();
+  } else {
+    used_edge_uids_.insert(uid);
+  }
+  edge->set_uid(uid);
   edges_.push_back(edge);
-  on_add_edge(edge);
 }
 
 void Graph::add_edge(std::shared_ptr<LayerImpl> layer, std::initializer_list<Node> producers,
                      std::initializer_list<Node> consumers) {
-  Edge edge = std::make_shared<EdgeImpl>(layer, producers, consumers);
-  edges_.push_back(edge);
-  on_add_edge(edge);
+  add_edge(layer, Vec<Node>(producers), Vec<Node>(consumers));
 }
 
 void Graph::sort() {
@@ -140,9 +143,10 @@ void Graph::sort() {
   }
 
   std::map<Edge, int> pending;
-  std::queue<Edge> ready;
+  Vec<Edge> ready;
 
-  for (const auto &edge : edges_) {
+  for (auto it = edges_.rbegin(); it != edges_.rend(); ++it) {
+    const auto &edge = *it;
     int count = 0;
     for (const auto &producer : edge->producers()) {
       if (produced_nodes.count(producer)) {
@@ -151,7 +155,7 @@ void Graph::sort() {
     }
     pending[edge] = count;
     if (count == 0) {
-      ready.push(edge);
+      ready.push_back(edge);
     }
   }
 
@@ -159,16 +163,18 @@ void Graph::sort() {
   sorted.reserve(edges_.size());
 
   while (!ready.empty()) {
-    Edge e = ready.front();
-    ready.pop();
+    Edge e = ready.back();
+    ready.pop_back();
     sorted.push_back(e);
 
-    for (const auto &consumer : e->consumers()) {
+    for (auto consumer_it = e->consumers().rbegin(); consumer_it != e->consumers().rend(); ++consumer_it) {
+      const auto &consumer = *consumer_it;
       auto it = node_to_dependent_edges.find(consumer);
       if (it != node_to_dependent_edges.end()) {
-        for (const auto &dep_edge : it->second) {
+        for (auto dep_it = it->second.rbegin(); dep_it != it->second.rend(); ++dep_it) {
+          const auto &dep_edge = *dep_it;
           if (--pending[dep_edge] == 0) {
-            ready.push(dep_edge);
+            ready.push_back(dep_edge);
           }
         }
       }
@@ -202,106 +208,37 @@ void Graph::sort() {
 
   nodes_ = std::move(sorted_nodes);
 }
-TensorBundle Graph::forward(TensorBundle &input_map, size_t pid) {
-  std::map<std::string, Node> uid_to_node;
-  for (const auto &node : nodes_) {
-    uid_to_node[node->uid()] = node;
+
+void Graph::save_dot(const std::string &filename) const {
+  std::ofstream output(filename);
+  if (!output) throw std::runtime_error("Failed to open DOT file: " + filename);
+
+  output << "digraph Graph {\n  rankdir=LR;\n";
+  for (const Node &node : nodes_) {
+    output << "  \"node_" << node->uid() << "\" [shape=ellipse, label=\"" << node->uid()
+           << "\"];\n";
   }
-  for (const auto &[uid, tensor] : input_map) {
-    auto it = uid_to_node.find(uid);
-    if (it == uid_to_node.end()) {
-      throw std::runtime_error("Input UID not found in graph: " + uid);
+  for (size_t index = 0; index < edges_.size(); ++index) {
+    const Edge &edge = edges_[index];
+    output << "  \"edge_" << index << "\" [shape=box, label=\"" << index << ": "
+           << edge->layer()->name() << "\"];\n";
+    for (const Node &producer : edge->producers()) {
+      output << "  \"node_" << producer->uid() << "\" -> \"edge_" << index << "\";\n";
     }
-    auto node = it->second;
-    Tensor device_tensor = tensor;
-    if (tensor.device() != this->device()) {
-      device_tensor = to_device(tensor, device(), engine_handle_.get_stream());
-    }
-    it->second->set_data(pid, device_tensor, out_degree_[node]);
-  }
-
-  size_t hook_id = 0;
-  bool hook_registered = false;
-  size_t edge_peak_usage = workspace_allocator_ ? workspace_allocator_->total_allocated() : 0;
-  if (workspace_allocator_) {
-    hook_id = workspace_allocator_->add_allocation_hook([&edge_peak_usage](size_t current_usage) {
-      edge_peak_usage = std::max(edge_peak_usage, current_usage);  // Hook to track peak memory
-    });
-    hook_registered = true;
-  }
-
-  TensorBundle output_map;
-  for (size_t edge_index = 0; edge_index < edges_.size(); ++edge_index) {
-    size_t usage_before = workspace_allocator_ ? workspace_allocator_->total_allocated() : 0;
-    edge_peak_usage = usage_before;
-    forward_edge(edges_[edge_index], pid);
-
-    for (const auto &consumer : edges_[edge_index]->consumers()) {
-      if (is_output(consumer)) {
-        output_map.set(consumer->uid(), consumer->data(pid));
-      }
+    for (const Node &consumer : edge->consumers()) {
+      output << "  \"edge_" << index << "\" -> \"node_" << consumer->uid() << "\";\n";
     }
   }
-
-  if (hook_registered) {
-    workspace_allocator_->remove_allocation_hook(hook_id);  // Unregister hook
-  }
-
-  // clean up boundary node data
-  for (Node &node : nodes_) {
-    if (node->data_ref_count(pid) == 0) {
-      node->clear_data(pid);
-    }
-  }
-
-  return output_map;
-}
-
-TensorBundle Graph::backward(TensorBundle &output_grad_map, size_t pid) {
-  std::map<std::string, Node> uid_to_node;
-  for (const auto &node : nodes_) {
-    uid_to_node[node->uid()] = node;
-  }
-  for (const auto &[uid, tensor] : output_grad_map) {
-    auto it = uid_to_node.find(uid);
-    if (it == uid_to_node.end()) {
-      throw std::runtime_error("Output UID not found in graph: " + uid);
-    }
-    auto node = it->second;
-    Tensor device_tensor = tensor;
-    if (tensor.device() != this->device()) {
-      // device_tensor = tensor.to_device(this->device());
-      device_tensor = to_device(tensor, device(), engine_handle_.get_stream());
-    }
-    it->second->set_grad(pid, device_tensor, in_degree_[node]);
-  }
-  TensorBundle grad_input_map;
-  for (auto it = edges_.rbegin(); it != edges_.rend(); ++it) {
-    Edge &edge = *it;
-    backward_edge(edge, pid);
-    for (auto &producer : edge->producers()) {
-      if (is_input(producer)) {
-        grad_input_map.set(producer->uid(), producer->grad(pid));
-      }
-    }
-  }
-
-  // clean up boundary node grads
-  for (Node &node : nodes_) {
-    if (node->grad_ref_count(pid) == 0) {
-      node->clear_grad(pid);
-    }
-  }
-  return grad_input_map;
+  output << "}\n";
 }
 
 Node Graph::make_node(std::string uid) {
   if (uid.empty()) {
-    uid = generate_uid();
-  } else if (used_uids_.count(uid) > 0) {
+    uid = generate_node_uid();
+  } else if (used_node_uids_.count(uid) > 0) {
     throw std::runtime_error("Duplicate node UID: " + uid);
   } else {
-    used_uids_.insert(uid);
+    used_node_uids_.insert(uid);
   }
   Node node = std::make_shared<NodeImpl>(this, uid);
   nodes_.push_back(node);
@@ -335,14 +272,19 @@ Node Graph::input(const std::string &uid) {
   return node;
 }
 
-void Graph::zero_grads() {
-  for (const auto &node : nodes_) {
-    node->clear_grads();
-  }
-  for (const auto &edge : edges_) {
-    edge->layer()->zero_grads();
-  }
-}
+Graph::Graph(Graph &&other) noexcept
+    : param_allocator_(other.param_allocator_),
+      workspace_allocator_(std::move(other.workspace_allocator_)),
+      engine_(std::move(other.engine_)),
+      engine_handle_(std::move(other.engine_handle_)),
+      nodes_(std::move(other.nodes_)),
+      edges_(std::move(other.edges_)),
+      input_nodes_(std::move(other.input_nodes_)),
+      output_nodes_(std::move(other.output_nodes_)),
+      mode_(other.mode_),
+      node_count_(other.node_count_),
+      used_node_uids_(std::move(other.used_node_uids_)),
+      used_edge_uids_(std::move(other.used_edge_uids_)) {}
 
 Vec<Param> Graph::params() {
   Vec<Param> params;
@@ -354,82 +296,30 @@ Vec<Param> Graph::params() {
   return params;
 }
 
-int Graph::node_in_degree(const Node &node) const {
-  auto it = in_degree_.find(node);
-  return it == in_degree_.end() ? 0 : it->second;
-}
-
-int Graph::node_out_degree(const Node &node) const {
-  auto it = out_degree_.find(node);
-  return it == out_degree_.end() ? 0 : it->second;
-}
-
-std::string Graph::generate_uid() {
+std::string Graph::generate_node_uid() {
   std::string uid;
   do {
     uid = "node_" + std::to_string(node_count_++);
-  } while (used_uids_.count(uid) > 0);
-  used_uids_.insert(uid);
+  } while (used_node_uids_.count(uid) > 0);
+  used_node_uids_.insert(uid);
   return uid;
 }
 
-Vec<Node> Graph::inputs() { return Vec<Node>(input_nodes_.begin(), input_nodes_.end()); }
-
-Vec<Node> Graph::outputs() { return Vec<Node>(output_nodes_.begin(), output_nodes_.end()); }
-
-void Graph::on_add_edge(const Edge &edge) {
-  for (const auto &producer : edge->producers()) {
-    out_degree_[producer]++;
-  }
-  for (const auto &consumer : edge->consumers()) {
-    in_degree_[consumer]++;
-  }
+std::string Graph::generate_edge_uid() {
+  std::string uid;
+  do {
+    uid = "edge_" + std::to_string(edge_count_++);
+  } while (used_edge_uids_.count(uid) > 0);
+  used_edge_uids_.insert(uid);
+  return uid;
 }
 
-void Graph::forward_edge(Edge &edge, size_t pid) {
-  Vec<Tensor> input_data;
-  for (const auto &producer : edge->producers()) {
-    if (!producer->data(pid)) {
-      throw std::runtime_error("Null input data while forwarding graph");
-    }
-    input_data.push_back(producer->data(pid));
-    producer->decrement_data_ref_count(pid);
-  }
-  Residuals residuals;  // can be used to store intermediate results for reuse within the same
-                        // forward pass
-  Vec<Tensor> output_data = edge->layer()->forward(input_data, residuals);
-
-  edge->set_residuals(pid, std::move(residuals));
-
-  for (size_t i = 0; i < edge->consumers().size(); ++i) {
-    Node consumer = edge->consumers()[i];
-    consumer->set_data(pid, output_data[i], out_degree_[consumer]);
-  }
-}
-
-void Graph::backward_edge(Edge &edge, size_t pid) {
-  Vec<Tensor> output_grads;
-  for (const auto &consumer : edge->consumers()) {
-    if (!consumer->grad(pid)) {
-      throw std::runtime_error("Null output gradient while backwarding graph");
-    }
-    output_grads.push_back(consumer->grad(pid));
-    consumer->decrement_grad_ref_count(pid);
-  }
-  Residuals &residuals = edge->residuals(pid);
-  Vec<Tensor> grad_inputs = edge->layer()->backward(output_grads, residuals);
-
-  edge->clear_residuals(pid);
-  for (size_t i = 0; i < edge->producers().size(); ++i) {
-    Node producer = edge->producers()[i];
-    producer->accumulate_grad(pid, grad_inputs[i], in_degree_[producer]);
-  }
-}
+Graph::~Graph() = default;
 
 namespace {
 
-constexpr std::array<char, 4> kGraphStateMagic{'T', 'N', 'N', 'G'};
-constexpr std::uint32_t kGraphStateVersion = 2;
+constexpr std::array<char, 4> kGraphStateMagic{'T', 'U', 'N', 'X'};
+constexpr std::uint32_t kGraphStateVersion = 3;
 
 template <typename T>
 void write_binary(std::ostream &stream, const T &value) {
@@ -666,17 +556,6 @@ Graph Graph::load_state(std::istream &stream, IAllocator &allocator) {
     }
 
     graph.add_edge(layers[layer_index], producers, consumers);
-  }
-
-  if (version == 1) {
-    for (const auto &node : nodes) {
-      if (graph.node_in_degree(node) == 0) {
-        graph.set_input(node);
-      }
-      if (graph.node_out_degree(node) == 0) {
-        graph.set_output(node);
-      }
-    }
   }
 
   graph.compile(allocator);

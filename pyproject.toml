@@ -6,6 +6,23 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "breathe>=4.36.0",
+    "deepspeed",
+    "matplotlib>=3.11.1",
+    "numpy",
+    "pandas>=3.0.5",
+    "pillow",
+    "python-dotenv",
     "sphinx>=9.1.0",
     "sphinx-rtd-theme>=3.1.0",
+    "torch",
+    "torchvision",
+]
+
+[tool.pyrefly]
+ignore-errors-in-generated-code = true
+python-interpreter-path = ".venv/bin/python"
+
+[tool.uv.workspace]
+members = [
+    "torch",
 ]

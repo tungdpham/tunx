@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "device/device_manager.hpp"
+#include "device/device_type.hpp"
 #include "device/pool_allocator.hpp"
 #include "device/stream.hpp"
 #include "distributed/endpoint.hpp"
@@ -38,6 +39,7 @@ public:
                      TCPCommunicator::Config config = TCPCommunicator::Config())
       : Worker(device_id) {
     auto &device = DeviceManager::instance().get(device_id);
+    std::cout << "Device type: " << device_type_to_string(device.device_type()) << std::endl;
     auto &allocator = PoolAllocator::instance(device, device.default_stream());
     auto communicator = std::make_unique<TCPCommunicator>(endpoint, allocator, config);
 

@@ -28,7 +28,21 @@ void LeakyReLU::apply(const Tensor &input, Tensor &output, stream s) const {
     throw std::runtime_error("Input and output must be on the same device for LeakyReLU");
   }
 
-  DISPATCH_DTYPE(input.dtype(), T, return apply_impl<T>(input, output, s));
+  size_t size = input.size();
+  auto &device = input.device();
+  if (input.device_type() == DeviceType::CPU) {
+    create_cpu_task(device, s, cpu::leaky_relu, input.dtype(), input.data_as(), output.data_as(),
+                    size, negative_slope_);
+  }
+#ifdef TUNX_USE_CUDA
+  else if (input.device_type() == DeviceType::CUDA) {
+    create_cuda_task(device, s, cuda::leaky_relu, input.dtype(), input.data_as(), output.data_as(),
+                     size, negative_slope_);
+  }
+#endif
+  else {
+    throw std::runtime_error("Unsupported device type for LeakyReLU apply");
+  }
 }
 
 void LeakyReLU::compute_gradient(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
@@ -39,66 +53,28 @@ void LeakyReLU::compute_gradient(const Tensor &input, const Tensor &grad_output,
     throw std::runtime_error(
         "Input and upstream grad_output must be on the same device for LeakyReLU");
   }
-  DISPATCH_DTYPE(input.dtype(), T,
-                 return compute_gradient_impl<T>(input, grad_output, grad_input, s));
+
+  size_t size = grad_output.size();
+  auto &device = grad_output.device();
+  if (grad_output.device_type() == DeviceType::CPU) {
+    create_cpu_task(device, s, cpu::leaky_relu_gradient, input.dtype(), input.data_as(),
+                    grad_output.data_as(), grad_input.data_as(), size, negative_slope_);
+  }
+#ifdef TUNX_USE_CUDA
+  else if (grad_output.device_type() == DeviceType::CUDA) {
+    create_cuda_task(device, s, cuda::leaky_relu_gradient, input.dtype(), input.data_as(),
+                     grad_output.data_as(), grad_input.data_as(), size, negative_slope_);
+  }
+#endif
+  else {
+    throw std::runtime_error("Unsupported device type for LeakyReLU compute_gradient");
+  }
 }
 
 std::string LeakyReLU::name() const { return "leaky_relu"; }
 
 std::unique_ptr<ActivationFunction> LeakyReLU::clone() const {
   return std::make_unique<LeakyReLU>(negative_slope_);
-}
-
-template <typename Compute_T>
-void LeakyReLU::apply_impl(const Tensor &input, Tensor &output, stream handle) const {
-  if (input.dtype() != dtype_of<Compute_T>() || output.dtype() != dtype_of<Compute_T>()) {
-    throw std::runtime_error("LeakyReLU tensor dtype mismatch with dispatch type");
-  }
-
-  size_t size = input.size();
-  const Compute_T slope_typed = static_cast<Compute_T>(negative_slope_);
-  auto &device = input.device();
-  if (input.device_type() == DeviceType::CPU) {
-    create_cpu_task(device, handle, cpu::leaky_relu<Compute_T>, input.data_as<Compute_T>(),
-                    output.data_as<Compute_T>(), size, slope_typed);
-  }
-#ifdef TUNX_USE_CUDA
-  else if (input.device_type() == DeviceType::CUDA) {
-    create_cuda_task(device, handle, cuda::leaky_relu<Compute_T>, input.data_as<Compute_T>(),
-                     output.data_as<Compute_T>(), size, slope_typed);
-  }
-#endif
-  else {
-    throw std::runtime_error("Unsupported device type for LeakyReLU apply");
-  }
-}
-
-template <typename Compute_T>
-void LeakyReLU::compute_gradient_impl(const Tensor &input, const Tensor &grad_output,
-                                      Tensor &grad_input, stream handle) const {
-  if (input.dtype() != dtype_of<Compute_T>() || grad_output.dtype() != dtype_of<Compute_T>() ||
-      grad_input.dtype() != dtype_of<Compute_T>()) {
-    throw std::runtime_error("LeakyReLU tensor dtype mismatch with dispatch type");
-  }
-
-  size_t size = grad_output.size();
-  const Compute_T slope_typed = static_cast<Compute_T>(negative_slope_);
-  auto &device = grad_output.device();
-  if (grad_output.device_type() == DeviceType::CPU) {
-    create_cpu_task(device, handle, cpu::leaky_relu_gradient<Compute_T>, input.data_as<Compute_T>(),
-                    grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size,
-                    slope_typed);
-  }
-#ifdef TUNX_USE_CUDA
-  else if (grad_output.device_type() == DeviceType::CUDA) {
-    create_cuda_task(device, handle, cuda::leaky_relu_gradient<Compute_T>,
-                     input.data_as<Compute_T>(), grad_output.data_as<Compute_T>(),
-                     grad_input.data_as<Compute_T>(), size, slope_typed);
-  }
-#endif
-  else {
-    throw std::runtime_error("Unsupported device type for LeakyReLU compute_gradient");
-  }
 }
 
 }  // namespace func

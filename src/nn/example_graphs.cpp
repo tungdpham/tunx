@@ -7,10 +7,17 @@
 
 #include "nn/example_graphs.hpp"
 
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+
 #include <string>
 
+#include "device/iallocator.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
+#include "nn/layers_impl/concat.hpp"
+#include "nn/layers_impl/conv2d_transpose.hpp"
+#include "nn/layers_impl/transpose.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
@@ -24,6 +31,12 @@ size_t channels(const Shape &shape) {
     throw std::runtime_error("Shape is empty");
   }
   return shape.back();
+}
+
+Node add(const Vec<Node> &inputs, Shape &shape, const std::string &name) {
+  auto layer = Add();
+  shape = layer.output_shapes({shape})[0];
+  return layer(inputs);
 }
 
 Node conv2d(Node input, Shape &shape, size_t out_channels, size_t kernel_h, size_t kernel_w,
@@ -61,6 +74,21 @@ Node flatten(Node input, Shape &shape, int start_dim, int end_dim, const std::st
   return layer(input);
 }
 
+Node transpose(Node input, Shape &shape, int dim0, int dim1, const std::string &name) {
+  auto layer = Transpose(dim0, dim1, name);
+  shape = layer.output_shapes({shape})[0];
+  return layer(input);
+}
+
+Node convtranspose2d(Node input, Shape &shape, size_t out_channels, size_t kernel_h,
+                     size_t kernel_w, size_t stride_h, size_t stride_w, size_t pad_h, size_t pad_w,
+                     bool use_bias, const std::string &name) {
+  auto layer = ConvTranspose2D(channels(shape), out_channels, kernel_h, kernel_w, stride_h,
+                               stride_w, pad_h, pad_w, use_bias, name);
+  shape = layer.output_shapes({shape})[0];
+  return layer(input);
+}
+
 Node dense(Node input, Shape &shape, size_t output_features, bool use_bias,
            const std::string &name) {
   auto layer = Dense(channels(shape), output_features, use_bias, name);
@@ -94,7 +122,7 @@ Node dropout(Node input, Shape &shape, float dropout_rate, const std::string &na
 
 Node embedding(Node input, Shape &shape, size_t vocab_size, size_t embed_dim,
                const std::string &name) {
-  auto layer = Embedding(vocab_size, embed_dim, name);
+  auto layer = Embedding(vocab_size, embed_dim, static_cast<size_t>(-1), name);
   shape = layer.output_shapes({shape})[0];
   return layer(input);
 }
@@ -212,6 +240,80 @@ Node gpt_block(Node input, Shape &shape, size_t embed_dim, size_t num_heads, siz
 
   shape = ffn_shape;
   return x + ffn;
+}
+
+std::pair<Node, Shape> concat(const Vec<Node> &inputs, const Vec<Shape> &shapes, size_t axis,
+                              const std::string &name) {
+  auto layer = Concat(axis, name);
+  Shape out_shape = layer.output_shapes(shapes)[0];
+  return {layer(inputs), out_shape};
+}
+
+Node inception_block(Node input, Shape &shape, size_t out_channels, const std::string &name) {
+  Shape b1_shape = shape;
+  Node b1 = conv2d(input, b1_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b1_conv");
+  b1 = batchnorm(b1, b1_shape, true, name + "_b1_bn");
+
+  Shape b2_shape = shape;
+  Node b2 = conv2d(input, b2_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b2_conv1");
+  b2 = batchnorm(b2, b2_shape, true, name + "_b2_bn1");
+  b2 = conv2d(b2, b2_shape, out_channels, 3, 3, 1, 1, 1, 1, false, name + "_b2_conv2");
+  b2 = batchnorm(b2, b2_shape, true, name + "_b2_bn2");
+
+  Shape b3_shape = shape;
+  Node b3 = conv2d(input, b3_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b3_conv1");
+  b3 = batchnorm(b3, b3_shape, true, name + "_b3_bn1");
+  b3 = conv2d(b3, b3_shape, out_channels, 5, 5, 1, 1, 2, 2, false, name + "_b3_conv2");
+  b3 = batchnorm(b3, b3_shape, true, name + "_b3_bn2");
+
+  Shape b4_shape = shape;
+  Node b4 = maxpool2d(input, b4_shape, 3, 3, 1, 1, 1, 1, name + "_b4_pool");
+  b4 = conv2d(b4, b4_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b4_conv");
+  b4 = batchnorm(b4, b4_shape, true, name + "_b4_bn");
+
+  auto [out, out_shape] =
+      concat({b1, b2, b3, b4}, {b1_shape, b2_shape, b3_shape, b4_shape}, 3, name + "_concat");
+  shape = out_shape;
+  return relu(out, shape, name + "_relu");
+}
+
+Node v1_residual_block(Node input, Shape &shape, size_t out_channels, const std::string &name) {
+  Shape b1_shape = shape;
+  Node b1 = avgpool2d(input, b1_shape, 3, 3, 1, 1, 1, 1, name + "_b1_avg_pool");
+  b1 = conv2d(b1, b1_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b1_conv");
+  b1 = batchnorm(b1, b1_shape, true, name + "_b1_bn");
+  b1 = maxpool2d(b1, b1_shape, 2, 2, 2, 2, 0, 0, name + "_b1_pool");
+
+  Shape b2_shape = shape;
+  Node b2 = conv2d(input, b2_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b2_conv1");
+  b2 = batchnorm(b2, b2_shape, true, name + "_b2_bn1");
+  b2 = conv2d(b2, b2_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b2_conv2");
+  b2 = batchnorm(b2, b2_shape, true, name + "_b2_bn2");
+  b2 = maxpool2d(b2, b2_shape, 2, 2, 2, 2, 0, 0, name + "_b2_pool");
+
+  Shape b3_shape = shape;
+  Node b3 = conv2d(input, b3_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b3_conv1");
+  b3 = batchnorm(b3, b3_shape, true, name + "_b3_bn1");
+  b3 = conv2d(b3, b3_shape, out_channels, 1, 1, 1, 1, 0, 0, false, name + "_b3_conv2");
+  b3 = batchnorm(b3, b3_shape, true, name + "_b3_bn2");
+  b3 = maxpool2d(b3, b3_shape, 2, 2, 2, 2, 0, 0, name + "_b3_pool");
+
+  Shape b4_shape = shape;
+  Node b4 = conv2d(input, b4_shape, out_channels * 2, 1, 1, 1, 1, 0, 0, false, name + "_b4_conv_1");
+  Shape b4_main_shape = b4_shape;
+  Node b4_main = conv2d(b4, b4_main_shape, out_channels * 4, 3, 3, 1, 1, 1, 1, false,
+                        name + "_b4_conv_2_main");
+  Shape b4_shortcut_shape = b4_shape;
+  Node b4_shortcut = conv2d(b4, b4_shortcut_shape, out_channels * 4, 3, 3, 1, 1, 1, 1, false,
+                            name + "_b4_conv2_shortcut");
+  b4 = b4_main + b4_shortcut;
+  b4_shape = b4_main_shape;
+  b4 = maxpool2d(b4, b4_shape, 2, 2, 2, 2, 0, 0, name + "_b4_pool");
+
+  auto [out, out_shape] =
+      concat({b1, b2, b3, b4}, {b1_shape, b2_shape, b3_shape, b4_shape}, 3, name + "_concat");
+  shape = out_shape;
+  return relu(out, shape, name + "_relu");
 }
 
 void finalize_graph(Graph &graph, IAllocator &allocator, const Node &output, GraphOpts opts) {
@@ -578,7 +680,7 @@ Graph create_tiny_imagenet_flash_vit_graph(IAllocator &allocator, GraphOpts opts
   }
 
   x = layernorm(x, shape, dtype_eps(DType_t::FP32), true, "ln_final");
-  x = slice(x, shape, 1, 0, 1, "extract_cls");
+  // x = slice(x, shape, 1, 0, 1, "extract_cls");
   x = flatten(x, shape, 1, -1, "flatten_cls");
   Node output = dense(x, shape, num_classes, true, "head");
   finalize_graph(graph, allocator, output, opts);
@@ -586,8 +688,7 @@ Graph create_tiny_imagenet_flash_vit_graph(IAllocator &allocator, GraphOpts opts
 }
 
 Graph create_gpt2_graph(IAllocator &allocator, size_t embed_dim, size_t num_heads,
-                        size_t num_layers, bool use_flash, const std::string &name,
-                        GraphOpts opts) {
+                        size_t num_layers, const std::string &name, GraphOpts opts) {
   constexpr size_t seq_len = 1024;
   constexpr size_t vocab_size = 50257;
   constexpr float dropout_rate = 0.1f;
@@ -611,6 +712,50 @@ Graph create_gpt2_graph(IAllocator &allocator, size_t embed_dim, size_t num_head
   return graph;
 }
 
+Graph create_inception_v1_graph(IAllocator &allocator, GraphOpts opts) {
+  Graph graph;
+  Node input = graph.input("input");
+  Shape shape = {1, 224, 224, 3};
+
+  Node x = conv2d(input, shape, 64, 7, 7, 2, 2, 3, 3, false, "conv1");
+  x = batchnorm(x, shape, true, "bn1");
+  x = maxpool2d(x, shape, 3, 3, 2, 2, 1, 1, "pool1");
+
+  x = inception_block(x, shape, 32, "inc1");
+  x = inception_block(x, shape, 64, "inc2");
+  x = maxpool2d(x, shape, 3, 3, 2, 2, 1, 1, "pool2");
+
+  x = inception_block(x, shape, 128, "inc3");
+  x = inception_block(x, shape, 128, "inc4");
+
+  x = avgpool2d(x, shape, 28, 28, 1, 1, 0, 0, "avgpool");
+  x = flatten(x, shape, 1, -1, "flatten");
+  Node output = dense(x, shape, 100, true, "output");
+
+  finalize_graph(graph, allocator, output, opts);
+  return graph;
+}
+
+Graph create_tunx_v1_graph(IAllocator &allocator, GraphOpts opts) {
+  Graph graph;
+  Node input = graph.input("input");
+  Shape shape = {1, 224, 224, 3};
+
+  Node x = conv2d(input, shape, 64, 7, 7, 2, 2, 3, 3, false, "conv1");  // -> {112, 112, 64}
+  x = batchnorm(x, shape, true, "bn1");
+  x = maxpool2d(x, shape, 3, 3, 2, 2, 1, 1, "pool1");  // -> {56, 56, 64}
+
+  x = v1_residual_block(x, shape, 256, "asym1");       // -> {56, 56, 256}
+  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool2");  // -> {28, 28, 256}
+
+  x = avgpool2d(x, shape, 28, 28, 1, 1, 0, 0, "avgpool");
+  x = flatten(x, shape, 1, -1, "flatten");
+  Node output = dense(x, shape, 100, true, "output");
+
+  finalize_graph(graph, allocator, output, opts);
+  return graph;
+}
+
 }  // namespace
 
 std::unordered_map<std::string, std::function<Graph(IAllocator &, GraphOpts)>>
@@ -618,6 +763,8 @@ std::unordered_map<std::string, std::function<Graph(IAllocator &, GraphOpts)>>
 
 void ExampleGraphs::register_defaults() {
   register_graph("mnist_cnn", create_mnist_graph);
+
+  register_graph("inception_v1", create_inception_v1_graph);
 
   register_graph("cifar10_vgg", create_cifar10_vgg_graph);
   register_graph("cifar10_test", create_cifar10_test_graph);
@@ -636,23 +783,17 @@ void ExampleGraphs::register_defaults() {
   register_graph("imagenet100_resnet50", create_imagenet100_resnet50_graph);
 
   register_graph("gpt2_small", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 768, 12, 12, false, "gpt2_small", opts);
-  });
-  register_graph("flash_gpt2_small", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 768, 12, 12, true, "flash_gpt2_small", opts);
+    return create_gpt2_graph(allocator, 768, 12, 12, "gpt2_small", opts);
   });
   register_graph("gpt2_medium", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 1024, 16, 24, false, "gpt2_medium", opts);
-  });
-  register_graph("flash_gpt2_medium", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 1024, 16, 24, true, "flash_gpt2_medium", opts);
+    return create_gpt2_graph(allocator, 1024, 16, 24, "gpt2_medium", opts);
   });
   register_graph("gpt2_large", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 1280, 20, 36, false, "gpt2_large", opts);
+    return create_gpt2_graph(allocator, 1280, 20, 36, "gpt2_large", opts);
   });
-  register_graph("flash_gpt2_large", [](IAllocator &allocator, GraphOpts opts) {
-    return create_gpt2_graph(allocator, 1280, 20, 36, true, "flash_gpt2_large", opts);
-  });
+
+  // graphs for benchmarking
+  register_graph("tunx_v1", create_tunx_v1_graph);
 }
 
 }  // namespace tunx

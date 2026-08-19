@@ -43,56 +43,171 @@ inline size_t get_shapes_bytes(const Vec<Vec<size_t>> &shapes, DType_t dtype) {
   return total_bytes;
 }
 
-namespace detail {
-struct ResidualObject {
+class ResidualObject {
+private:
+  struct Impl {
+    using ResidualValue =
+        std::variant<std::monostate, std::map<std::string, ResidualObject>, Tensor, Vec<size_t>>;
+
+    ResidualValue data;
+  };
+  std::shared_ptr<Impl> impl_;
+
 public:
-  using ResidualValue = std::variant<std::monostate, std::map<std::string, ResidualObject>, Tensor>;
-
-  ResidualValue data_;
-
   ResidualObject()
-      : data_(std::monostate{}) {}
+      : impl_(std::make_shared<Impl>()) {}
   ~ResidualObject() = default;
-  ResidualObject(const ResidualObject &) = delete;
-  ResidualObject &operator=(const ResidualObject &) = delete;
+  ResidualObject(const ResidualObject &) = default;
+  ResidualObject &operator=(const ResidualObject &) = default;
   ResidualObject(ResidualObject &&) = default;
   ResidualObject &operator=(ResidualObject &&) = default;
 
   ResidualObject &operator[](const std::string &key) {
-    if (data_.index() == 0) {
-      data_ = std::map<std::string, ResidualObject>{};
-    } else if (data_.index() == 1) {
+    if (impl_->data.index() == 0) {
+      impl_->data = std::map<std::string, ResidualObject>{};
+    } else if (impl_->data.index() == 1) {
       // already a map, do nothing
-    } else if (data_.index() == 2) {
+    } else if (impl_->data.index() == 2) {
       throw std::runtime_error("ResidualObject: Attempting to index into a leaf node");
     }
 
-    return std::get<1>(data_)[key];
+    return std::get<1>(impl_->data)[key];
   }
 
   ResidualObject &operator=(const Tensor &tensor) {
-    if (data_.index() == 0) {
-      data_ = tensor;
-    } else if (data_.index() == 1) {
+    if (impl_->data.index() == 0) {
+      impl_->data = tensor;
+    } else if (impl_->data.index() == 1) {
       throw std::runtime_error("ResidualObject: Attempting to assign a Tensor to a non-leaf node");
     }
     return *this;
   }
 
+  ResidualObject &operator=(const Vec<size_t> &vec) {
+    if (impl_->data.index() == 0) {
+      impl_->data = vec;
+    } else if (impl_->data.index() == 1) {
+      throw std::runtime_error(
+          "ResidualObject: Attempting to assign a Vec<size_t> to a non-leaf node");
+    }
+    return *this;
+  }
+
   operator Tensor &() {
-    if (data_.index() != 2) {
+    if (impl_->data.index() != 2) {
       throw std::runtime_error("ResidualObject: Attempting to convert a non-leaf node to Tensor");
     }
-    return std::get<2>(data_);
+    return std::get<2>(impl_->data);
+  }
+
+  operator Vec<size_t> &() {
+    if (impl_->data.index() != 3) {
+      throw std::runtime_error(
+          "ResidualObject: Attempting to convert a non-leaf node to Vec<size_t>");
+    }
+    return std::get<3>(impl_->data);
+  }
+
+  void print(std::ostream &os, int indent = 0) const {
+    std::string indent_str(indent * 2, ' ');
+    if (!impl_) {
+      os << indent_str << "<null impl_>\n";
+      return;
+    }
+
+    std::visit(
+        [&os, indent, &indent_str](auto &&arg) {
+          using T = std::decay_t<decltype(arg)>;
+
+          if constexpr (std::is_same_v<T, std::monostate>) {
+            os << "<empty>\n";
+          } else if constexpr (std::is_same_v<T, std::map<std::string, ResidualObject>>) {
+            if (arg.empty()) {
+              os << "{}\n";
+              return;
+            }
+            os << "{\n";
+            for (const auto &[key, value] : arg) {
+              os << indent_str << "  " << key << ": ";
+              value.print(os, indent + 1);
+            }
+            os << indent_str << "}\n";
+          } else if constexpr (std::is_same_v<T, Tensor>) {
+            // For leaf nodes, output the Tensor
+            os << "Tensor(shape=[";
+            const auto &shape = arg.shape();
+            for (size_t i = 0; i < shape.size(); ++i) {
+              os << shape[i];
+              if (i < shape.size() - 1) os << ", ";
+            }
+            os << "])\n";
+          } else if constexpr (std::is_same_v<T, Vec<size_t>>) {
+            os << "Vec<size_t>[";
+            for (size_t i = 0; i < arg.size(); ++i) {
+              os << arg[i];
+              if (i < arg.size() - 1) os << ", ";
+            }
+            os << "]\n";
+          }
+        },
+        impl_->data);
+  }
+
+  size_t num_bytes() const {
+    if (!impl_) return 0;
+    return std::visit(
+        [](auto &&arg) -> size_t {
+          using T = std::decay_t<decltype(arg)>;
+          if constexpr (std::is_same_v<T, std::monostate>) {
+            return 0;
+          } else if constexpr (std::is_same_v<T, std::map<std::string, ResidualObject>>) {
+            size_t total = 0;
+            for (const auto &[key, value] : arg) {
+              total += value.num_bytes();
+            }
+            return total;
+          } else if constexpr (std::is_same_v<T, Tensor>) {
+            return arg.num_bytes();
+          } else if constexpr (std::is_same_v<T, Vec<size_t>>) {
+            return arg.size() * sizeof(size_t);
+          }
+          return 0;
+        },
+        impl_->data);
+  }
+
+  friend std::ostream &operator<<(std::ostream &os, const ResidualObject &obj) {
+    obj.print(os, 0);
+    return os;
+  }
+
+  std::map<std::string, Tensor> tensors() const {
+    std::map<std::string, Tensor> res;
+    std::visit(
+        [&res](auto &&arg) {
+          using T = std::decay_t<decltype(arg)>;
+          if constexpr (std::is_same_v<T, std::monostate>) {
+          } else if constexpr (std::is_same_v<T, std::map<std::string, ResidualObject>>) {
+            for (const auto &[key, value] : arg) {
+              auto inner_tensors = value.tensors();
+              for (auto &[inner_key, inner_value] : inner_tensors) {
+                res[key + "." + inner_key] = inner_value;
+              }
+            }
+          } else if constexpr (std::is_same_v<T, Tensor>) {
+            res[""] = arg;
+          } else if constexpr (std::is_same_v<T, Vec<size_t>>) {
+          }
+        },
+        impl_->data);
+    return res;
   }
 };
 
-}  // namespace detail
-
-using Residuals = detail::ResidualObject;
+using Residuals = ResidualObject;
 
 struct InitOptions {
-  DELAllocatorV2 *ws_allocator = nullptr;
+  IAllocator *ws_allocator = nullptr;
   Engine engine = nullptr;
   engine_handle handle = nullptr;
   unsigned long long seed;
@@ -124,6 +239,8 @@ public:
   void set_training(bool training);
   bool is_training() const;
 
+  void set_workspace_allocator(IAllocator* alloc);
+
   virtual Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const = 0;
   std::string name() const { return name_; }
   void save_state(std::ostream &out) const;
@@ -133,9 +250,17 @@ public:
   virtual Vec<Param> params();
   virtual const Vec<Param> params() const;
 
-  void zero_grads() {
+  void register_layer(std::shared_ptr<LayerImpl> layer) {
+    registered_layers_.push_back(std::move(layer));
+  }
+  const Vec<std::shared_ptr<LayerImpl>> &layers() const { return registered_layers_; }
+
+  virtual void zero_grads() {
     for (auto &param : params_) {
       param.zero_grad(engine_handle_.get_stream());
+    }
+    for (auto &layer : registered_layers_) {
+      layer->zero_grads();
     }
   }
 
@@ -157,16 +282,18 @@ protected:
   Engine engine_ = nullptr;
   engine_handle engine_handle_ = nullptr;
   IAllocator *param_allocator_ = nullptr;
-  DELAllocatorV2 *ws_allocator_ = nullptr;
+  IAllocator *ws_allocator_ = nullptr;
   bool is_training_ = true;
   bool use_seed_ = false;
   unsigned long long srand_seed_ = 0;
   std::string name_;
   Vec<Param> params_;
+  Vec<std::shared_ptr<LayerImpl>> registered_layers_;
   DType_t io_dtype_ = DType_t::FP32;       // data type for input/output tensors
   DType_t param_dtype_ = DType_t::FP32;    // data type for parameters/gradients
   DType_t compute_dtype_ = DType_t::FP32;  // data type for internal computations
 
+public:
   // helpers
   Param make_param(const Vec<size_t> &shape, DType_t dtype);
   Tensor make_tensor(const Vec<size_t> &shape, DType_t dtype);
@@ -264,7 +391,7 @@ public:
     return impl_->backward(grad_outputs, residuals);
   }
 
-  DELAllocatorV2 *get_allocator() const {
+  IAllocator *get_allocator() const {
     check_layer("get_allocator");
     return impl_->get_allocator();
   }
@@ -293,6 +420,12 @@ public:
   bool is_training() const {
     check_layer("is_training");
     return impl_->is_training();
+  }
+
+  LayerRef &set_workspace_allocator(IAllocator *alloc) {
+    check_layer("set_workspace_allocator");
+    impl_->set_workspace_allocator(alloc);
+    return *this;
   }
 
   Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes) const {

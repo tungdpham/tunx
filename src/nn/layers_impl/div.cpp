@@ -12,78 +12,61 @@
 #include "type/type.hpp"
 
 namespace tunx {
-namespace internal {
 
-Vec<Vec<size_t>> DivImpl::output_shapes(const Vec<Vec<size_t>> &input_shapes) const {
+Vec<Vec<size_t>> DivOp::output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config) {
   if (input_shapes.size() != 2) {
-    throw std::runtime_error("DivImpl: expected exactly 2 inputs");
+    throw std::runtime_error("DivOp: expected exactly 2 inputs");
   }
   if (input_shapes[0] != input_shapes[1]) {
-    throw std::runtime_error("DivImpl: both inputs must have the same shape");
+    throw std::runtime_error("DivOp: both inputs must have the same shape");
   }
   return {input_shapes[0]};
 }
 
-Vec<Tensor> DivImpl::forward_impl(const Vec<Tensor> &inputs, Residuals &residuals) {
-  if (inputs.size() != 2) {
-    throw std::runtime_error("DivImpl: expected exactly 2 inputs");
-  }
-  const Tensor &a = inputs[0];
-  const Tensor &b = inputs[1];
-
+Tensor DivOp::forward(OpContext &ctx, const Tensor &a, const Tensor &b) {
   if (a.shape() != b.shape()) {
-    throw std::runtime_error("DivImpl: both inputs must have the same shape");
+    throw std::runtime_error("DivOp: both inputs must have the same shape");
   }
 
-  Tensor output = make_tensor(a.shape(), io_dtype_);
-
-  if (this->is_training_) {
-    residuals["a"] = a;
-    residuals["b"] = b;
+  if (ctx.is_training) {
+    ctx.residuals["a"] = a;
+    ctx.residuals["b"] = b;
   }
 
-  div(a, b, output);
+  Tensor output = ctx.make_tensor(a.shape(), a.dtype());
+  div(a, b, output, ctx.handle.get_stream());
 
-  return {output};
+  return output;
 }
 
-Vec<Tensor> DivImpl::backward_impl(const Vec<Tensor> &grad_outputs, Residuals &residuals) {
-  if (grad_outputs.size() != 1) {
-    throw std::runtime_error("DivImpl: expected exactly 1 grad output");
-  }
-  const Tensor &grad_out = grad_outputs[0];
-  const Tensor &a = residuals["a"];
-  const Tensor &b = residuals["b"];
+Vec<Tensor> DivOp::backward(OpContext &ctx, const Tensor &grad_out) {
+  const Tensor &a = ctx.residuals["a"];
+  const Tensor &b = ctx.residuals["b"];
 
   // grad_a = grad_out / b
   // grad_b = -(grad_out * a) / b^2
-  Tensor grad_a = make_tensor(grad_out.shape(), this->io_dtype_);
-  Tensor grad_b = make_tensor(grad_out.shape(), this->io_dtype_);
+  Tensor grad_a = ctx.make_tensor(grad_out.shape(), ctx.io_dtype);
+  Tensor grad_b = ctx.make_tensor(grad_out.shape(), ctx.io_dtype);
 
   // grad_a = grad_out / b
-  div(grad_out, b, grad_a, engine_handle_.get_stream());
+  div(grad_out, b, grad_a, ctx.handle.get_stream());
 
-  Tensor b_sq = make_tensor(grad_out.shape(), this->io_dtype_);
-  mul(b, b, b_sq, engine_handle_.get_stream());
+  Tensor b_sq = ctx.make_tensor(grad_out.shape(), ctx.io_dtype);
+  mul(b, b, b_sq, ctx.handle.get_stream());
 
-  Tensor numerator = make_tensor(grad_out.shape(), this->io_dtype_);
-  mul(grad_out, a, numerator, engine_handle_.get_stream());
-  div(numerator, b_sq, grad_b, engine_handle_.get_stream());
-  mul_scalar(grad_b, -1, grad_b, engine_handle_.get_stream());
+  Tensor numerator = ctx.make_tensor(grad_out.shape(), ctx.io_dtype);
+  mul(grad_out, a, numerator, ctx.handle.get_stream());
+  div(numerator, b_sq, grad_b, ctx.handle.get_stream());
+  mul_scalar(grad_b, -1, grad_b, ctx.handle.get_stream());
 
   return {grad_a, grad_b};
 }
 
-LayerConfig DivImpl::get_config() const {
-  LayerConfig config;
-  config.type = TYPE_NAME;
-  config.name = this->name_;
-  return config;
+LayerConfig DivOp::get_config(const Config &config, const std::string &name) {
+  LayerConfig lcfg;
+  lcfg.type = TYPE_NAME;
+  lcfg.name = name;
+  return lcfg;
 }
 
-std::shared_ptr<DivImpl> DivImpl::create_from_config(const LayerConfig &config) {
-  return std::make_shared<DivImpl>(config.name.empty() ? "div" : config.name);
-}
-
-}  // namespace internal
 }  // namespace tunx

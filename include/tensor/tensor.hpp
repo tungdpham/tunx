@@ -124,6 +124,7 @@ public:
   size_t stride(size_t index) const { return strides_[index]; }
   size_t size() const { return data_size_; }
   size_t capacity() const { return data_.capacity() / get_dtype_size(dtype_); }
+  size_t num_bytes() const { return size() * get_dtype_size(dtype_); }
   IAllocator &allocator() const { return allocator_; }
   Device &device() const { return data_.device(); }
   DeviceType device_type() const { return device().device_type(); }

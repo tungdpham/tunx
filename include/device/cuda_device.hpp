@@ -1,6 +1,7 @@
 #pragma once
 
 #include <functional>
+#include <iostream>
 #ifdef TUNX_USE_CUDA
 
 #include "device/device.hpp"
@@ -52,8 +53,40 @@ public:
                                std::string(cudaGetErrorString(err)));
     }
   }
+  cuda_stream(CUDADevice &device, cudaStream_t stream)
+      : device_(&device),
+        stream_(stream) {}
 
-  ~cuda_stream() { cudaStreamDestroy(stream_); }
+  ~cuda_stream() {
+    if (stream_ != nullptr) {
+      cudaError_t err = cudaStreamDestroy(stream_);
+      if (err != cudaSuccess) {
+        std::cerr << "Failed to destroy CUDA stream: " << cudaGetErrorString(err) << std::endl;
+      }
+    }
+  }
+  cuda_stream(const cuda_stream &) = delete;
+  cuda_stream &operator=(const cuda_stream &) = delete;
+
+  cuda_stream(cuda_stream &&other) noexcept
+      : device_(other.device_),
+        stream_(other.stream_) {
+    other.stream_ = nullptr;
+    other.device_ = nullptr;
+  }
+
+  cuda_stream &operator=(cuda_stream &&other) noexcept {
+    if (this != &other) {
+      if (stream_ != nullptr) {
+        cudaStreamDestroy(stream_);
+      }
+      device_ = other.device_;
+      stream_ = other.stream_;
+      other.stream_ = nullptr;
+      other.device_ = nullptr;
+    }
+    return *this;
+  }
 
   operator cudaStream_t() { return stream_; }
 

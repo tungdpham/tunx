@@ -107,6 +107,7 @@ void update_adam(T* params_data, const T* grads_data, T* m_data, T* v_data, size
                  const float learning_rate, const float beta1, const float beta2,
                  const float epsilon, const float bias_correction1, const float bias_correction2,
                  const float weight_decay, const bool decouple_weight_decay, cudaStream_t stream) {
+  if (size == 0) return;
   const int threads_per_block = 256;
   constexpr size_t vec_size = VectoredTraits<T>::size;
 

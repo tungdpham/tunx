@@ -55,12 +55,9 @@ void dropout_bwd_impl(const T* grad_output_data, T* grad_input_data, const bool*
 }
 
 template <typename T>
-void relu_fwd_impl(const T* input_data, T* output_data, bool* mask_data, size_t num_elements) {
-  T zero = static_cast<T>(0);
+void relu_fwd_impl(const T* input_data, T* output_data, size_t num_elements) {
   parallel_for<size_t>(0, num_elements, [&](size_t i) {
-    bool is_positive = input_data[i] > zero;
-    output_data[i] = is_positive ? input_data[i] : zero;
-    if (mask_data) mask_data[i] = is_positive;
+    output_data[i] = input_data[i] > T(0) ? input_data[i] : T(0);
   });
 }
 
@@ -72,10 +69,10 @@ void relu_inf_impl(const T* input_data, T* output_data, size_t num_elements) {
 }
 
 template <typename T>
-void relu_bwd_impl(const T* grad_output_data, T* grad_input_data, const bool* mask_data,
+void relu_bwd_impl(const T* grad_output_data, T* grad_input_data, const T* output_data,
                    size_t num_elements) {
   parallel_for<size_t>(0, num_elements, [&](size_t i) {
-    grad_input_data[i] = grad_output_data[i] * static_cast<T>(mask_data[i]);
+    grad_input_data[i] = output_data[i] > T(0) ? grad_output_data[i] : T(0);
   });
 }
 
@@ -104,10 +101,10 @@ void CPUEngine::dropout_bwd(engine_handle backend_handle, const DropoutStats& st
 }
 
 void CPUEngine::relu_fwd(engine_handle backend_handle, const ReLUStats& stats, const void* input,
-                         void* output, bool* mask, void* workspace, DTypeDesc type_desc) {
+                         void* output, void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
-    relu_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output), mask,
+    relu_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output),
                      stats.batch_size * stats.spatial_size);
   });
 }
@@ -122,12 +119,12 @@ void CPUEngine::relu_inf(engine_handle backend_handle, const ReLUStats& stats, c
 }
 
 void CPUEngine::relu_bwd(engine_handle backend_handle, const ReLUStats& stats,
-                         const void* grad_output, void* grad_input, const bool* mask,
+                         const void* grad_output, void* grad_input, const void* output,
                          void* workspace, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
-    relu_bwd_impl<T>(static_cast<const T*>(grad_output), static_cast<T*>(grad_input), mask,
-                     stats.batch_size * stats.spatial_size);
+    relu_bwd_impl<T>(static_cast<const T*>(grad_output), static_cast<T*>(grad_input),
+                     static_cast<const T*>(output), stats.batch_size * stats.spatial_size);
   });
 }
 

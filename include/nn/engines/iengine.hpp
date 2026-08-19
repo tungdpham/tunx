@@ -1,98 +1,10 @@
 #pragma once
 
-#include <functional>
-#include <vector>
-
 #include "nn/engines/engine_handle.hpp"
 #include "nn/stats/stats.hpp"
 #include "type/type.hpp"
 
 namespace tunx {
-
-struct DTypeDesc {
-  DType_t io_dtype;
-  DType_t param_dtype;
-  DType_t compute_dtype;
-};
-
-inline bool operator==(const DTypeDesc& lhs, const DTypeDesc& rhs) {
-  return lhs.io_dtype == rhs.io_dtype && lhs.param_dtype == rhs.param_dtype &&
-         lhs.compute_dtype == rhs.compute_dtype;
-}
-
-enum OpType {
-  DENSE_FWD,
-  DENSE_WGRAD,
-  DENSE_DGRAD,
-  DENSE_BGRAD,
-  DENSE_ADD_BIAS,
-  AVG_POOL_FWD,
-  AVG_POOL_BWD,
-  MAXPOOL2D_FWD,
-  MAXPOOL2D_INFER,
-  MAXPOOL2D_BWD,
-  CLASS_TOKEN_FWD,
-  CLASS_TOKEN_BWD,
-  DROPOUT_FWD,
-  DROPOUT_BWD,
-  RELU_FWD,
-  RELU_INFER,
-  RELU_BWD,
-  EMBEDDING_FWD,
-  EMBEDDING_BWD,
-  POS_EMBEDDING_FWD,
-  POS_EMBEDDING_BWD,
-  BATCHNORM_FWD,
-  BATCHNORM_INFER,
-  BATCHNORM_BWD,
-  CONV2D_FWD,
-  CONV2D_DGRAD,
-  CONV2D_WGRAD,
-  CONV2D_BGRAD,
-  LAYERNORM_FWD,
-  LAYERNORM_INFER,
-  LAYERNORM_BWD,
-  SDPA_FWD,
-  SDPA_BWD,
-  TRANSPOSE,
-};
-
-struct GraphCacheKey {
-  OpType op_type;
-  DTypeDesc dtype_desc;
-  std::vector<size_t> dims;
-  std::unordered_map<std::string, float> attributes;
-};
-
-inline bool operator==(const GraphCacheKey& lhs, const GraphCacheKey& rhs) {
-  return lhs.op_type == rhs.op_type && lhs.dtype_desc == rhs.dtype_desc && lhs.dims == rhs.dims &&
-         lhs.attributes == rhs.attributes;
-}
-
-}  // namespace tunx
-
-namespace std {
-
-template <>
-struct hash<tunx::GraphCacheKey> {
-  size_t operator()(const tunx::GraphCacheKey& key) const {
-    size_t h = hash<int>()(static_cast<int>(key.op_type));
-    auto hash_combine = [](size_t& seed, size_t val) {
-      seed ^= val + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-    };
-    hash_combine(h, hash<tunx::DType_t>()(key.dtype_desc.io_dtype));
-    hash_combine(h, hash<tunx::DType_t>()(key.dtype_desc.param_dtype));
-    hash_combine(h, hash<tunx::DType_t>()(key.dtype_desc.compute_dtype));
-    for (size_t dim : key.dims) {
-      hash_combine(h, hash<size_t>()(dim));
-    }
-    return h;
-  }
-};
-}  // namespace std
-
-namespace tunx {
-
 class IEngine {
 public:
   virtual ~IEngine() = default;
@@ -233,6 +145,16 @@ public:
    */
   virtual WorkspaceReq query_transpose_graph(engine_handle backend_handle,
                                              const TransposeStats& stats, DTypeDesc type_desc) = 0;
+
+  /**
+   * @brief Queries the workspace memory requirement for Slice graphs.
+   * @param backend_handle Opaque handle to the backend context.
+   * @param stats Slice configuration.
+   * @param type_desc Data type descriptors.
+   * @return WorkspaceReq specifying forward and backward workspace size in bytes.
+   */
+  virtual WorkspaceReq query_slice_graph(engine_handle backend_handle, const SliceStats& stats,
+                                         DTypeDesc type_desc) = 0;
 
   /**
    * @brief Forward pass for a Dense (Linear) layer.
@@ -437,7 +359,7 @@ public:
    * @brief Forward pass for an Embedding layer.
    * @param backend_handle Opaque handle to the backend context.
    * @param stats Embedding layer configuration.
-   * @param input Input indices tensor. Shape: [num_indices], DType: io_dtype.
+   * @param input Input indices tensor. Shape: [num_indices], DType: int32.
    * @param weight Embedding lookup table. Shape: [vocab_size, embed_dim], DType: param_dtype.
    * @param output Output embeddings. Shape: [num_indices, embed_dim], DType: io_dtype.
    * @param workspace Workspace buffer.
@@ -502,12 +424,11 @@ public:
    * @param stats ReLU layer configuration.
    * @param input Input tensor. Shape: Total elements flattened, DType: io_dtype.
    * @param output Output tensor. Shape: Total elements flattened, DType: io_dtype.
-   * @param mask Mask tensor (bitmask or bool) for backward pass.
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
   virtual void relu_fwd(engine_handle backend_handle, const ReLUStats& stats, const void* input,
-                        void* output, bool* mask, void* workspace, DTypeDesc type_desc) = 0;
+                        void* output, void* workspace, DTypeDesc type_desc) = 0;
 
   /**
    * @brief Forward pass for a ReLU activation (inference mode).
@@ -528,12 +449,12 @@ public:
    * @param grad_output Gradient w.r.t output. Shape: Total elements flattened, DType: io_dtype.
    * @param grad_input Computed gradient w.r.t input. Shape: Total elements flattened, DType:
    * io_dtype.
-   * @param mask Mask tensor from forward pass.
+   * @param output Cached output tensor from forward pass (used as gate: output > 0).
    * @param workspace Workspace buffer.
    * @param type_desc Data type descriptors.
    */
   virtual void relu_bwd(engine_handle backend_handle, const ReLUStats& stats,
-                        const void* grad_output, void* grad_input, const bool* mask,
+                        const void* grad_output, void* grad_input, const void* output,
                         void* workspace, DTypeDesc type_desc) = 0;
 
   /**
@@ -802,6 +723,19 @@ public:
    */
   virtual void transpose(engine_handle backend_handle, const TransposeStats& stats,
                          const void* input, void* output, void* workspace, DTypeDesc type_desc) = 0;
+
+  /**
+   * @brief Slice forward pass.
+   */
+  virtual void slice_fwd(engine_handle backend_handle, const SliceStats& stats, const void* input,
+                         void* output, void* workspace, DTypeDesc type_desc) = 0;
+
+  /**
+   * @brief Slice backward pass.
+   */
+  virtual void slice_bwd(engine_handle backend_handle, const SliceStats& stats,
+                         const void* grad_output, void* grad_input, void* workspace,
+                         DTypeDesc type_desc) = 0;
 
   // --- Legacy APIs ---
 

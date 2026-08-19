@@ -7,12 +7,12 @@
 #pragma once
 
 #include <fcntl.h>
-#include <device/stream.hpp>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
 #include <algorithm>
+#include <device/stream.hpp>
 #include <iostream>
 #include <numeric>
 #include <string>
@@ -206,7 +206,7 @@ public:
   bool load_data(const std::string &source) override { return load_data_impl(source); }
 
   bool get_batch(size_t batch_size, Tensor &batch_data, Tensor &batch_labels) override {
-    DISPATCH_DTYPE(dtype_, T, return get_batch_impl<T>(batch_size, batch_data, batch_labels));
+    DISPATCH_ANY_DTYPE(dtype_, T, return get_batch_impl<T>(batch_size, batch_data, batch_labels));
   }
 
   void reset() override { this->current_index_ = 0; }
@@ -244,8 +244,7 @@ public:
               << mnist_constants::IMAGE_WIDTH << "x" << mnist_constants::NUM_CHANNELS << std::endl;
   }
 
-  static void create(const std::string &data_path, MNIST &train_dataset,
-                     MNIST &test_dataset) {
+  static void create(const std::string &data_path, MNIST &train_dataset, MNIST &test_dataset) {
     if (!train_dataset.load_data(data_path + "/mnist_train.csv")) {
       throw std::runtime_error("Failed to load training data!");
     }

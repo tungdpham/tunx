@@ -4,15 +4,14 @@
 #include <cuda_runtime.h>
 
 #include <cstddef>
+#include "type/type.hpp"
 
 namespace tunx {
 namespace cuda {
-template <typename T>
-void leaky_relu(const T *input, T *output, size_t size, T negative_slope, cudaStream_t stream);
+void leaky_relu(DType_t dtype, const void *input, void *output, size_t size, double negative_slope, cudaStream_t stream);
 
-template <typename T>
-void leaky_relu_gradient(const T *input, const T *grad_output, T *grad_input, size_t size,
-                         T negative_slope, cudaStream_t stream);
+void leaky_relu_gradient(DType_t dtype, const void *input, const void *grad_output, void *grad_input, size_t size,
+                         double negative_slope, cudaStream_t stream);
 }  // namespace cuda
 }  // namespace tunx
 

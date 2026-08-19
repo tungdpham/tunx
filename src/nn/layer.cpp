@@ -41,6 +41,9 @@ void LayerImpl::init(IAllocator &param_allocator, InitOptions opts) {
     srand_seed_ = opts.seed;
   }
   init_impl();
+  for (auto &layer : registered_layers_) {
+    layer->init(param_allocator, opts);
+  }
   initialized_ = true;
 }
 
@@ -98,9 +101,19 @@ DType_t LayerImpl::get_compute_dtype() const { return compute_dtype_; }
 void LayerImpl::set_training(bool training) {
   is_training_ = training;
   on_set_training(training);
+  for (auto &layer : registered_layers_) {
+    layer->set_training(training);
+  }
 }
 
 bool LayerImpl::is_training() const { return is_training_; }
+
+void LayerImpl::set_workspace_allocator(IAllocator* alloc) {
+  ws_allocator_ = alloc;
+  for (auto &layer : registered_layers_) {
+    layer->set_workspace_allocator(alloc);
+  }
+}
 
 Engine LayerImpl::get_engine() {
   if (!engine_) {
@@ -111,9 +124,23 @@ Engine LayerImpl::get_engine() {
 
 engine_handle LayerImpl::get_backend_handle() const { return engine_handle_; }
 
-Vec<Param> LayerImpl::params() { return params_; }
+Vec<Param> LayerImpl::params() {
+  Vec<Param> all_params = params_;
+  for (auto &layer : registered_layers_) {
+    auto layer_params = layer->params();
+    all_params.insert(all_params.end(), layer_params.begin(), layer_params.end());
+  }
+  return all_params;
+}
 
-const Vec<Param> LayerImpl::params() const { return params_; }
+const Vec<Param> LayerImpl::params() const {
+  Vec<Param> all_params = params_;
+  for (const auto &layer : registered_layers_) {
+    auto layer_params = layer->params();
+    all_params.insert(all_params.end(), layer_params.begin(), layer_params.end());
+  }
+  return all_params;
+}
 
 void LayerImpl::save_state(std::ostream &out) const {
   auto config = get_config();

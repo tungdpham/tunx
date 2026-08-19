@@ -197,8 +197,8 @@ void CPUEngine::legacy_conv2d_fwd(engine_handle backend_handle, const void* col_
                                   size_t kernel_size, size_t out_channels, DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
-    cpu::gemm<T>(static_cast<const T*>(weight_data), static_cast<const T*>(col_data),
-                 static_cast<T*>(output_data), out_channels, output_size, kernel_size, false, false,
+    cpu::legacy_gemm(static_cast<const T*>(weight_data), static_cast<const T*>(col_data),
+                     static_cast<T*>(output_data), out_channels, output_size, kernel_size, false, false,
                  T(1.0), T(0.0));
   });
 }
@@ -209,8 +209,8 @@ void CPUEngine::legacy_conv2d_wgrad(engine_handle backend_handle, const void* co
                                     DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
-    cpu::gemm<T>(static_cast<const T*>(gradient_data), static_cast<const T*>(col_data),
-                 static_cast<T*>(grad_weight_data), out_channels, kernel_size, output_size, false,
+    cpu::legacy_gemm(static_cast<const T*>(gradient_data), static_cast<const T*>(col_data),
+                     static_cast<T*>(grad_weight_data), out_channels, kernel_size, output_size, false,
                  true, T(1.0), T(1.0));
   });
 }
@@ -221,8 +221,8 @@ void CPUEngine::legacy_conv2d_dgrad(engine_handle backend_handle, const void* gr
                                     DTypeDesc type_desc) {
   CHECK_HOMOGENEOUS_DTYPE(type_desc);
   DISPATCH_DTYPE(type_desc.compute_dtype, T, {
-    cpu::gemm<T>(static_cast<const T*>(weight_data), static_cast<const T*>(gradient_data),
-                 static_cast<T*>(col_grad_data), kernel_size, output_size, out_channels, true,
+    cpu::legacy_gemm(static_cast<const T*>(weight_data), static_cast<const T*>(gradient_data),
+                     static_cast<T*>(col_grad_data), kernel_size, output_size, out_channels, true,
                  false, T(1.0), T(0.0));
   });
 }

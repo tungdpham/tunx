@@ -43,6 +43,36 @@ void transpose_impl(const T* input, T* output, const size_t* shape, size_t ndim,
   });
 }
 
+template <typename T>
+void slice_fwd_impl(const T* input, T* output, size_t outer_size, size_t inner_size,
+                    size_t axis_size, size_t start, size_t length) {
+  size_t total_elements = outer_size * length * inner_size;
+  parallel_for<size_t>(0, total_elements, [&](size_t idx) {
+    size_t i = idx % inner_size;
+    size_t tmp = idx / inner_size;
+    size_t l = tmp % length;
+    size_t o = tmp / length;
+
+    size_t input_idx = o * axis_size * inner_size + (start + l) * inner_size + i;
+    output[idx] = input[input_idx];
+  });
+}
+
+template <typename T>
+void slice_bwd_impl(const T* grad_output, T* grad_input, size_t outer_size, size_t inner_size,
+                    size_t axis_size, size_t start, size_t length) {
+  size_t total_elements = outer_size * length * inner_size;
+  parallel_for<size_t>(0, total_elements, [&](size_t idx) {
+    size_t i = idx % inner_size;
+    size_t tmp = idx / inner_size;
+    size_t l = tmp % length;
+    size_t o = tmp / length;
+
+    size_t output_idx = o * axis_size * inner_size + (start + l) * inner_size + i;
+    grad_input[output_idx] += grad_output[idx];
+  });
+}
+
 }  // namespace
 
 void CPUEngine::sdpa_fwd(engine_handle backend_handle, const AttentionStats& stats,
@@ -76,6 +106,31 @@ WorkspaceReq CPUEngine::query_sdpa_graph(engine_handle backend_handle, const Att
 WorkspaceReq CPUEngine::query_transpose_graph(engine_handle backend_handle,
                                               const TransposeStats& stats, DTypeDesc type_desc) {
   return WorkspaceReq{0, 0, 0};
+}
+
+WorkspaceReq CPUEngine::query_slice_graph(engine_handle backend_handle, const SliceStats& stats,
+                                          DTypeDesc type_desc) {
+  return WorkspaceReq{0, 0, 0};
+}
+
+void CPUEngine::slice_fwd(engine_handle backend_handle, const SliceStats& stats, const void* input,
+                          void* output, void* workspace, DTypeDesc type_desc) {
+  CHECK_HOMOGENEOUS_DTYPE(type_desc);
+  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
+    slice_fwd_impl<T>(static_cast<const T*>(input), static_cast<T*>(output), stats.outer_size,
+                      stats.inner_size, stats.axis_size, stats.start, stats.length);
+  });
+}
+
+void CPUEngine::slice_bwd(engine_handle backend_handle, const SliceStats& stats,
+                          const void* grad_output, void* grad_input, void* workspace,
+                          DTypeDesc type_desc) {
+  CHECK_HOMOGENEOUS_DTYPE(type_desc);
+  DISPATCH_DTYPE(type_desc.compute_dtype, T, {
+    slice_bwd_impl<T>(static_cast<const T*>(grad_output), static_cast<T*>(grad_input),
+                      stats.outer_size, stats.inner_size, stats.axis_size, stats.start,
+                      stats.length);
+  });
 }
 
 }  // namespace tunx

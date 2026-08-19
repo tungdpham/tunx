@@ -5,44 +5,30 @@
  * project root for the full license text.
  */
 #pragma once
-
-#include <memory>
 #include <string>
 
-#include "nn/siso_layer.hpp"
+#include "nn/functional_layer.hpp"
 #include "tensor/tensor.hpp"
 
 namespace tunx {
-
-namespace internal {
-class TransposeImpl : public SISOLayerImpl {
-private:
-  size_t dim0_, dim1_;
-
-  Tensor forward_impl(const Tensor &input, Residuals &residuals) override;
-  Tensor backward_impl(const Tensor &grad_output, Residuals &residuals) override;
-
-public:
-  TransposeImpl(size_t dim0, size_t dim1, const std::string &name = "transpose");
-
+struct TransposeOp {
   static constexpr const char *TYPE_NAME = "transpose";
 
-  std::string type() const override { return TYPE_NAME; }
-  LayerConfig get_config() const override;
+  struct Config {
+    size_t dim0;
+    size_t dim1;
+  };
 
-  Vec<size_t> compute_output_shape(const Vec<size_t> &input_shape) const override;
-
-  static std::shared_ptr<TransposeImpl> create_from_config(const LayerConfig &config);
+  static Tensor forward(OpContext &ctx, const Tensor &input, const Config &config);
+  static Tensor backward(OpContext &ctx, const Tensor &grad_output, const Config &config);
+  static LayerConfig get_config(const Config &config, const std::string &name);
+  static Config parse_config(const LayerConfig &config);
+  static Vec<Vec<size_t>> output_shapes(const Vec<Vec<size_t>> &input_shapes, const Config &config);
 };
 
-}  // namespace internal
-
-class Transpose : public LayerRef<internal::TransposeImpl> {
+class Transpose : public FunctionalLayer<TransposeOp> {
 public:
-  explicit Transpose(size_t dim0, size_t dim1, const std::string &name = "transpose")
-      : LayerRef(std::make_shared<internal::TransposeImpl>(dim0, dim1, name)) {}
-
-  using LayerRef<internal::TransposeImpl>::LayerRef;
+  Transpose(size_t dim0, size_t dim1, const std::string &name = "transpose")
+      : FunctionalLayer(TransposeOp::Config{dim0, dim1}, name) {}
 };
-
 }  // namespace tunx

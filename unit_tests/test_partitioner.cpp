@@ -9,7 +9,9 @@
 #include "device/pool_allocator.hpp"
 #include "nn/example_graphs.hpp"
 #include "nn/graph.hpp"
+#include "nn/graph_executor.hpp"
 #include "nn/layer_factory.hpp"
+#include "nn/tensor_bundle.hpp"
 #include "partitioner/graph_partitioner.hpp"
 #include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
@@ -207,12 +209,15 @@ TEST_F(GraphPlannerStateTest, PartitionedResNet9MatchesFullGraphForwardAndBackwa
   fill_uniform(input, -1.0f, 1.0f, 12345ULL);
 
   TensorBundle full_inputs{{"input", to_device(input, full_graph.device())}};
-  TensorBundle full_outputs = full_graph.forward(full_inputs);
+  GraphExecutor full_executor(full_graph);
+  TensorBundle full_outputs = full_executor.forward(full_inputs);
 
   TensorBundle stage0_inputs{{partitions[0].input_uids.front(), to_device(input, stage0.device())}};
-  TensorBundle stage0_outputs = stage0.forward(stage0_inputs);
+  GraphExecutor stage0_executor(stage0);
+  TensorBundle stage0_outputs = stage0_executor.forward(stage0_inputs);
   TensorBundle stage1_inputs = make_partition_input_map(stage0_outputs, partitions[1].input_uids);
-  TensorBundle stage1_outputs = stage1.forward(stage1_inputs);
+  GraphExecutor stage1_executor(stage1);
+  TensorBundle stage1_outputs = stage1_executor.forward(stage1_inputs);
 
   expect_tensors_close(full_outputs.get("output"),
                        stage1_outputs.get(partitions[1].output_uids.front()), 1e-4f);
@@ -221,14 +226,14 @@ TEST_F(GraphPlannerStateTest, PartitionedResNet9MatchesFullGraphForwardAndBackwa
   fill_uniform(grad_output, -1.0f, 1.0f, 12345ULL);
 
   TensorBundle full_output_grads{{"output", to_device(grad_output, full_graph.device())}};
-  TensorBundle full_grad_inputs = full_graph.backward(full_output_grads);
+  TensorBundle full_grad_inputs = full_executor.backward(full_output_grads);
 
   TensorBundle stage1_output_grads{
       {partitions[1].output_uids.front(), to_device(grad_output, stage1.device())}};
-  TensorBundle stage1_grad_inputs = stage1.backward(stage1_output_grads);
+  TensorBundle stage1_grad_inputs = stage1_executor.backward(stage1_output_grads);
   TensorBundle stage0_output_grads =
       make_partition_input_map(stage1_grad_inputs, partitions[0].output_uids);
-  TensorBundle stage0_grad_inputs = stage0.backward(stage0_output_grads);
+  TensorBundle stage0_grad_inputs = stage0_executor.backward(stage0_output_grads);
 
   expect_tensors_close(full_grad_inputs.get("input"),
                        stage0_grad_inputs.get(partitions[0].input_uids.front()), 1e-4f);
@@ -257,20 +262,23 @@ TEST_F(GraphPlannerStateTest, BackwardAccumulatesGradientsAcrossFanOut) {
     fill(right_dense.params()[0].data(), 3.0f);
   }
 
-  Tensor input_tensor = Tensor({1, 1}, DType_t::FP32, getHost());
+  Tensor input_tensor = Tensor({1, 1}, DType_t::FP32, device_);
   fill(input_tensor, 1.0f);
   TensorBundle inputs{{"input", input_tensor}};
 
-  TensorBundle outputs = graph.forward(inputs);
+  GraphExecutor executor(graph);
+  TensorBundle outputs = executor.forward(inputs);
   Tensor output = outputs.get("output");
+  output = to_host(output);
   EXPECT_NEAR(output.data_as<float>()[0], 5.0f, 1e-5f);
 
-  Tensor grad_output = Tensor({1, 1}, DType_t::FP32, getHost());
+  Tensor grad_output = Tensor({1, 1}, DType_t::FP32, device_);
   fill(grad_output, 1.0f);
   TensorBundle output_grads{{"output", grad_output}};
 
-  TensorBundle grad_inputs = graph.backward(output_grads);
+  TensorBundle grad_inputs = executor.backward(output_grads);
   Tensor grad_input = grad_inputs.get("input");
+  grad_input = to_host(grad_input);
   EXPECT_NEAR(grad_input.data_as<float>()[0], 5.0f, 1e-5f);
 }
 
@@ -296,30 +304,31 @@ TEST_F(GraphPlannerStateTest, BackwardClearsAccumulatedGradientsBetweenPasses) {
   fill(left_dense.params()[0].data(), 2.0f);
   fill(right_dense.params()[0].data(), 3.0f);
 
-  Tensor first_input = Tensor({1, 1}, DType_t::FP32, getHost());
+  GraphExecutor executor(graph);
+
+  Tensor first_input = Tensor({1, 1}, DType_t::FP32, device_);
   fill(first_input, 1.0f);
   TensorBundle first_inputs{{"input", first_input}};
-  graph.forward(first_inputs, 0);
+  executor.forward(first_inputs);
 
-  Tensor first_grad_output = Tensor({1, 1}, DType_t::FP32, getHost());
+  Tensor first_grad_output = Tensor({1, 1}, DType_t::FP32, device_);
   fill(first_grad_output, 1.0f);
   TensorBundle first_output_grads{{"output", first_grad_output}};
-  TensorBundle first_grad_inputs = graph.backward(first_output_grads, 0);
-  EXPECT_NEAR(first_grad_inputs.get("input").data_as<float>()[0], 5.0f, 1e-5f);
+  TensorBundle first_grad_inputs = executor.backward(first_output_grads);
+  Tensor grad_input = to_host(first_grad_inputs.get("input"));
+  EXPECT_NEAR(grad_input.data_as<float>()[0], 5.0f, 1e-5f);
 
-  Tensor second_input = Tensor({2, 1}, DType_t::FP32, getHost());
+  Tensor second_input = Tensor({2, 1}, DType_t::FP32, device_);
   fill(second_input, 1.0f);
   TensorBundle second_inputs{{"input", second_input}};
-  graph.forward(second_inputs, 1);
+  executor.forward(second_inputs);
 
-  Tensor second_grad_output = Tensor({2, 1}, DType_t::FP32, getHost());
+  Tensor second_grad_output = Tensor({2, 1}, DType_t::FP32, device_);
   fill(second_grad_output, 1.0f);
   TensorBundle second_output_grads{{"output", second_grad_output}};
-  TensorBundle second_grad_inputs = graph.backward(second_output_grads, 1);
-
-  const Tensor &second_grad_input_tensor = second_grad_inputs.get("input");
-  const float *second_grad_input = second_grad_input_tensor.data_as<float>();
-  for (size_t i = 0; i < second_grad_input_tensor.size(); ++i) {
-    EXPECT_NEAR(second_grad_input[i], 5.0f, 1e-5f);
+  TensorBundle second_grad_inputs = executor.backward(second_output_grads);
+  Tensor second_grad_input = to_host(second_grad_inputs.get("input"));
+  for (size_t i = 0; i < second_grad_input.size(); ++i) {
+    EXPECT_NEAR(second_grad_input.data_as<float>()[i], 5.0f, 1e-5f);
   }
 }

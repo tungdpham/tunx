@@ -321,9 +321,46 @@ void math_maxpool2d_bwd(const T* grad_output, T* grad_input, const int32_t* mask
 }
 
 template <typename T>
-void math_layernorm_bwd(const T* grad_output, const T* input, const T* gamma, T* grad_input,
-                        T* grad_gamma, T* grad_beta, size_t batch_size, size_t channels,
+void math_layernorm_fwd(const T* input, const T* gamma, const T* beta, T* output, T* mean_out,
+                        T* invar_out, size_t batch_size, size_t seq_len, size_t channels,
                         T epsilon) {
+  size_t total_elements = batch_size * seq_len;
+  size_t batch_stride = channels;
+
+  for (size_t n = 0; n < total_elements; ++n) {
+    size_t base_idx = n * batch_stride;
+    T sum = 0;
+    for (size_t c = 0; c < channels; ++c) {
+      sum += input[base_idx + c];
+    }
+    T mean = sum / static_cast<T>(channels);
+    if (mean_out) mean_out[n] = mean;
+
+    T sq_sum = 0;
+    for (size_t c = 0; c < channels; ++c) {
+      T diff = input[base_idx + c] - mean;
+      sq_sum += diff * diff;
+    }
+    T var = sq_sum / static_cast<T>(channels);
+    T inv_std = T(1) / static_cast<T>(std::sqrt(static_cast<double>(var + epsilon)));
+    if (invar_out) invar_out[n] = inv_std;
+
+    for (size_t c = 0; c < channels; ++c) {
+      size_t idx = base_idx + c;
+      T val = input[idx];
+      T normalized = (val - mean) * inv_std;
+      T g = gamma ? gamma[c] : T(1);
+      T b = beta ? beta[c] : T(0);
+      output[idx] = normalized * g + b;
+    }
+  }
+}
+
+template <typename T>
+void math_layernorm_bwd(const T* grad_output, const T* input, const T* gamma, T* grad_input,
+                        T* grad_gamma, T* grad_beta, size_t batch_size, size_t seq_len,
+                        size_t channels, T epsilon) {
+  batch_size = batch_size * seq_len;
   size_t batch_stride = channels;
   std::vector<T> means(batch_size);
   std::vector<T> inv_stds(batch_size);
@@ -494,4 +531,203 @@ void math_conv2d_bgrad_naive(const T* grad_output, T* grad_bias, size_t batch_si
     }
     grad_bias[oc] += static_cast<T>(sum);
   }
+}
+
+template <typename T>
+void math_transpose(const T* input, T* output, const size_t* shape, size_t ndim, size_t dim0, size_t dim1) {
+    size_t total_elements = 1;
+    std::vector<size_t> strides(ndim);
+    for (int i = static_cast<int>(ndim) - 1; i >= 0; --i) {
+        strides[i] = total_elements;
+        total_elements *= shape[i];
+    }
+    std::vector<size_t> out_shape(shape, shape + ndim);
+    std::swap(out_shape[dim0], out_shape[dim1]);
+    
+    std::vector<size_t> out_strides(ndim);
+    size_t out_total = 1;
+    for (int i = static_cast<int>(ndim) - 1; i >= 0; --i) {
+        out_strides[i] = out_total;
+        out_total *= out_shape[i];
+    }
+    
+    for (size_t i = 0; i < total_elements; ++i) {
+        size_t linear_idx = i;
+        size_t out_idx = 0;
+        for (size_t d = 0; d < ndim; ++d) {
+            size_t coord = linear_idx / strides[d];
+            linear_idx %= strides[d];
+            
+            size_t out_d = d;
+            if (d == dim0) out_d = dim1;
+            else if (d == dim1) out_d = dim0;
+            
+            out_idx += coord * out_strides[out_d];
+        }
+        output[out_idx] = input[i];
+    }
+}
+
+template <typename T>
+void math_slice_fwd(const T* input, T* output, size_t outer_size, size_t inner_size,
+                    size_t axis_size, size_t start, size_t length) {
+  for (size_t o = 0; o < outer_size; ++o) {
+    for (size_t l = 0; l < length; ++l) {
+      for (size_t i = 0; i < inner_size; ++i) {
+        size_t input_idx = o * axis_size * inner_size + (start + l) * inner_size + i;
+        size_t output_idx = o * length * inner_size + l * inner_size + i;
+        output[output_idx] = input[input_idx];
+      }
+    }
+  }
+}
+
+template <typename T>
+void math_slice_bwd(const T* grad_output, T* grad_input, size_t outer_size, size_t inner_size,
+                    size_t axis_size, size_t start, size_t length) {
+  for (size_t o = 0; o < outer_size; ++o) {
+    for (size_t l = 0; l < length; ++l) {
+      for (size_t i = 0; i < inner_size; ++i) {
+        size_t output_idx = o * axis_size * inner_size + (start + l) * inner_size + i;
+        size_t input_idx = o * length * inner_size + l * inner_size + i;
+        grad_input[output_idx] = grad_output[input_idx];
+      }
+    }
+  }
+}
+
+template <typename T>
+void math_sdpa_fwd(const T* q, const T* k, const T* v, T* o, T* stats, size_t batch_size,
+                   size_t num_heads, size_t seq_len, size_t head_dim, float attn_scale,
+                   bool is_causal) {
+    size_t B = batch_size, H = num_heads, S = seq_len, D = head_dim;
+    for (size_t b = 0; b < B; ++b) {
+        for (size_t h = 0; h < H; ++h) {
+            for (size_t s_q = 0; s_q < S; ++s_q) {
+                std::vector<float> scores(S, -INFINITY);
+                float max_score = -INFINITY;
+                for (size_t s_k = 0; s_k < S; ++s_k) {
+                    if (is_causal && s_k > s_q) continue;
+                    float dot = 0.0f;
+                    for (size_t d = 0; d < D; ++d) {
+                        float q_val = static_cast<float>(q[b * H * S * D + h * S * D + s_q * D + d]);
+                        float k_val = static_cast<float>(k[b * H * S * D + h * S * D + s_k * D + d]);
+                        dot += q_val * k_val;
+                    }
+                    dot *= attn_scale;
+                    scores[s_k] = dot;
+                    if (dot > max_score) max_score = dot;
+                }
+                
+                float sum_exp = 0.0f;
+                for (size_t s_k = 0; s_k < S; ++s_k) {
+                    if (is_causal && s_k > s_q) continue;
+                    scores[s_k] = std::exp(scores[s_k] - max_score);
+                    sum_exp += scores[s_k];
+                }
+                
+                for (size_t d = 0; d < D; ++d) {
+                    float out_val = 0.0f;
+                    for (size_t s_k = 0; s_k < S; ++s_k) {
+                        if (is_causal && s_k > s_q) continue;
+                        float v_val = static_cast<float>(v[b * H * S * D + h * S * D + s_k * D + d]);
+                        out_val += (scores[s_k] / sum_exp) * v_val;
+                    }
+                    o[b * H * S * D + h * S * D + s_q * D + d] = static_cast<T>(out_val);
+                }
+                if (stats) {
+                    stats[b * H * S + h * S + s_q] = static_cast<T>(std::log(sum_exp) + max_score);
+                }
+            }
+        }
+    }
+}
+
+template <typename T>
+void math_sdpa_bwd(const T* q, const T* k, const T* v, const T* o, const T* do_, T* dq, T* dk, T* dv,
+                   size_t batch_size, size_t num_heads, size_t seq_len, size_t head_dim,
+                   float attn_scale, bool is_causal) {
+    size_t B = batch_size, H = num_heads, S = seq_len, D = head_dim;
+    size_t total_elements = B * H * S * D;
+    for (size_t i = 0; i < total_elements; ++i) {
+        dq[i] = 0; dk[i] = 0; dv[i] = 0;
+    }
+
+    for (size_t b = 0; b < B; ++b) {
+        for (size_t h = 0; h < H; ++h) {
+            for (size_t s_q = 0; s_q < S; ++s_q) {
+                std::vector<float> scores(S, -INFINITY);
+                float max_score = -INFINITY;
+                for (size_t s_k = 0; s_k < S; ++s_k) {
+                    if (is_causal && s_k > s_q) continue;
+                    float dot = 0.0f;
+                    for (size_t d = 0; d < D; ++d) {
+                        float q_val = static_cast<float>(q[b * H * S * D + h * S * D + s_q * D + d]);
+                        float k_val = static_cast<float>(k[b * H * S * D + h * S * D + s_k * D + d]);
+                        dot += q_val * k_val;
+                    }
+                    dot *= attn_scale;
+                    scores[s_k] = dot;
+                    if (dot > max_score) max_score = dot;
+                }
+                
+                float sum_exp = 0.0f;
+                std::vector<float> probs(S, 0.0f);
+                for (size_t s_k = 0; s_k < S; ++s_k) {
+                    if (is_causal && s_k > s_q) continue;
+                    probs[s_k] = std::exp(scores[s_k] - max_score);
+                    sum_exp += probs[s_k];
+                }
+                for (size_t s_k = 0; s_k < S; ++s_k) {
+                    if (is_causal && s_k > s_q) continue;
+                    probs[s_k] /= sum_exp;
+                }
+
+                std::vector<float> dS(S, 0.0f);
+                for (size_t s_k = 0; s_k < S; ++s_k) {
+                    if (is_causal && s_k > s_q) continue;
+                    float ds_val = 0.0f;
+                    for (size_t d = 0; d < D; ++d) {
+                        float do_val = static_cast<float>(do_[b * H * S * D + h * S * D + s_q * D + d]);
+                        float v_val = static_cast<float>(v[b * H * S * D + h * S * D + s_k * D + d]);
+                        ds_val += do_val * v_val;
+                        
+                        float dv_val = static_cast<float>(dv[b * H * S * D + h * S * D + s_k * D + d]);
+                        dv_val += probs[s_k] * do_val;
+                        dv[b * H * S * D + h * S * D + s_k * D + d] = static_cast<T>(dv_val);
+                    }
+                    dS[s_k] = ds_val;
+                }
+
+                float dS_dot_probs = 0.0f;
+                for (size_t s_k = 0; s_k < S; ++s_k) {
+                    if (is_causal && s_k > s_q) continue;
+                    dS_dot_probs += dS[s_k] * probs[s_k];
+                }
+
+                std::vector<float> dP(S, 0.0f);
+                for (size_t s_k = 0; s_k < S; ++s_k) {
+                    if (is_causal && s_k > s_q) continue;
+                    dP[s_k] = probs[s_k] * (dS[s_k] - dS_dot_probs);
+                }
+
+                for (size_t d = 0; d < D; ++d) {
+                    float dq_val = 0.0f;
+                    float q_val = static_cast<float>(q[b * H * S * D + h * S * D + s_q * D + d]);
+                    for (size_t s_k = 0; s_k < S; ++s_k) {
+                        if (is_causal && s_k > s_q) continue;
+                        float k_val = static_cast<float>(k[b * H * S * D + h * S * D + s_k * D + d]);
+                        float dp_scaled = dP[s_k] * attn_scale;
+                        dq_val += dp_scaled * k_val;
+                        
+                        float dk_val = static_cast<float>(dk[b * H * S * D + h * S * D + s_k * D + d]);
+                        dk_val += dp_scaled * q_val;
+                        dk[b * H * S * D + h * S * D + s_k * D + d] = static_cast<T>(dk_val);
+                    }
+                    float old_dq = static_cast<float>(dq[b * H * S * D + h * S * D + s_q * D + d]);
+                    dq[b * H * S * D + h * S * D + s_q * D + d] = static_cast<T>(old_dq + dq_val);
+                }
+            }
+        }
+    }
 }

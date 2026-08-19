@@ -26,13 +26,6 @@ public:
   std::string name() const override;
   std::unique_ptr<ActivationFunction> clone() const override;
 
-private:
-  template <typename Compute_T>
-  void apply_impl(const Tensor &input, Tensor &output, stream s) const;
-
-  template <typename Compute_T>
-  void compute_gradient_impl(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
-                             stream s) const;
 };
 
 }  // namespace func

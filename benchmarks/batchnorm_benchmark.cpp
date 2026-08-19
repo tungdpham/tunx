@@ -1,9 +1,7 @@
 #include <cstddef>
-#include <memory>
 
 #include "device/device_manager.hpp"
 #include "device/pool_allocator.hpp"
-#include "nn/activations_impl/relu.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer_factory.hpp"
 #include "nn/layers_impl/batchnorm.hpp"
@@ -34,7 +32,7 @@ signed main() {
   auto legacy_batchnorm_layer =
       LegacyBatchNorm(NUM_FEATURES, 1e-5f, 0.1f, true, "legacy_batchnorm_test");
   auto legacy_bn_output = legacy_batchnorm_layer(input);
-  auto relu_layer = Activation(std::make_unique<func::ReLU>(), "relu_activation");
+  auto relu_layer = ReLU("relu_activation");
   auto legacy_relu_output_node = relu_layer(legacy_bn_output);
 
   graph.compile(allocator);

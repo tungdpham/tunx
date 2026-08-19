@@ -28,7 +28,21 @@ void ELU::apply(const Tensor &input, Tensor &output, stream s) const {
     throw std::runtime_error("Input and output must be on the same device for ELU");
   }
 
-  DISPATCH_DTYPE(input.dtype(), T, return apply_impl<T>(input, output, s));
+  size_t size = input.size();
+  auto &device = input.device();
+  if (input.device_type() == DeviceType::CPU) {
+    create_cpu_task(device, s, cpu::elu, input.dtype(), input.data_as(), output.data_as(), size,
+                    alpha_);
+  }
+#ifdef TUNX_USE_CUDA
+  else if (input.device_type() == DeviceType::CUDA) {
+    create_cuda_task(device, s, cuda::elu, input.dtype(), input.data_as(), output.data_as(), size,
+                     alpha_);
+  }
+#endif
+  else {
+    throw std::runtime_error("Unsupported device type for ELU apply");
+  }
 }
 
 void ELU::compute_gradient(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
@@ -38,65 +52,27 @@ void ELU::compute_gradient(const Tensor &input, const Tensor &grad_output, Tenso
   if (grad_output.device() != grad_input.device()) {
     throw std::runtime_error("Input and upstream grad_output must be on the same device for ELU");
   }
-  DISPATCH_DTYPE(input.dtype(), T,
-                 return compute_gradient_impl<T>(input, grad_output, grad_input, s));
-}
-
-std::string ELU::name() const { return "elu"; }
-
-std::unique_ptr<ActivationFunction> ELU::clone() const { return std::make_unique<ELU>(alpha_); }
-
-template <typename Compute_T>
-void ELU::apply_impl(const Tensor &input, Tensor &output, stream handle) const {
-  if (input.dtype() != dtype_of<Compute_T>() || output.dtype() != dtype_of<Compute_T>()) {
-    throw std::runtime_error("ELU tensor dtype mismatch with dispatch type");
-  }
-
-  size_t size = input.size();
-  const Compute_T alpha_typed = static_cast<Compute_T>(alpha_);
-  auto &device = input.device();
-  if (input.device_type() == DeviceType::CPU) {
-    create_cpu_task(device, handle, cpu::elu<Compute_T>, input.data_as<Compute_T>(),
-                    output.data_as<Compute_T>(), size, alpha_typed);
-  }
-#ifdef TUNX_USE_CUDA
-  else if (input.device_type() == DeviceType::CUDA) {
-    create_cuda_task(device, handle, cuda::elu<Compute_T>, input.data_as<Compute_T>(),
-                     output.data_as<Compute_T>(), size, alpha_typed);
-  }
-#endif
-  else {
-    throw std::runtime_error("Unsupported device type for ELU apply");
-  }
-}
-
-template <typename Compute_T>
-void ELU::compute_gradient_impl(const Tensor &input, const Tensor &grad_output, Tensor &grad_input,
-                                stream handle) const {
-  if (input.dtype() != dtype_of<Compute_T>() || grad_output.dtype() != dtype_of<Compute_T>() ||
-      grad_input.dtype() != dtype_of<Compute_T>()) {
-    throw std::runtime_error("ELU tensor dtype mismatch with dispatch type");
-  }
 
   size_t size = grad_output.size();
-  const Compute_T alpha_typed = static_cast<Compute_T>(alpha_);
   auto &device = grad_output.device();
   if (grad_output.device_type() == DeviceType::CPU) {
-    create_cpu_task(device, handle, cpu::elu_gradient<Compute_T>, input.data_as<Compute_T>(),
-                    grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size,
-                    alpha_typed);
+    create_cpu_task(device, s, cpu::elu_gradient, input.dtype(), input.data_as(),
+                    grad_output.data_as(), grad_input.data_as(), size, alpha_);
   }
 #ifdef TUNX_USE_CUDA
   else if (grad_output.device_type() == DeviceType::CUDA) {
-    create_cuda_task(device, handle, cuda::elu_gradient<Compute_T>, input.data_as<Compute_T>(),
-                     grad_output.data_as<Compute_T>(), grad_input.data_as<Compute_T>(), size,
-                     alpha_typed);
+    create_cuda_task(device, s, cuda::elu_gradient, input.dtype(), input.data_as(),
+                     grad_output.data_as(), grad_input.data_as(), size, alpha_);
   }
 #endif
   else {
     throw std::runtime_error("Unsupported device type for ELU compute_gradient");
   }
 }
+
+std::string ELU::name() const { return "elu"; }
+
+std::unique_ptr<ActivationFunction> ELU::clone() const { return std::make_unique<ELU>(alpha_); }
 
 }  // namespace func
 }  // namespace tunx
