@@ -610,6 +610,12 @@ int main() {
   std::vector<std::string> to_checks = {"MACRO"};
 
   run_simulation_trials(
+      trials, "Independent Operators", "independent_operators",
+      []() { return random_m_sequences_graph(10, 1); }, to_checks);
+  run_simulation_trials(
+      trials, "Parallel Sequences", "parallel_sequences",
+      []() { return random_m_sequences_graph(4, 4); }, to_checks);
+  run_simulation_trials(
       trials, "Join", "join", []() { return random_joining_graph(4); }, to_checks);
   run_simulation_trials(
       trials, "Order-Invariant Branch", "order_invariant_branch",
