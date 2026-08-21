@@ -1,21 +1,33 @@
 {
   "host": "127.0.0.1",
   "port": 9000,
-  "local_worker_host": "127.0.0.1",
-  "local_worker_port": 9001,
+  "local_worker_position": 0,
   "num_io_threads": 4,
   "max_packet_size": 4194304,
   "skts_per_endpoint": 1,
-  "worker_endpoints": [
+  "workers": [
     {
-      "type": "tcp",
-      "host": "127.0.0.1",
-      "port": 8001
+      "endpoint": {
+        "type": "tcp",
+        "host": "127.0.0.1",
+        "port": 9001
+      },
+      "compute_power": 2.0,
+      "interconnect_speeds": [
+        3000000.0
+      ]
+    },
+    {
+      "endpoint": {
+        "type": "tcp",
+        "host": "127.0.0.1",
+        "port": 8001
+      },
+      "compute_power": 1.0,
+      "interconnect_speeds": [
+        3000000.0
+      ]
     }
-  ],
-  "partition_ratios": [
-    2,
-    1
   ],
   "epochs": 20,
   "batch_size": 256,
