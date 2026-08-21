@@ -421,3 +421,60 @@ inline Graph tunx_v1_graph() {
 
   return g;
 }
+
+inline Graph sample_failure_graph() {
+  Graph g;
+
+  auto* input = g.add_act("input", 1280);
+  auto* b3_0_seq = g.add_act("b3_0_seq", 1280);
+  auto* b2_1_branch0 = g.add_act("b2_1_branch0", 5120);
+  auto* b2_1_branch1 = g.add_act("b2_1_branch1", 2560);
+  auto* b1_2_branch0 = g.add_act("b1_2_branch0", 5120);
+  auto* b1_2_branch1 = g.add_act("b1_2_branch1", 2560);
+  auto* b1_2_branch2 = g.add_act("b1_2_branch2", 2560);
+  auto* b1_3_seq = g.add_act("b1_3_seq", 1280);
+
+  g.add_op("b3_0_seq_conv", 2048, {input}, {b3_0_seq}, {}, 1024);
+  
+  g.add_op("b2_1_conv0", 256, {b3_0_seq}, {b2_1_branch0}, {}, 4096);
+  g.add_op("b2_1_conv1", 2048, {b3_0_seq}, {b2_1_branch1}, {}, 1024);
+
+  g.add_op("b1_2_conv0", 512, {b2_1_branch0}, {b1_2_branch0}, {}, 4096);
+  g.add_op("b1_2_conv1", 1024, {b2_1_branch0}, {b1_2_branch1}, {}, 1024);
+  g.add_op("b1_2_conv2", 512, {b2_1_branch0}, {b1_2_branch2}, {}, 1024);
+
+  g.add_op("b1_3_seq_conv", 512, {b2_1_branch1}, {b1_3_seq}, {}, 512);
+
+  g.set_inputs({input});
+  g.set_outputs({b1_2_branch0, b1_2_branch1, b1_2_branch2, b1_3_seq});
+
+  return g;
+}
+inline Graph sample_failure_graph_2() {
+  Graph g;
+
+  auto* input = g.add_act("input", 5120);
+  auto* b3_0_seq = g.add_act("b3_0_seq", 5120);
+  auto* b2_1_branch0 = g.add_act("b2_1_branch0", 1280);
+  auto* b2_1_branch1 = g.add_act("b2_1_branch1", 1280);
+  auto* b2_1_branch2 = g.add_act("b2_1_branch2", 10240);
+  auto* b1_2_seq = g.add_act("b1_2_seq", 5120);
+  auto* b1_3_seq = g.add_act("b1_3_seq", 5120);
+  auto* b1_4_seq = g.add_act("b1_4_seq", 5120);
+
+  g.add_op("b3_0_seq_conv", 2048, {input}, {b3_0_seq}, {}, 1024);
+  
+  g.add_op("b2_1_conv0", 256, {b3_0_seq}, {b2_1_branch0}, {}, 512);
+  g.add_op("b2_1_conv1", 1024, {b3_0_seq}, {b2_1_branch1}, {}, 2048);
+  g.add_op("b2_1_conv2", 512, {b3_0_seq}, {b2_1_branch2}, {}, 512);
+
+  g.add_op("b1_2_seq_conv", 1024, {b2_1_branch0}, {b1_2_seq}, {}, 512);
+  g.add_op("b1_3_seq_conv", 2048, {b2_1_branch1}, {b1_3_seq}, {}, 1024);
+  g.add_op("b1_4_seq_conv", 256, {b2_1_branch2}, {b1_4_seq}, {}, 1024);
+
+  g.set_inputs({input});
+  g.set_outputs({b1_2_seq, b1_3_seq, b1_4_seq});
+
+  return g;
+}
+

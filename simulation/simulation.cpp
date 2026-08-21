@@ -17,6 +17,7 @@
 #include "graph_executor.h"
 #include "graph_generator.h"
 #include "macro_solver.h"
+#include "macro_solver_v2.h"
 #include "memory_packer.h"
 
 std::vector<std::string> find_fw_macro_candidate_execution_order(Graph& graph,
@@ -28,6 +29,18 @@ std::vector<std::string> find_fw_macro_candidate_execution_order(Graph& graph,
 std::vector<std::string> find_bw_macro_candidate_execution_order(Graph& graph,
                                                                  std::ostream* os = nullptr) {
   MacroSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+std::vector<std::string> find_fw_macro_v2_candidate_execution_order(Graph& graph,
+                                                                    std::ostream* os = nullptr) {
+  MacroSolverV2 solver(graph, os);
+  return solver.find_forward_order();
+}
+
+std::vector<std::string> find_bw_macro_v2_candidate_execution_order(Graph& graph,
+                                                                    std::ostream* os = nullptr) {
+  MacroSolverV2 solver(graph, os);
   return solver.find_backward_order();
 }
 
@@ -55,7 +68,7 @@ std::vector<std::string> find_fw_fork_join_execution_order(Graph& graph,
     temp_allocator.unsubscribe("baseline");
   }
 
-  auto [dependencies, dependents] = get_dependencies(graph);
+  auto [dependencies, dependents] = get_op_dependencies(graph);
   struct Schedule {
     size_t peak;
     std::vector<std::string> order;
@@ -137,7 +150,7 @@ std::vector<std::string> find_fw_fork_join_execution_order(Graph& graph,
 }
 
 std::vector<std::string> find_fw_naive_dfs_execution_order(Graph& graph) {
-  auto [dependencies, dependents] = get_dependencies(graph);
+  auto [dependencies, dependents] = get_op_dependencies(graph);
   std::set<std::string> visited;
   std::vector<std::string> order;
 
@@ -197,7 +210,7 @@ std::vector<std::string> find_bw_fork_join_execution_order(Graph& graph,
     temp_allocator.unsubscribe("baseline");
   }
 
-  auto deps_and_dependents = get_dependencies(graph);
+  auto deps_and_dependents = get_op_dependencies(graph);
   auto dependencies = deps_and_dependents.second;
 
   struct Schedule {
@@ -295,7 +308,7 @@ std::vector<std::string> find_bw_fork_join_execution_order(Graph& graph,
 }
 
 std::vector<std::string> find_bw_naive_dfs_execution_order(Graph& graph) {
-  auto deps_and_dependents = get_dependencies(graph);
+  auto deps_and_dependents = get_op_dependencies(graph);
   auto dependencies = deps_and_dependents.second;
   std::set<std::string> visited;
   std::vector<std::string> order;
@@ -530,18 +543,24 @@ void run_simulation_trials(int original_trials, const std::string& title,
 
     auto fw_best_order = find_fw_fork_join_execution_order(g);
     auto fw_macro_order = find_fw_macro_candidate_execution_order(g);
+    auto fw_macro_v2_order = find_fw_macro_v2_candidate_execution_order(g);
     auto fw_dfs_order = find_fw_naive_dfs_execution_order(g);
 
-    std::map<std::string, std::vector<std::string>> fw_orders = {
-        {"BEST", fw_best_order}, {"MACRO", fw_macro_order}, {"DFS", fw_dfs_order}};
+    std::map<std::string, std::vector<std::string>> fw_orders = {{"BEST", fw_best_order},
+                                                                 {"MACRO", fw_macro_order},
+                                                                 {"MACRO_V2", fw_macro_v2_order},
+                                                                 {"DFS", fw_dfs_order}};
 
     auto fw_effs = rank_execution_orders(g, fw_orders);
 
     auto bw_best_order = find_bw_fork_join_execution_order(g);
     auto bw_macro_order = find_bw_macro_candidate_execution_order(g);
+    auto bw_macro_v2_order = find_bw_macro_v2_candidate_execution_order(g);
     auto bw_dfs_order = find_bw_naive_dfs_execution_order(g);
-    std::map<std::string, std::vector<std::string>> bw_orders = {
-        {"BEST", bw_best_order}, {"MACRO", bw_macro_order}, {"DFS", bw_dfs_order}};
+    std::map<std::string, std::vector<std::string>> bw_orders = {{"BEST", bw_best_order},
+                                                                 {"MACRO", bw_macro_order},
+                                                                 {"MACRO_V2", bw_macro_v2_order},
+                                                                 {"DFS", bw_dfs_order}};
     auto bw_effs = rank_backward_execution_orders(g, bw_orders);
     auto fw_packing_effs = rank_packing_efficiencies(g, fw_orders, false);
     auto bw_packing_effs = rank_packing_efficiencies(g, bw_orders, true);
@@ -560,8 +579,12 @@ void run_simulation_trials(int original_trials, const std::string& title,
           log << "\n";
         };
         print_path("BEST", fw_best_order);
-        print_path(name, fw_macro_order);
-        find_fw_macro_candidate_execution_order(g, &log);
+        print_path(name, fw_orders[name]);
+        if (name == "MACRO_V2") {
+          find_fw_macro_v2_candidate_execution_order(g, &log);
+        } else {
+          find_fw_macro_candidate_execution_order(g, &log);
+        }
         log << "\n";
       }
     }
@@ -574,14 +597,21 @@ void run_simulation_trials(int original_trials, const std::string& title,
         std::ofstream log("./logs/" + log_prefix + "_bw_bad_macro.log", std::ios_base::app);
         log << "--- Trial Failure ---\n";
         log << name << " Efficiency: " << eff << "%\n";
+        log << "BEST Efficiency: " << bw_effs["BEST"] << "%\n";
+        log << "DFS Efficiency: " << bw_effs["DFS"] << "%\n";
         auto print_path = [&](const std::string& p_name, const std::vector<std::string>& path) {
           log << p_name << " Path: ";
           for (const auto& op : path) log << op << " ";
           log << "\n";
         };
         print_path("BEST", bw_best_order);
-        print_path(name, bw_macro_order);
-        find_bw_macro_candidate_execution_order(g, &log);
+        print_path("DFS", bw_dfs_order);
+        print_path(name, bw_orders[name]);
+        if (name == "MACRO_V2") {
+          find_bw_macro_v2_candidate_execution_order(g, &log);
+        } else {
+          find_bw_macro_candidate_execution_order(g, &log);
+        }
         log << "\n";
       }
     }
@@ -604,31 +634,36 @@ void run_simulation_trials(int original_trials, const std::string& title,
 
 int main() {
   srand(static_cast<unsigned int>(time(nullptr)));
+  std::vector<std::string> to_checks = {"MACRO_V2"};
+
+  run_simulation_trials(
+      1, "Sample Failure", "sample_failure", []() { return sample_failure_graph(); }, to_checks);
+  run_simulation_trials(
+      1, "Sample Failure 2", "sample_failure_2", []() { return sample_failure_graph_2(); }, to_checks);
 
   int trials;
   std::cin >> trials;
-  std::vector<std::string> to_checks = {"MACRO"};
 
-  run_simulation_trials(
-      trials, "Independent Operators", "independent_operators",
-      []() { return random_m_sequences_graph(10, 1); }, to_checks);
-  run_simulation_trials(
-      trials, "Parallel Sequences", "parallel_sequences",
-      []() { return random_m_sequences_graph(4, 4); }, to_checks);
-  run_simulation_trials(
-      trials, "Join", "join", []() { return random_joining_graph(4); }, to_checks);
-  run_simulation_trials(
-      trials, "Order-Invariant Branch", "order_invariant_branch",
-      []() { return random_order_invariant_branching_graph(3); }, to_checks);
-  run_simulation_trials(
-      trials, "Order-Invariant Fork Join", "order_invariant_fork_join",
-      []() { return random_order_invariant_fork_join_graph(4); }, to_checks);
+  // run_simulation_trials(
+  //     trials, "Independent Operators", "independent_operators",
+  //     []() { return random_m_sequences_graph(10, 1); }, to_checks);
+  // run_simulation_trials(
+  //     trials, "Parallel Sequences", "parallel_sequences",
+  //     []() { return random_m_sequences_graph(4, 4); }, to_checks);
+  // run_simulation_trials(
+  //     trials, "Join", "join", []() { return random_joining_graph(4); }, to_checks);
+  // run_simulation_trials(
+  //     trials, "Order-Invariant Branch", "order_invariant_branch",
+  //     []() { return random_order_invariant_branching_graph(3); }, to_checks);
+  // run_simulation_trials(
+  //     trials, "Order-Invariant Fork Join", "order_invariant_fork_join",
+  //     []() { return random_order_invariant_fork_join_graph(4); }, to_checks);
   run_simulation_trials(
       trials, "Order-Dependent Branch", "branch", []() { return random_branching_graph(3); },
       to_checks);
-  run_simulation_trials(
-      trials, "Order-Dependent Fork Join", "fork_join", []() { return random_fork_join_graph(4); },
-      to_checks);
+  // run_simulation_trials(
+  //     trials, "Order-Dependent Fork Join", "fork_join", []() { return random_fork_join_graph(4);
+  //     }, to_checks);
 
   return 0;
 }

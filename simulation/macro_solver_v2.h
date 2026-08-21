@@ -1,3 +1,6 @@
+#include <bitset>
+
+#include "macro_solver.h"
 #pragma once
 
 #include <algorithm>
@@ -14,31 +17,7 @@
 
 #include "graph.h"
 
-struct MacroNode {
-  std::string id;
-  std::vector<std::string> ops;
-  long long a;
-  long long b;
-};
-
-inline std::pair<long, long> get_rank(const MacroNode& m) {
-  if (m.b < 0) {
-    return {0, m.a};
-  } else {
-    return {1, m.b - m.a};
-  }
-}
-
-inline bool compare_macros(const MacroNode& m1, const MacroNode& m2) {
-  auto rank1 = get_rank(m1);
-  auto rank2 = get_rank(m2);
-  if (rank1.first != rank2.first) return rank1.first < rank2.first;
-  return rank1.second < rank2.second;
-}
-
-inline bool operator<(const MacroNode& m1, const MacroNode& m2) { return compare_macros(m1, m2); }
-
-class MacroSolver {
+class MacroSolverV2 {
 private:
   // core
   Graph& graph_;
@@ -165,6 +144,11 @@ private:
     return distances;
   }
 
+  bool is_descendant(const std::string& ancestor, const std::string& descendant) const {
+    const auto dists = ancestor_distances(descendant);
+    return dists.find(ancestor) != dists.end();
+  }
+
   std::string nearest_common_branching_ancestor(const std::string& first,
                                                 const std::string& second) const {
     const auto first_distances = ancestor_distances(first);
@@ -245,8 +229,25 @@ private:
                                 const std::set<std::string>& cached_tensors, int& next_macro_id) {
     std::string worst_parent;
     for (const auto& parent : macro_deps_.at(join)) {
-      if (macro_dependents_.at(parent).size() != 1 ||
-          has_peers_forward(parent, out_deg, cached_tensors) ||
+      bool valid_dependents = true;
+      for (const auto& dep : macro_dependents_.at(parent)) {
+        if (dep != join) {
+          if (is_descendant(dep, join)) {
+            // parent -> dep -> join. Merging parent and join creates a cycle!
+            valid_dependents = false;
+            break;
+          }
+          if (is_descendant(join, dep)) {
+            // join -> dep and parent -> dep. No cycle. Safe to ignore cost check.
+            continue;
+          }
+          if (macros_.at(dep) < macros_.at(join)) {
+            valid_dependents = false;
+            break;
+          }
+        }
+      }
+      if (!valid_dependents || has_peers_forward(parent, out_deg, cached_tensors) ||
           !(macros_.at(join) < macros_.at(parent))) {
         continue;
       }
@@ -263,10 +264,34 @@ private:
                                          int& next_macro_id) {
     std::string worst_parent;
     for (const auto& parent : macro_deps_.at(join)) {
-      if (macro_dependents_.at(parent).size() != 1 ||
-          has_peers_backward(parent, in_deg, cached_tensors) ||
+      bool valid_dependents = true;
+      for (const auto& dep : macro_dependents_.at(parent)) {
+        if (dep != join) {
+          if (is_descendant(dep, join)) {
+            // parent -> dep -> join. Merging parent and join creates a cycle!
+            valid_dependents = false;
+            break;
+          }
+          if (is_descendant(join, dep)) {
+            // join -> dep and parent -> dep. No cycle. Safe to ignore cost check.
+            continue;
+          }
+          if (macros_.at(dep) < macros_.at(join)) {
+            valid_dependents = false;
+            break;
+          }
+        }
+      }
+      if (!valid_dependents || has_peers_backward(parent, in_deg, cached_tensors) ||
           !(macros_.at(join) < macros_.at(parent))) {
         continue;
+      }
+      if (os_) {
+        *os_ << "Valid parent: " << macros_.at(parent).id << "[";
+        for (auto op : macros_.at(parent).ops) {
+          *os_ << op << " ";
+        }
+        *os_ << ", a: " << macros_.at(parent).a << ", b: " << macros_.at(parent).b << "]\n";
       }
       if (worst_parent.empty() || macros_.at(worst_parent) < macros_.at(parent)) {
         worst_parent = parent;
@@ -276,7 +301,7 @@ private:
   }
 
 public:
-  MacroSolver(Graph& graph, std::ostream* os = nullptr)
+  MacroSolverV2(Graph& graph, std::ostream* os = nullptr)
       : graph_(graph),
         os_(os) {}
 
@@ -478,8 +503,11 @@ public:
     }
 
     auto deps_and_dependents = get_op_dependencies(graph_);
+    auto tensor_deps_and_dependents = get_tensor_dependencies(graph_);
     auto deps = deps_and_dependents.second;
     auto dependents = deps_and_dependents.first;
+    auto tensor_deps = tensor_deps_and_dependents.second;
+    auto tensor_dependents = tensor_deps_and_dependents.first;
 
     std::set<std::string> cached_tensors;
     for (auto& [uuid, node] : graph_.op_nodes()) {
@@ -492,10 +520,30 @@ public:
     macro_deps_.clear();
     macro_dependents_.clear();
 
+    // Fix gradient accumulated nodes memory tracking
+    std::map<std::string, ActivationNode*> tensor_map;
+    for (auto& [uuid, node] : graph_.op_nodes()) {
+      for (auto* t : node.outputs()) tensor_map[t->uuid()] = t;
+    }
+    for (auto* t : graph_.inputs()) tensor_map[t->uuid()] = t;
+
+    auto out_deg = get_out_deg(graph_);
+    std::map<std::string, std::vector<std::string>> tensor_to_bw_ops;
+    for (auto& id : op_ids) {
+      auto& node = graph_.get_op(id);
+      for (auto* t : node.inputs()) {
+        if (out_deg[t->uuid()] > 1) {
+          tensor_to_bw_ops[t->uuid()].push_back(id);
+        }
+      }
+    }
+
     for (auto& id : op_ids) {
       auto& node = graph_.get_op(id);
       long long all_inputs = 0;
       for (auto* t : node.inputs()) {
+        // be a little pessimistic here, assuming that this operator creates the gradient (even if
+        // it's shared in reality)
         all_inputs += t->size();
       }
 
@@ -520,6 +568,14 @@ public:
       macro_deps_[id] = deps[id];
       macro_dependents_[id] = dependents[id];
     }
+
+    std::vector<std::string> tensor_ids;
+    for (auto& [id, count] : out_deg) {
+      if (count > 1 && tensor_to_bw_ops.count(id)) {
+        tensor_ids.push_back(id);
+      }
+    }
+    std::sort(tensor_ids.begin(), tensor_ids.end());
 
     std::vector<std::string> topo_order;
     std::map<std::string, int> in_deg_topo;
@@ -552,21 +608,132 @@ public:
       }
     }
 
+    std::set<std::string> resolved_shared_gradients;
     std::deque<std::string> pending(topo_order.begin(), topo_order.end());
     while (!pending.empty()) {
       const std::string current = pending.front();
       pending.pop_front();
       if (!macros_.contains(current)) continue;
 
+      bool postpone = false;
+      for (const auto& op : macros_.at(current).ops) {
+        const auto& node = graph_.get_op(op);
+        for (auto* t : node.inputs()) {
+          std::string t_id = t->uuid();
+          if (tensor_to_bw_ops.count(t_id) && tensor_to_bw_ops.at(t_id).size() > 1) {
+            if (!resolved_shared_gradients.count(t_id)) {
+              postpone = true;
+              break;
+            }
+          }
+        }
+        if (postpone) break;
+      }
+
       if (macro_deps_.at(current).size() == 1) {
         const std::string parent = *macro_deps_.at(current).begin();
         if (macro_dependents_.at(parent).size() == 1 && macros_.at(current) < macros_.at(parent)) {
-          pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
-          continue;
+          if (!postpone) {
+            pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
+            continue;
+          }
         }
       }
 
       if (macro_deps_.at(current).size() > 1) {
+        bool structure_changed = false;
+        std::set<std::string> resolved_this_iteration;
+
+        for (const auto& op : macros_.at(current).ops) {
+          const auto& node = graph_.get_op(op);
+          for (auto* t : node.outputs()) {
+            std::string t_id = t->uuid();
+            if (tensor_to_bw_ops.count(t_id) && tensor_to_bw_ops.at(t_id).size() > 1) {
+              if (resolved_shared_gradients.count(t_id)) continue;
+              resolved_shared_gradients.insert(t_id);
+              resolved_this_iteration.insert(t_id);
+            }
+          }
+        }
+
+        for (const std::string& t_id : resolved_this_iteration) {
+          std::vector<std::string> parent_macros;
+          for (const auto& v : tensor_to_bw_ops.at(t_id)) {
+            for (const auto& [m_id, m] : macros_) {
+              if (std::find(m.ops.begin(), m.ops.end(), v) != m.ops.end()) {
+                if (std::find(parent_macros.begin(), parent_macros.end(), m_id) ==
+                    parent_macros.end()) {
+                  parent_macros.push_back(m_id);
+                }
+                break;
+              }
+            }
+          }
+
+          if (parent_macros.size() > 1) {
+            std::vector<std::string> M;
+            for (const auto& u : parent_macros) {
+              bool is_minimal = true;
+              for (const auto& v : parent_macros) {
+                if (u != v && is_descendant(v, u)) {
+                  is_minimal = false;
+                  break;
+                }
+              }
+              if (is_minimal) M.push_back(u);
+            }
+
+            if (M.empty()) continue;
+
+            long long cost = tensor_map.at(t_id)->size();
+            std::string best_parent = M.front();
+            for (const auto& m : M) {
+              MacroNode m_dec = macros_.at(m);
+              m_dec.a -= cost;
+              m_dec.b -= cost;
+
+              MacroNode best_dec = macros_.at(best_parent);
+              best_dec.a -= cost;
+              best_dec.b -= cost;
+
+              if (m_dec < best_dec) {
+                best_parent = m;
+              }
+            }
+
+            if (os_) {
+              *os_ << "Gradient Accumulated Tensor " << t_id << " best parent: " << best_parent
+                   << std::endl;
+            }
+
+            for (const auto& m : parent_macros) {
+              if (std::find(pending.begin(), pending.end(), m) == pending.end()) {
+                pending.push_front(m);
+              }
+              if (m == best_parent) continue;
+
+              if (os_) {
+                *os_ << "  added dependency for other parent: " << m << " (size " << cost << ")"
+                     << std::endl;
+              }
+
+              macro_deps_.at(m).insert(best_parent);
+              macro_dependents_.at(best_parent).insert(m);
+
+              macros_.at(m).a -= cost;
+              macros_.at(m).b -= cost;
+            }
+            structure_changed = true;
+          }
+        }
+
+        if (structure_changed) {
+          pending.push_front(current);
+          continue;
+        }
+
+        if (postpone) continue;
+
         const std::string prepared = prepare_join_branches(current, next_macro_id);
         if (prepared != current) {
           pending.push_front(prepared);
@@ -616,6 +783,7 @@ public:
 
     while (final_order.size() < op_ids.size()) {
       if (ready_macros.empty()) {
+        save_graph_to_dot(graph_, "broken_macro_graph.dot", true);
         throw std::runtime_error("Graph has a cycle or unresolved dependencies.");
       }
 

@@ -25,7 +25,7 @@ inline std::vector<std::string> find_legacy_minimum_memory_execution_order(Graph
   }
 
   auto out_deg = get_out_deg(graph);
-  auto [deps, dependents] = get_dependencies(graph);
+  auto [deps, dependents] = get_op_dependencies(graph);
 
   std::map<std::string, int> in_degree;
   for (auto& id : op_ids) {
