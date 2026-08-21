@@ -118,3 +118,6 @@ private/
 
 # github
 /.github/
+
+# experiment results
+/experiments/
