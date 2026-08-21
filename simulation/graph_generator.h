@@ -478,3 +478,98 @@ inline Graph sample_failure_graph_2() {
   return g;
 }
 
+inline Graph sample_failure_graph_3() {
+  Graph g;
+  auto* input = g.add_act("input", 2560);
+  auto* b3_0_branch0 = g.add_act("b3_0_branch0", 1280);
+  auto* b3_0_branch1 = g.add_act("b3_0_branch1", 1280);
+  auto* b2_1_branch0 = g.add_act("b2_1_branch0", 10240);
+  auto* b2_1_branch1 = g.add_act("b2_1_branch1", 10240);
+  auto* b2_1_branch2 = g.add_act("b2_1_branch2", 2560);
+  auto* b1_2_seq = g.add_act("b1_2_seq", 10240);
+  auto* b1_3_branch0 = g.add_act("b1_3_branch0", 10240);
+  auto* b1_3_branch1 = g.add_act("b1_3_branch1", 1280);
+  auto* b1_4_seq = g.add_act("b1_4_seq", 2560);
+  auto* b2_5_seq = g.add_act("b2_5_seq", 10240);
+  auto* b1_6_seq = g.add_act("b1_6_seq", 1280);
+
+  g.add_op("b3_0_conv0", 256, {input}, {b3_0_branch0}, {}, 4096);
+  g.add_op("b3_0_conv1", 2048, {input}, {b3_0_branch1}, {}, 2048);
+  g.add_op("b2_1_conv0", 256, {b3_0_branch0}, {b2_1_branch0}, {}, 512);
+  g.add_op("b1_2_seq_conv", 256, {b2_1_branch0}, {b1_2_seq}, {}, 4096);
+  
+  g.add_op("b2_1_conv1", 256, {b3_0_branch0}, {b2_1_branch1}, {}, 512);
+  g.add_op("b1_3_conv0", 256, {b2_1_branch1}, {b1_3_branch0}, {}, 512);
+  g.add_op("b1_3_conv1", 512, {b2_1_branch1}, {b1_3_branch1}, {}, 1024);
+
+  g.add_op("b2_1_conv2", 512, {b3_0_branch0}, {b2_1_branch2}, {}, 4096);
+  g.add_op("b1_4_seq_conv", 256, {b2_1_branch2}, {b1_4_seq}, {}, 512);
+
+  g.add_op("b2_5_seq_conv", 2048, {b3_0_branch1}, {b2_5_seq}, {}, 512);
+  g.add_op("b1_6_seq_conv", 1024, {b2_5_seq}, {b1_6_seq}, {}, 4096);
+
+  g.set_inputs({input});
+  g.set_outputs({b1_2_seq, b1_3_branch0, b1_3_branch1, b1_4_seq, b1_6_seq});
+  return g;
+}
+
+inline Graph sample_failure_graph_4() {
+  Graph g;
+  auto* input = g.add_act("input", 5120);
+  
+  auto* b3_0_seq = g.add_act("b3_0_seq", 2560);
+  g.add_op("b3_0_seq_conv", 512, {input}, {b3_0_seq}, {}, 1024);
+  
+  auto* b2_1_branch0 = g.add_act("b2_1_branch0", 10240);
+  g.add_op("b2_1_conv0", 2048, {b3_0_seq}, {b2_1_branch0}, {}, 2048);
+  
+  auto* b2_1_branch1 = g.add_act("b2_1_branch1", 1280);
+  g.add_op("b2_1_conv1", 512, {b3_0_seq}, {b2_1_branch1}, {}, 1024);
+  
+  auto* b2_1_branch2 = g.add_act("b2_1_branch2", 1280);
+  g.add_op("b2_1_conv2", 2048, {b3_0_seq}, {b2_1_branch2}, {}, 4096);
+  
+  auto* b1_2_seq = g.add_act("b1_2_seq", 10240);
+  g.add_op("b1_2_seq_conv", 1024, {b2_1_branch0}, {b1_2_seq}, {}, 2048);
+  
+  auto* b1_3_seq = g.add_act("b1_3_seq", 2560);
+  g.add_op("b1_3_seq_conv", 256, {b2_1_branch1}, {b1_3_seq}, {}, 1024);
+  
+  auto* b1_4_seq = g.add_act("b1_4_seq", 1280);
+  g.add_op("b1_4_seq_conv", 256, {b2_1_branch2}, {b1_4_seq}, {}, 1024);
+  
+  g.set_inputs({input});
+  g.set_outputs({b1_2_seq, b1_3_seq, b1_4_seq});
+  return g;
+}
+
+
+inline Graph sample_failure_graph_5() {
+  Graph g;
+  auto* t_b1_4_seq = g.add_act("b1_4_seq", 5120);
+  auto* t_b2_3_branch0 = g.add_act("b2_3_branch0", 5120);
+  auto* t_b1_5_branch1 = g.add_act("b1_5_branch1", 2560);
+  auto* t_b2_3_branch1 = g.add_act("b2_3_branch1", 2560);
+  auto* t_b1_2_branch1 = g.add_act("b1_2_branch1", 10240);
+  auto* t_b1_6_seq = g.add_act("b1_6_seq", 2560);
+  auto* t_b1_2_branch0 = g.add_act("b1_2_branch0", 1280);
+  auto* t_b2_3_branch2 = g.add_act("b2_3_branch2", 5120);
+  auto* t_b2_1_seq = g.add_act("b2_1_seq", 10240);
+  auto* t_b3_0_branch1 = g.add_act("b3_0_branch1", 5120);
+  auto* t_b3_0_branch0 = g.add_act("b3_0_branch0", 2560);
+  auto* t_b1_5_branch0 = g.add_act("b1_5_branch0", 1280);
+  auto* t_input = g.add_act("input", 1280);
+  g.add_op("b1_5_conv0", 256, {t_b1_5_branch0}, {t_b2_3_branch1}, {}, 512);
+  g.add_op("b2_3_conv1", 1024, {t_b2_3_branch1}, {t_b3_0_branch1}, {}, 512);
+  g.add_op("b1_4_seq_conv", 2048, {t_b1_4_seq}, {t_b2_3_branch0}, {}, 1024);
+  g.add_op("b2_3_conv0", 512, {t_b2_3_branch0}, {t_b3_0_branch1}, {}, 512);
+  g.add_op("b2_3_conv2", 512, {t_b2_3_branch2}, {t_b3_0_branch1}, {}, 2048);
+  g.add_op("b1_2_conv1", 2048, {t_b1_2_branch1}, {t_b2_1_seq}, {}, 512);
+  g.add_op("b1_2_conv0", 256, {t_b1_2_branch0}, {t_b2_1_seq}, {}, 4096);
+  g.add_op("b1_6_seq_conv", 512, {t_b1_6_seq}, {t_b2_3_branch2}, {}, 4096);
+  g.add_op("b1_5_conv1", 2048, {t_b1_5_branch1}, {t_b2_3_branch1}, {}, 1024);
+  g.add_op("b3_0_conv1", 2048, {t_b3_0_branch1}, {t_input}, {}, 2048);
+  g.add_op("b2_1_seq_conv", 1024, {t_b2_1_seq}, {t_b3_0_branch0}, {}, 2048);
+  g.add_op("b3_0_conv0", 2048, {t_b3_0_branch0}, {t_input}, {}, 4096);
+  return g;
+}

@@ -182,6 +182,30 @@ private:
     return macro_id;
   }
 
+  MacroNode get_worst_upstream_macro(const std::string& start_macro) const {
+    MacroNode worst = macros_.at(start_macro);
+    std::queue<std::string> q;
+    std::set<std::string> visited;
+    q.push(start_macro);
+    visited.insert(start_macro);
+    
+    while (!q.empty()) {
+      std::string curr = q.front();
+      q.pop();
+      
+      if (worst < macros_.at(curr)) {
+        worst = macros_.at(curr);
+      }
+      
+      for (const auto& parent : macro_deps_.at(curr)) {
+        if (visited.insert(parent).second) {
+          q.push(parent);
+        }
+      }
+    }
+    return worst;
+  }
+
   std::string merge_branch_recursively(std::string ancestor, int& next_macro_id) {
     bool merged_branch = false;
     while (true) {
@@ -633,7 +657,7 @@ public:
       if (macro_deps_.at(current).size() == 1) {
         const std::string parent = *macro_deps_.at(current).begin();
         if (macro_dependents_.at(parent).size() == 1 && macros_.at(current) < macros_.at(parent)) {
-          if (!postpone) {
+          if (true) {
             pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
             continue;
           }
@@ -686,18 +710,34 @@ public:
             if (M.empty()) continue;
 
             long long cost = tensor_map.at(t_id)->size();
+            auto evaluate_allocator = [&](const std::string& candidate) -> long long {
+              MacroNode alloc_node = get_worst_upstream_macro(candidate);
+              for (const auto& u : M) {
+                if (u == candidate) continue;
+                MacroNode acc_node = get_worst_upstream_macro(u);
+                
+                acc_node.b -= cost;
+                if (acc_node < alloc_node) {
+                  alloc_node.a = std::max(alloc_node.a, alloc_node.b + acc_node.a);
+                  alloc_node.b += acc_node.b;
+                }
+              }
+              return alloc_node.a;
+            };
             std::string best_parent = M.front();
+            long long best_peak = evaluate_allocator(best_parent);
             for (const auto& m : M) {
-              MacroNode m_dec = macros_.at(m);
-              m_dec.a -= cost;
-              m_dec.b -= cost;
-
-              MacroNode best_dec = macros_.at(best_parent);
-              best_dec.a -= cost;
-              best_dec.b -= cost;
-
-              if (m_dec < best_dec) {
+              long long m_peak = evaluate_allocator(m);
+              if (os_ && t_id == "b3_0_seq") {
+                *os_ << "Candidate loop: " << m << " peak: " << m_peak << " a=" << get_worst_upstream_macro(m).a << " b=" << get_worst_upstream_macro(m).b << "\n";
+              }
+              if (m_peak < best_peak) {
+                best_peak = m_peak;
                 best_parent = m;
+              } else if (m_peak == best_peak) {
+                if (get_worst_upstream_macro(m) < get_worst_upstream_macro(best_parent)) {
+                  best_parent = m;
+                }
               }
             }
 
@@ -720,7 +760,7 @@ public:
               macro_deps_.at(m).insert(best_parent);
               macro_dependents_.at(best_parent).insert(m);
 
-              macros_.at(m).a -= cost;
+              
               macros_.at(m).b -= cost;
             }
             structure_changed = true;
@@ -732,7 +772,7 @@ public:
           continue;
         }
 
-        if (postpone) continue;
+        
 
         const std::string prepared = prepare_join_branches(current, next_macro_id);
         if (prepared != current) {

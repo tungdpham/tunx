@@ -620,16 +620,16 @@ void run_simulation_trials(int original_trials, const std::string& title,
   std::cout << "=== " << title << " Forward Efficiency Overview (" << original_trials
             << " trials) ===\n";
   print_stats(fw_efficiencies);
-  std::cout << "=== " << title << " Forward Packing Efficiency Overview (" << original_trials
-            << " trials) ===\n";
-  print_stats(fw_packing_efficiencies);
+  // std::cout << "=== " << title << " Forward Packing Efficiency Overview (" << original_trials
+  //           << " trials) ===\n";
+  // print_stats(fw_packing_efficiencies);
 
   std::cout << "=== " << title << " Backward Pass Efficiency Overview (" << original_trials
             << " trials) ===\n";
   print_stats(bw_efficiencies);
-  std::cout << "=== " << title << " Full Pass Packing Efficiency Overview (" << original_trials
-            << " trials) ===\n";
-  print_stats(fp_packing_efficiencies);
+  // std::cout << "=== " << title << " Full Pass Packing Efficiency Overview (" << original_trials
+  //           << " trials) ===\n";
+  // print_stats(fp_packing_efficiencies);
 }
 
 int main() {
@@ -639,10 +639,17 @@ int main() {
   run_simulation_trials(
       1, "Sample Failure", "sample_failure", []() { return sample_failure_graph(); }, to_checks);
   run_simulation_trials(
-      1, "Sample Failure 2", "sample_failure_2", []() { return sample_failure_graph_2(); }, to_checks);
+      1, "Sample Failure 2", "sample_failure_2", []() { return sample_failure_graph_2(); },
+      to_checks);
+  run_simulation_trials(
+      1, "Sample Failure 3", "sample_failure_3", []() { return sample_failure_graph_3(); },
+      to_checks);
+  run_simulation_trials(
+      1, "Sample Failure 4", "sample_failure_4", []() { return sample_failure_graph_4(); },
+      to_checks);
 
-  int trials;
-  std::cin >> trials;
+  int trials = 100;
+  // std::cin >> trials;
 
   // run_simulation_trials(
   //     trials, "Independent Operators", "independent_operators",
