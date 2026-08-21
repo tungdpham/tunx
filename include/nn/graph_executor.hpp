@@ -2,6 +2,7 @@
 
 #include <map>
 #include <ostream>
+#include <tuple>
 
 #include "nn/edge.hpp"
 #include "nn/edge_profile.hpp"
@@ -41,6 +42,11 @@ public:
   ExecutionPlan &active_backward_plan() { return active_built_plan_.backward_plan; }
   const ExecutionPlan &active_backward_plan() const { return active_built_plan_.backward_plan; }
 
+  std::tuple<TensorBundle, std::map<Edge, EdgeProfile>, std::map<Node, size_t>> profile_edges_forward(
+      TensorBundle &input_map);
+  std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edges_backward(
+      TensorBundle &output_grad_map);
+
   std::map<Edge, Residuals> &residuals() { return residuals_; }
   const std::map<Edge, Residuals> &residuals() const { return residuals_; }
   void clear_residuals() { residuals_.clear(); }
@@ -79,10 +85,6 @@ private:
   void backward_edge(const Edge &edge);
   void cleanup_released(std::map<Node, Entry> &entries);
 
-  std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edges_forward(
-      TensorBundle &input_map);
-  std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edges_backward(
-      TensorBundle &output_grad_map);
   EdgeProfile profile_edge_forward(const Edge &edge);
   EdgeProfile profile_edge_backward(const Edge &edge);
 

@@ -99,7 +99,7 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map) {
     return built_plans_.at(key);
   }
   MacroSolver planner(graph_, os_);
-  auto [output_map, forward_edge_profiles] = profile_edges_forward(input_map);
+  auto [output_map, forward_edge_profiles, node_profiles] = profile_edges_forward(input_map);
   ExecutionPlan forward_plan = planner.find_forward_order(forward_edge_profiles);
 
   TensorBundle output_grad_map;
@@ -253,9 +253,10 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
   return grad_input_map;
 }
 
-std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edges_forward(
+std::tuple<TensorBundle, std::map<Edge, EdgeProfile>, std::map<Node, size_t>> GraphExecutor::profile_edges_forward(
     TensorBundle &input_map) {
   std::map<Edge, EdgeProfile> edge_profiles;
+  std::map<Node, size_t> node_profiles;
   std::map<std::string, Node> uid_to_node;
   for (const auto &node : graph_.nodes()) {
     uid_to_node[node->uid()] = node;
@@ -270,6 +271,7 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
       device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
     }
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
+    node_profiles[it->second] = device_tensor.num_bytes();
   }
   TensorBundle output_map;  // placeholder to ensure outputs arent prematurely deallocated
 
@@ -278,6 +280,7 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
     EdgeProfile profile = profile_edge_forward(edge);
     edge_profiles[edge] = profile;
     for (const Node &consumer : edge->consumers()) {
+      node_profiles[consumer] = data(consumer).num_bytes();
       if (graph_.is_output(consumer)) {
         output_map.set(consumer->uid(), data(consumer));
         release_data(consumer);
@@ -285,7 +288,7 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
     }
   }
   cleanup_released(data_);
-  return {output_map, edge_profiles};
+  return {output_map, edge_profiles, node_profiles};
 }
 
 ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,

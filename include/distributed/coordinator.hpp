@@ -41,7 +41,7 @@ struct CoordinatorConfig {
   Graph model;
   std::unique_ptr<Optimizer> optimizer;
   std::unique_ptr<Scheduler> scheduler;
-  std::unique_ptr<GraphPartitioner> partitioner;
+  std::unique_ptr<PartitionerBase> partitioner;
   Endpoint coordinator_endpoint;
   std::unique_ptr<Worker> local_worker = nullptr;
   Vec<Endpoint> worker_endpoints;
@@ -51,7 +51,7 @@ struct CoordinatorConfig {
 class Coordinator {
 public:
   Coordinator(Graph model, std::unique_ptr<Optimizer> optimizer,
-              std::unique_ptr<Scheduler> scheduler, std::unique_ptr<GraphPartitioner> partitioner,
+              std::unique_ptr<Scheduler> scheduler, std::unique_ptr<PartitionerBase> partitioner,
               std::unique_ptr<Worker> local_worker, Endpoint coordinator_endpoint,
               Vec<Endpoint> worker_endpoints, ParallelMode_t parallel_mode)
       : parallel_mode_(parallel_mode),
@@ -72,7 +72,7 @@ public:
 
   void initialize() { initialize_topology(); }
 
-  void set_partitioner(std::unique_ptr<GraphPartitioner> partitioner) {
+  void set_partitioner(std::unique_ptr<PartitionerBase> partitioner) {
     partitioner_ = std::move(partitioner);
   }
 
@@ -664,7 +664,7 @@ protected:
   Graph model_;
   std::unique_ptr<Optimizer> optimizer_;
   std::unique_ptr<Scheduler> scheduler_;
-  std::unique_ptr<GraphPartitioner> partitioner_;
+  std::unique_ptr<PartitionerBase> partitioner_;
   std::unique_ptr<Worker> local_worker_;
 
   // Communication

@@ -259,4 +259,146 @@ std::vector<size_t> GraphPartitioner::resolve_layer_counts(size_t total_layers) 
   return layer_counts;
 }
 
+ComputeBandwidthPartitioner::ComputeBandwidthPartitioner(
+    DeviceMesh mesh,
+    std::function<double(const Edge &)> compute_cost_fn,
+    std::function<double(const Node &)> activation_size_fn)
+    : mesh_(std::move(mesh)),
+      compute_cost_fn_(std::move(compute_cost_fn)),
+      activation_size_fn_(std::move(activation_size_fn)) {
+  if (compute_cost_fn_ == nullptr) {
+    compute_cost_fn_ = [](const Edge &) { return 1.0; };
+  }
+  if (activation_size_fn_ == nullptr) {
+    activation_size_fn_ = [](const Node &) { return 1.0; };
+  }
+}
+
+std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &graph) const {
+  const Vec<Edge> sorted_edges = topologically_sorted_edges(graph);
+  const size_t N = sorted_edges.size();
+  const size_t K = mesh_.compute_powers.size();
+
+  if (K == 0) {
+    throw std::runtime_error("ComputeBandwidthPartitioner requires at least one machine in the mesh");
+  }
+  if (mesh_.link_speeds.size() != K - 1) {
+    throw std::runtime_error("ComputeBandwidthPartitioner link_speeds size must be compute_powers size - 1");
+  }
+  if (N < K) {
+    throw std::runtime_error("ComputeBandwidthPartitioner cannot partition graph with fewer edges than machines");
+  }
+  for (double p : mesh_.compute_powers) {
+    if (p <= 0.0) throw std::runtime_error("Compute power must be positive");
+  }
+  for (double l : mesh_.link_speeds) {
+    if (l <= 0.0) throw std::runtime_error("Link speed must be positive");
+  }
+
+  std::unordered_map<std::string, size_t> producer_idx;
+  std::unordered_map<std::string, size_t> last_consumer_idx;
+  std::unordered_map<std::string, Node> uid_to_node;
+
+  for (size_t i = 0; i < N; ++i) {
+    const Edge &edge = sorted_edges[i];
+    for (const auto &input_node : edge->producers()) {
+      const std::string &uid = input_node->uid();
+      uid_to_node[uid] = input_node;
+      if (producer_idx.find(uid) == producer_idx.end()) {
+        producer_idx[uid] = 0; 
+      }
+      last_consumer_idx[uid] = std::max(last_consumer_idx[uid], i + 1);
+    }
+    
+    for (const auto &output_node : edge->consumers()) {
+      const std::string &uid = output_node->uid();
+      uid_to_node[uid] = output_node;
+      producer_idx[uid] = i + 1;
+      if (last_consumer_idx.find(uid) == last_consumer_idx.end()) {
+        last_consumer_idx[uid] = i + 1;
+      } else {
+        last_consumer_idx[uid] = std::max(last_consumer_idx[uid], i + 1);
+      }
+    }
+  }
+
+  std::vector<double> prefix_compute(N + 1, 0.0);
+  for (size_t i = 0; i < N; ++i) {
+    prefix_compute[i + 1] = prefix_compute[i] + compute_cost_fn_(sorted_edges[i]);
+  }
+
+  std::vector<double> boundary_size(N + 1, 0.0);
+  for (const auto &[uid, node] : uid_to_node) {
+    size_t prod = producer_idx[uid];
+    size_t cons = last_consumer_idx[uid];
+    if (prod < cons) {
+      double size = activation_size_fn_(node);
+      for (size_t j = prod; j < cons; ++j) {
+        if (j > 0 && j < N) {
+          boundary_size[j] += size;
+        }
+      }
+    }
+  }
+
+  const double INF = std::numeric_limits<double>::infinity();
+  std::vector<std::vector<double>> dp(K + 1, std::vector<double>(N + 1, INF));
+  std::vector<std::vector<size_t>> parent(K + 1, std::vector<size_t>(N + 1, 0));
+
+  dp[0][0] = 0.0;
+
+  for (size_t k = 1; k <= K; ++k) {
+    double P_k = mesh_.compute_powers[k - 1];
+    double L_k = (k < K) ? mesh_.link_speeds[k - 1] : 1.0;
+
+    for (size_t i = 1; i <= N; ++i) {
+      for (size_t p = 0; p < i; ++p) {
+        if (dp[k - 1][p] == INF) continue;
+
+        double compute_time = (prefix_compute[i] - prefix_compute[p]) / P_k;
+        double comm_time = (k < K) ? (boundary_size[i] / L_k) : 0.0;
+
+        double bottleneck = std::max({dp[k - 1][p], compute_time, comm_time});
+
+        if (bottleneck < dp[k][i]) {
+          dp[k][i] = bottleneck;
+          parent[k][i] = p;
+        }
+      }
+    }
+  }
+
+  if (dp[K][N] == INF) {
+    throw std::runtime_error("ComputeBandwidthPartitioner failed to find a valid partition");
+  }
+
+  std::vector<size_t> cuts(K + 1, 0);
+  cuts[K] = N;
+  size_t curr = N;
+  for (size_t k = K; k >= 1; --k) {
+    cuts[k - 1] = parent[k][curr];
+    curr = cuts[k - 1];
+  }
+
+  std::vector<GraphPartition> partitions;
+  partitions.reserve(K);
+  for (size_t k = 0; k < K; ++k) {
+    size_t start = cuts[k];
+    size_t end = cuts[k + 1];
+    if (start == end) {
+      throw std::runtime_error("ComputeBandwidthPartitioner produced an empty partition");
+    }
+
+    Vec<Edge> partition_edges;
+    partition_edges.reserve(end - start);
+    for (size_t i = start; i < end; ++i) {
+      partition_edges.push_back(sorted_edges[i]);
+    }
+
+    partitions.push_back(build_partition(graph, partition_edges, start));
+  }
+
+  return partitions;
+}
+
 }  // namespace tunx
