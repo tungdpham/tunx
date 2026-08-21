@@ -647,6 +647,9 @@ int main() {
   run_simulation_trials(
       1, "Sample Failure 4", "sample_failure_4", []() { return sample_failure_graph_4(); },
       to_checks);
+  run_simulation_trials(
+      1, "Sample Failure 5", "sample_failure_5", []() { return sample_failure_graph_5(); },
+      to_checks);
 
   int trials = 100;
   // std::cin >> trials;
