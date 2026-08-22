@@ -16,6 +16,7 @@
 #include "graph.h"
 #include "graph_executor.h"
 #include "graph_generator.h"
+#include "vision_graph_generator.h"
 #include "macro_solver.h"
 #include "memory_packer.h"
 
@@ -25,14 +26,56 @@ std::vector<std::string> find_fw_macro_candidate_execution_order(Graph& graph,
   return solver.find_forward_order();
 }
 
+std::vector<std::string> find_fw_ranked_execution_order(Graph& graph, std::ostream* os) {
+  RankedSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+std::vector<std::string> find_fw_linear_execution_order(Graph& graph, std::ostream* os) {
+  LinearSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+std::vector<std::string> find_fw_branching_execution_order(Graph& graph,
+                                                           std::ostream* os) {
+  BranchingSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+std::vector<std::string> find_fw_joining_execution_order(Graph& graph, std::ostream* os) {
+  JoiningSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
 std::vector<std::string> find_bw_macro_candidate_execution_order(Graph& graph,
                                                                  std::ostream* os = nullptr) {
   MacroSolver solver(graph, os);
   return solver.find_backward_order();
 }
 
+std::vector<std::string> find_bw_ranked_execution_order(Graph& graph, std::ostream* os = nullptr) {
+  RankedSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+std::vector<std::string> find_bw_linear_execution_order(Graph& graph, std::ostream* os = nullptr) {
+  LinearSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+std::vector<std::string> find_bw_branching_execution_order(Graph& graph,
+                                                           std::ostream* os = nullptr) {
+  BranchingSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+std::vector<std::string> find_bw_joining_execution_order(Graph& graph, std::ostream* os = nullptr) {
+  JoiningSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
 std::vector<std::string> find_fw_fork_join_execution_order(Graph& graph,
-                                                           size_t max_states = 1000000) {
+                                                           size_t max_states, bool* oracle_complete) {
   std::vector<std::string> op_ids;
   std::map<std::string, int> op_index;
   for (const auto& [uuid, op] : graph.op_nodes()) {
@@ -71,10 +114,12 @@ std::vector<std::string> find_fw_fork_join_execution_order(Graph& graph,
 
   std::unordered_map<std::bitset<256>, Schedule> memo;
   bool state_limit_reached = false;
+  if (oracle_complete) *oracle_complete = true;
   std::function<Schedule(std::bitset<256>&)> solve = [&](std::bitset<256>& completed) {
     if (const auto it = memo.find(completed); it != memo.end()) return it->second;
     if (memo.size() >= max_states) {
       state_limit_reached = true;
+      if (oracle_complete) *oracle_complete = false;
       return Schedule{std::numeric_limits<size_t>::max(), {}};
     }
     if (allocator.allocated() >= baseline_peak) {
@@ -516,35 +561,41 @@ void print_stats(std::map<std::string, std::vector<double>>& effs_by_name) {
   }
 }
 
-void run_simulation_trials(int original_trials, const std::string& title,
+void run_forward_trials(int trials, const std::string& title,
                            const std::string& log_prefix, std::function<Graph()> graph_generator,
                            const std::vector<std::string>& to_checks) {
   std::map<std::string, std::vector<double>> fw_efficiencies;
-  std::map<std::string, std::vector<double>> bw_efficiencies;
   std::map<std::string, std::vector<double>> fw_packing_efficiencies;
-  std::map<std::string, std::vector<double>> fp_packing_efficiencies;
 
-  int trials = original_trials;
+  int original_trials = trials;
   while (trials--) {
     Graph g = graph_generator();
 
-    auto fw_best_order = find_fw_fork_join_execution_order(g);
+    bool oracle_complete = false;
+    auto fw_best_order = find_fw_fork_join_execution_order(g, 1000000, &oracle_complete);
     auto fw_macro_order = find_fw_macro_candidate_execution_order(g);
+    auto fw_ranked_order = find_fw_ranked_execution_order(g);
+    auto fw_linear_order = find_fw_linear_execution_order(g);
+    auto fw_branching_order = find_fw_branching_execution_order(g);
+    auto fw_joining_order = find_fw_joining_execution_order(g);
+    auto fw_flat_bj_order = find_fw_flat_bj_execution_order(g);
+    auto fw_full_order = find_fw_full_execution_order(g);
     auto fw_dfs_order = find_fw_naive_dfs_execution_order(g);
 
     std::map<std::string, std::vector<std::string>> fw_orders = {
-        {"BEST", fw_best_order}, {"MACRO", fw_macro_order}, {"DFS", fw_dfs_order}};
+        {"BEST", fw_best_order},
+        {"MACRO", fw_macro_order},
+        {"BRANCHING", fw_branching_order},
+        {"JOINING", fw_joining_order},
+        {"LINEAR", fw_linear_order},
+        {"RANKED", fw_ranked_order},
+        {"FLAT_BJ", fw_flat_bj_order},
+        {"FULL", fw_full_order},
+        {"DFS", fw_dfs_order},
+    };
 
     auto fw_effs = rank_execution_orders(g, fw_orders);
-
-    auto bw_best_order = find_bw_fork_join_execution_order(g);
-    auto bw_macro_order = find_bw_macro_candidate_execution_order(g);
-    auto bw_dfs_order = find_bw_naive_dfs_execution_order(g);
-    std::map<std::string, std::vector<std::string>> bw_orders = {
-        {"BEST", bw_best_order}, {"MACRO", bw_macro_order}, {"DFS", bw_dfs_order}};
-    auto bw_effs = rank_backward_execution_orders(g, bw_orders);
     auto fw_packing_effs = rank_packing_efficiencies(g, fw_orders, false);
-    auto bw_packing_effs = rank_packing_efficiencies(g, bw_orders, true);
 
     for (const auto& [name, eff] : fw_effs) {
       fw_efficiencies[name].push_back(eff);
@@ -567,6 +618,40 @@ void run_simulation_trials(int original_trials, const std::string& title,
         log << "\n";
       }
     }
+  }
+
+  std::cout << "=== " << title << " Forward Efficiency Overview (" << original_trials << " trials) ===\n";
+  print_stats(fw_efficiencies);
+}
+
+void run_backward_trials(int trials, const std::string& title,
+                           const std::string& log_prefix, std::function<Graph()> graph_generator,
+                           const std::vector<std::string>& to_checks) {
+  std::map<std::string, std::vector<double>> bw_efficiencies;
+  std::map<std::string, std::vector<double>> fp_packing_efficiencies;
+
+  int original_trials = trials;
+  while (trials--) {
+    Graph g = graph_generator();
+
+    auto bw_best_order = find_bw_fork_join_execution_order(g);
+    auto bw_macro_order = find_bw_macro_candidate_execution_order(g);
+    auto bw_ranked_order = find_bw_ranked_execution_order(g);
+    auto bw_linear_order = find_bw_linear_execution_order(g);
+    auto bw_branching_order = find_bw_branching_execution_order(g);
+    auto bw_joining_order = find_bw_joining_execution_order(g);
+    auto bw_dfs_order = find_bw_naive_dfs_execution_order(g);
+    std::map<std::string, std::vector<std::string>> bw_orders = {
+        {"BEST", bw_best_order},
+        {"MACRO", bw_macro_order},
+        {"BRANCHING", bw_branching_order},
+        {"JOINING", bw_joining_order},
+        {"LINEAR", bw_linear_order},
+        {"RANKED", bw_ranked_order},
+        {"DFS", bw_dfs_order},
+    };
+    auto bw_effs = rank_backward_execution_orders(g, bw_orders);
+    auto bw_packing_effs = rank_packing_efficiencies(g, bw_orders, true);
 
     for (const auto& [name, eff] : bw_effs) {
       bw_efficiencies[name].push_back(eff);
@@ -594,63 +679,99 @@ void run_simulation_trials(int original_trials, const std::string& title,
     }
   }
 
-  std::cout << "=== " << title << " Forward Efficiency Overview (" << original_trials
-            << " trials) ===\n";
-  print_stats(fw_efficiencies);
-  // std::cout << "=== " << title << " Forward Packing Efficiency Overview (" << original_trials
-  //           << " trials) ===\n";
-  // print_stats(fw_packing_efficiencies);
-
-  std::cout << "=== " << title << " Backward Pass Efficiency Overview (" << original_trials
-            << " trials) ===\n";
+  std::cout << "=== " << title << " Backward Pass Efficiency Overview (" << original_trials << " trials) ===\n";
   print_stats(bw_efficiencies);
-  // std::cout << "=== " << title << " Full Pass Packing Efficiency Overview (" << original_trials
-  //           << " trials) ===\n";
-  // print_stats(fp_packing_efficiencies);
+}
+
+void run_motif_witness(MotifTarget target, const std::string& name, int trials) {
+    std::cout << "\nGenerating Motif: " << name << "\n";
+    std::vector<double> effs;
+    std::vector<double> scaled_effs;
+    int success = 0;
+    
+    for (int i = 0; i < trials; ++i) {
+        try {
+            GeneratedGraph witness = generate_witness(target, rand());
+            double eff = witness.peaks.full > 0 ? (100.0 * witness.peaks.oracle / witness.peaks.full) : 0.0;
+            effs.push_back(eff);
+            
+            // Now generate scaled version using the exact same seed that worked
+            IRGraph scaled_ir = build_candidate(target, witness.seed, true);
+            randomize_ids_and_materialization(scaled_ir, witness.seed);
+            Graph scaled_graph = materialize(scaled_ir);
+            AblationPeaks scaled_peaks = evaluate_ablations(scaled_graph);
+            
+            // For scaled graph, we compare FULL against DFS just to show the macroscopic effect
+            double scaled_eff = scaled_peaks.dfs > 0 ? (100.0 * scaled_peaks.full / scaled_peaks.dfs) : 0.0;
+            scaled_effs.push_back(scaled_eff);
+            
+            success++;
+        } catch (const std::exception& e) {
+            std::cout << "Failed to generate motif witness for " << name << " on attempt " << i << ": " << e.what() << "\n";
+        }
+    }
+    
+    std::cout << "Generated " << success << "/" << trials << " " << name << " witnesses.\n";
+    if (success > 0) {
+        std::map<std::string, std::vector<double>> res = {
+            {"Discovery (Oracle/Full)", effs},
+            {"Scaled (Full/DFS)", scaled_effs}
+        };
+        print_stats(res);
+    }
 }
 
 int main() {
   srand(static_cast<unsigned int>(time(nullptr)));
-  std::vector<std::string> to_checks = {"MACRO_V2"};
+  std::vector<std::string> to_checks = {"MACRO"};
 
-  run_simulation_trials(
-      1, "Sample Failure", "sample_failure", []() { return sample_failure_graph(); }, to_checks);
-  run_simulation_trials(
-      1, "Sample Failure 2", "sample_failure_2", []() { return sample_failure_graph_2(); },
-      to_checks);
-  run_simulation_trials(
-      1, "Sample Failure 3", "sample_failure_3", []() { return sample_failure_graph_3(); },
-      to_checks);
-  run_simulation_trials(
-      1, "Sample Failure 4", "sample_failure_4", []() { return sample_failure_graph_4(); },
-      to_checks);
-  run_simulation_trials(
-      1, "Sample Failure 5", "sample_failure_5", []() { return sample_failure_graph_5(); },
-      to_checks);
+  int trials = 20;
 
-  int trials = 100;
-  // std::cin >> trials;
+  for (int seed = 0; seed < 10; ++seed) {
+      IRGraph ir = build_candidate(MotifTarget::Branch, seed, false);
+      randomize_ids_and_materialization(ir, seed);
+      Graph g = materialize(ir);
+      AblationPeaks peaks = evaluate_ablations(g);
 
-  // run_simulation_trials(
-  //     trials, "Independent Operators", "independent_operators",
-  //     []() { return random_m_sequences_graph(10, 1); }, to_checks);
-  // run_simulation_trials(
-  //     trials, "Parallel Sequences", "parallel_sequences",
-  //     []() { return random_m_sequences_graph(4, 4); }, to_checks);
-  // run_simulation_trials(
-  //     trials, "Join", "join", []() { return random_joining_graph(4); }, to_checks);
-  // run_simulation_trials(
-  //     trials, "Order-Invariant Branch", "order_invariant_branch",
-  //     []() { return random_order_invariant_branching_graph(3); }, to_checks);
-  // run_simulation_trials(
-  //     trials, "Order-Invariant Fork Join", "order_invariant_fork_join",
-  //     []() { return random_order_invariant_fork_join_graph(4); }, to_checks);
-  run_simulation_trials(
+      std::cout << "Seed " << seed << "\n";
+      std::cout << "  DFS:    " << peaks.dfs << "\n";
+      std::cout << "  RANK:   " << peaks.rank << "\n";
+      std::cout << "  LINEAR: " << peaks.linear << "\n";
+      std::cout << "  BRANCH: " << peaks.branch << "\n";
+      std::cout << "  JOIN:   " << peaks.join << "\n";
+      std::cout << "  FULL:   " << peaks.full << "\n";
+  }
+  exit(0);
+ // Reduced for motif generation speed
+
+  // Mechanism Witnesses
+  run_motif_witness(MotifTarget::Rank, "V1 (Rank)", trials);
+  run_motif_witness(MotifTarget::Linear, "V2 (Linear)", trials);
+  run_motif_witness(MotifTarget::Branch, "V3 (Branch)", trials);
+  run_motif_witness(MotifTarget::Join, "V4 (Join)", trials);
+  run_motif_witness(MotifTarget::ForkJoin, "V5 (Recursive Fork-Join)", trials);
+
+  // Stress tests (Forward)
+  run_forward_trials(
+      trials, "Independent Operators", "independent_operators",
+      []() { return random_m_sequences_graph(10, 1); }, to_checks);
+  run_forward_trials(
+      trials, "Parallel Sequences", "parallel_sequences",
+      []() { return random_m_sequences_graph(4, 4); }, to_checks);
+  run_forward_trials(
+      trials, "Join", "join", []() { return random_joining_graph(4); }, to_checks);
+  run_forward_trials(
+      trials, "Order-Invariant Branch", "order_invariant_branch",
+      []() { return random_order_invariant_branching_graph(3); }, to_checks);
+  run_forward_trials(
+      trials, "Order-Invariant Fork Join", "order_invariant_fork_join",
+      []() { return random_order_invariant_fork_join_graph(4); }, to_checks);
+  run_forward_trials(
       trials, "Order-Dependent Branch", "branch", []() { return random_branching_graph(3); },
       to_checks);
-  // run_simulation_trials(
-  //     trials, "Order-Dependent Fork Join", "fork_join", []() { return random_fork_join_graph(4);
-  //     }, to_checks);
+  run_forward_trials(
+      trials, "Order-Dependent Fork Join", "fork_join", []() { return random_fork_join_graph(4); },
+      to_checks);
 
   return 0;
 }
