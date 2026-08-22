@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.10)
+project(repro)
+set(CMAKE_CXX_STANDARD 20)
+add_executable(repro repro.cpp ../simulation/graph.cpp ../simulation/vision_graph_generator.cpp ../simulation/graph_executor.cpp)
+target_include_directories(repro PRIVATE ../)

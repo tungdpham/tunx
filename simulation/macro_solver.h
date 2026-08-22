@@ -395,7 +395,8 @@ public:
         std::string best_child;
         for (const auto& child : macro_dependents_.at(current)) {
           if (macro_deps_.at(child).size() == 1 && macros_.at(child) < macros_.at(current)) {
-            if (best_child.empty() || macros_.at(child) < macros_.at(best_child)) best_child = child;
+            if (best_child.empty() || macros_.at(child) < macros_.at(best_child))
+              best_child = child;
           }
         }
         if (!best_child.empty()) {
@@ -413,7 +414,7 @@ public:
             continue;
           }
         }
-        
+
         if (options_.enable_joining) {
           const std::string merged =
               merge_join_parent(prepared, out_deg, cached_tensors, next_macro_id);
@@ -422,7 +423,9 @@ public:
       }
     }
     if (macros_.contains(virtual_join_id)) {
-      prepare_join_branches(virtual_join_id, next_macro_id);
+      if (options_.enable_branching || options_.enable_recursive_fork_join) {
+        prepare_join_branches(virtual_join_id, next_macro_id);
+      }
       for (const auto& terminal : macro_deps_.at(virtual_join_id)) {
         macro_dependents_.at(terminal).erase(virtual_join_id);
       }
@@ -598,7 +601,8 @@ public:
         std::string best_child;
         for (const auto& child : macro_dependents_.at(current)) {
           if (macro_deps_.at(child).size() == 1 && macros_.at(child) < macros_.at(current)) {
-            if (best_child.empty() || macros_.at(child) < macros_.at(best_child)) best_child = child;
+            if (best_child.empty() || macros_.at(child) < macros_.at(best_child))
+              best_child = child;
           }
         }
         if (!best_child.empty()) {
@@ -625,7 +629,9 @@ public:
       }
     }
     if (macros_.contains(virtual_join_id)) {
-      prepare_join_branches(virtual_join_id, next_macro_id);
+      if (options_.enable_branching || options_.enable_recursive_fork_join) {
+        prepare_join_branches(virtual_join_id, next_macro_id);
+      }
       for (const auto& terminal : macro_deps_.at(virtual_join_id)) {
         macro_dependents_.at(terminal).erase(virtual_join_id);
       }
@@ -728,3 +734,59 @@ public:
   FullSolver(Graph& graph, std::ostream* os = nullptr)
       : MacroSolver(graph, os, {true, true, true, true}) {}
 };
+
+inline std::vector<std::string> find_fw_macro_candidate_execution_order(
+    Graph& graph, std::ostream* os = nullptr) {
+  MacroSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+inline std::vector<std::string> find_fw_ranked_execution_order(Graph& graph, std::ostream* os) {
+  RankedSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+inline std::vector<std::string> find_fw_linear_execution_order(Graph& graph, std::ostream* os) {
+  LinearSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+inline std::vector<std::string> find_fw_branching_execution_order(Graph& graph, std::ostream* os) {
+  BranchingSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+inline std::vector<std::string> find_fw_joining_execution_order(Graph& graph, std::ostream* os) {
+  JoiningSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+inline std::vector<std::string> find_bw_macro_candidate_execution_order(
+    Graph& graph, std::ostream* os = nullptr) {
+  MacroSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+inline std::vector<std::string> find_bw_ranked_execution_order(Graph& graph,
+                                                               std::ostream* os = nullptr) {
+  RankedSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+inline std::vector<std::string> find_bw_linear_execution_order(Graph& graph,
+                                                               std::ostream* os = nullptr) {
+  LinearSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+inline std::vector<std::string> find_bw_branching_execution_order(Graph& graph,
+                                                                  std::ostream* os = nullptr) {
+  BranchingSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+inline std::vector<std::string> find_bw_joining_execution_order(Graph& graph,
+                                                                std::ostream* os = nullptr) {
+  JoiningSolver solver(graph, os);
+  return solver.find_backward_order();
+}
