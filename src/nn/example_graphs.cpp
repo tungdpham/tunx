@@ -238,19 +238,60 @@ Graph create_tunx_v1_graph(IAllocator &allocator, GraphOpts opts) {
   Node input = graph.input("input");
   Shape shape = {1, 224, 224, 3};
 
-  Node x = conv2d(input, shape, 64, 7, 2, 3, false, "conv1");  // -> {112, 112, 64}
-  x = batchnorm(x, shape, true, "bn1");
-  x = maxpool2d(x, shape, 3, 2, 1, "pool1");  // -> {56, 56, 64}
+  Node x = avgpool2d(input, shape, 4, 4, 0, "pool1");  // -> {56, 56, 3}
+  x = conv2d(x, shape, 8, 1, 1, 0, false, "conv1");    // -> {56, 56, 8}
 
-  x = v1_residual_block(x, shape, 256, "asym1");  // -> {28, 28, 256}
-  x = maxpool2d(x, shape, 2, 2, 0, "pool2");      // -> {14, 14, 256}
+  const Shape initial_shape = shape;
 
-  x = avgpool2d(x, shape, 14, 1, 0, "avgpool");
-  x = flatten(x, shape, 1, -1, "flatten");
-  Node output = dense(x, shape, 100, true, "output");
+  Shape b1_shape = initial_shape;
+  Node b1 = convtranspose2d(x, b1_shape, 32, 2, 2, 0, false, "b1_up1");  // -> {112, 112, 32}
+  b1 = batchnorm(b1, b1_shape, true, "b1_bn1");
+  b1 = convtranspose2d(b1, b1_shape, 64, 4, 4, 0, false, "b1_up2");  // -> {448, 448, 64}
+  b1 = batchnorm(b1, b1_shape, true, "b1_bn2");
+  b1 = conv2d(b1, b1_shape, 64, 3, 1, 1, false, "b1_down");  // -> {448, 448, 64}
+  b1 = maxpool2d(b1, b1_shape, 4, 4, 0, "b1_pool");          // -> {112, 112, 64}
+
+  Shape b2_shape = initial_shape;
+  Node b2 = convtranspose2d(x, b2_shape, 64, 2, 2, 0, false, "b2_trans");  // -> {112, 112, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn1");
+  b2 = convtranspose2d(b2, b2_shape, 64, 2, 2, 0, false, "b2_up2");  // -> {224, 224, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn2");
+  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv");   // -> {224, 224, 64}
+  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv2");  // -> {224, 224, 64}
+  b2 = b2 * -1;                                               // -> {224, 224, 64}
+  b2 = maxpool2d(b2, b2_shape, 2, 2, 0, "b2_pool");           // -> {112, 112, 64}
+
+  Shape b3_shape = initial_shape;
+  Node b3 = convtranspose2d(x, b3_shape, 32, 2, 2, 0, false, "b3_up1");  // -> {112, 112, 32}
+  b3 = convtranspose2d(b3, b3_shape, 128, 4, 4, 0, false, "b3_up2");     // -> {448, 448, 128}
+  b3 = avgpool2d(b3, b3_shape, 4, 4, 0, "b3_pool");                      // -> {112, 112, 128}
+  b3 = conv2d(b3, b3_shape, 64, 3, 1, 1, false, "b3_down1");             // -> {112, 112, 64}
+
+  Shape y_shape = b1_shape;
+  Node y = add({b1, b2, b3}, y_shape, "merge_b1_b2_b3");
+  y = relu(y, y_shape, "out_relu");
+  y = flatten(y, y_shape, 1, -1, "flatten");
+
+  Node output = dense(y, y_shape, 100, true, "output");
 
   finalize_graph(graph, allocator, output, opts);
   return graph;
+}
+
+std::pair<Node, Shape> v2_block(Node x, Shape shape, const std::string &name) {
+  Shape b1_shape = shape;
+  Node b1 = convtranspose2d(x, b1_shape, 128, 2, 2, 0, false, name + "_up1");  // -> {56, 56, 128}
+  b1 = maxpool2d(b1, b1_shape, 3, 1, 1, name + "_bn1");                        // -> {56, 56, 128}
+
+  Shape b2_shape = shape;
+  Node b2 = convtranspose2d(x, b2_shape, 128, 4, 4, 0, false, name + "_up2");  // -> {56, 56, 128}
+  Node b2_left = maxpool2d(b2 * -1, b2_shape, 2, 2, 0, name + "_left_pool");   // -> {56, 56, 128}
+  Node b2_right = avgpool2d(b2, b2_shape, 2, 2, 0, name + "_right_pool");      // -> {56, 56, 128}
+  Node c = add({b1, b2_left, b2_right}, b1_shape, name + "_add");
+
+  Shape out_shape = b1_shape;
+  auto out = conv2d(c, out_shape, 64, 3, 1, 1, false, name + "_conv");
+  return {out, out_shape};
 }
 
 Graph create_tunx_v2_graph(IAllocator &allocator, GraphOpts opts) {
@@ -258,64 +299,62 @@ Graph create_tunx_v2_graph(IAllocator &allocator, GraphOpts opts) {
   Node input = graph.input("input");
   Shape shape = {1, 224, 224, 3};
 
-  /*
-   * Construct a compact common seed:
-   *
-   * 224x224x3 -> 14x14x3 -> 14x14x8
-   */
-  Node seed = avgpool2d(input, shape, 16, 16, 0, "seed_pool");
+  Node x = conv2d(input, shape, 16, 7, 2, 3, false, "conv1");  // -> {112, 112, 16}
+  x = batchnorm(x, shape, true, "bn1");                        // -> {112, 112, 16}
+  x = maxpool2d(x, shape, 4, 4, 0, "pool1");                   // -> {28, 28, 16}
 
-  seed = conv2d(seed, shape, 8, 1, 1, 0, false, "seed_projection");
+  const Shape initial_shape = shape;
 
-  const Shape seed_shape = shape;
+  Shape b1_shape = initial_shape;
+  Node b1 = convtranspose2d(x, b1_shape, 32, 2, 2, 0, false, "b1_up1");  // -> {56, 56, 32}
+  b1 = batchnorm(b1, b1_shape, true, "b1_bn1");
+  b1 = convtranspose2d(b1, b1_shape, 64, 2, 2, 0, false, "b1_up2");  // -> {112, 112, 64}
+  b1 = batchnorm(b1, b1_shape, true, "b1_bn2");
+  b1 = conv2d(b1, b1_shape, 64, 3, 1, 1, false, "b1_down");  // -> {112, 112, 64}
+  b1 = maxpool2d(b1, b1_shape, 2, 2, 0, "b1_pool");          // -> {56, 56, 64}
 
-  /*
-   * Outer group 1: relatively small inner fork.
-   *
-   * Expanded resolutions:
-   *   28x28, 56x56, 84x84
-   */
-  Shape g1_shape = seed_shape;
-  Node g1 = v2_nested_group(seed, g1_shape, 64, 2, 4, 6, "outer_g1");
+  Shape b2_shape = initial_shape;
+  Node b2 = convtranspose2d(x, b2_shape, 64, 2, 2, 0, false, "b2_trans");  // -> {56, 56, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn1");
+  b2 = convtranspose2d(b2, b2_shape, 64, 2, 2, 0, false, "b2_up2");  // -> {112, 112, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn2");
+  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv");   // -> {112, 112, 64}
+  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv2");  // -> {112, 112, 64}
+  b2 = b2 * -1;                                               // -> {112, 112, 64}
+  b2 = maxpool2d(b2, b2_shape, 2, 2, 0, "b2_pool");           // -> {56, 56, 64}
 
-  /*
-   * Outer group 2: medium inner fork.
-   *
-   * Expanded resolutions:
-   *   56x56, 84x84, 112x112
-   */
-  Shape g2_shape = seed_shape;
-  Node g2 = v2_nested_group(seed, g2_shape, 64, 4, 6, 8, "outer_g2");
+  Shape b3_shape = initial_shape;
+  Node b3 = conv2d(x, b3_shape, 32, 3, 1, 1, false, "b3_conv");      // -> {28, 28, 32}
+  b3 = convtranspose2d(b3, b3_shape, 64, 5, 1, 2, false, "b3_up1");  // {28, 28, 64}
+  std::tie(b3, b3_shape) = v2_block(b3, b3_shape, "b3_block");       // -> {56, 56, 64}
 
-  /*
-   * Outer group 3: largest inner fork.
-   *
-   * Expanded resolutions:
-   *   84x84, 112x112, 140x140
-   */
-  Shape g3_shape = seed_shape;
-  Node g3 = v2_nested_group(seed, g3_shape, 64, 6, 8, 10, "outer_g3");
+  Shape y_shape = b1_shape;
+  Node y = add({b1, b2, b3}, y_shape, "merge_b1_b2_b3");
+  y = relu(y, y_shape, "out_relu");
+  y = flatten(y, y_shape, 1, -1, "flatten");
 
-  /*
-   * Each group output is:
-   *
-   * 28x28x(3 * 64) = 28x28x192
-   *
-   * Add is used for the outer join so the channel count remains 192.
-   */
-  Shape merged_shape = g1_shape;
-  Node merged = add({g1, g2, g3}, merged_shape, "outer_merge");
-
-  shape = merged_shape;
-
-  // 28x28x192 -> 1x1x192
-  Node x = avgpool2d(merged, shape, 28, 1, 0, "global_avgpool");
-
-  x = flatten(x, shape, 1, -1, "flatten");
-  Node output = dense(x, shape, 100, true, "output");
+  Node output = dense(y, y_shape, 100, true, "output");
 
   finalize_graph(graph, allocator, output, opts);
   return graph;
+}
+
+std::pair<Node, Shape> v3_block(Node x, Shape shape, const std::string &name) {
+  Shape b1_shape = shape;
+  Node b1 = convtranspose2d(x, b1_shape, 128, 2, 2, 0, false, name + "_up1");  // -> {56, 56, 64}
+  b1 = maxpool2d(b1, b1_shape, 4, 4, 0, name + "_pool1");                      // -> {28, 28, 64}
+
+  Shape b2_shape = shape;
+  Node b2 = convtranspose2d(x, b2_shape, 128, 2, 2, 0, false, name + "_up2");  // -> {56, 56, 128}
+  Shape b2_left_shape = b2_shape;
+  Node b2_left =
+      maxpool2d(b2 * -1, b2_left_shape, 4, 4, 0, name + "_left_pool");  // -> {28, 28, 64}
+  Shape b2_right_shape = b2_shape;
+  Node b2_right = avgpool2d(b2, b2_right_shape, 4, 4, 0, name + "_right_pool");  // -> {28, 28, 64}
+  auto [c, c_shape] = concat({b1, b2_left, b2_right}, {b1_shape, b2_left_shape, b2_right_shape}, 3,
+                             name + "_concat");
+  c = conv2d(c, c_shape, 64, 3, 1, 1, false, name + "_conv");
+  return {c, c_shape};
 }
 
 Graph create_tunx_v3_graph(IAllocator &allocator, GraphOpts opts) {
@@ -323,40 +362,150 @@ Graph create_tunx_v3_graph(IAllocator &allocator, GraphOpts opts) {
   Node input = graph.input("input");
   Shape shape = {1, 224, 224, 3};
 
-  Node x = avgpool2d(input, shape, 16, 16, 0, "pool1");  // -> {14, 14, 3}
-  x = conv2d(x, shape, 8, 1, 1, 0, false, "conv1");      // -> {14, 14, 8}
+  Node x = conv2d(input, shape, 16, 7, 2, 3, false, "conv1");  // -> {112, 112, 16}
+  x = batchnorm(x, shape, true, "bn1");                        // -> {112, 112, 16}
+  x = maxpool2d(x, shape, 4, 4, 0, "pool1");                   // -> {28, 28, 16}
 
   const Shape initial_shape = shape;
 
   Shape b1_shape = initial_shape;
-  Node b1 = convtranspose2d(x, b1_shape, 32, 2, 2, 0, false, "b1_up1");  // -> {28, 28, 32}
-  b1 = convtranspose2d(b1, b1_shape, 64, 2, 2, 0, false, "b1_up2");      // -> {56, 56, 64}
-  b1 = conv2d(b1, b1_shape, 128, 3, 1, 1, false, "b1_conv");             // -> {112, 112, 56}
-  b1 = transpose(b1, b1_shape, 1, 2, "b1_transpose");                    // -> {56, 56, 128}
-  b1 = conv2d(b1, b1_shape, 64, 3, 1, 1, false, "b1_down");              // -> {56, 56, 64}
-  b1 = avgpool2d(b1, b1_shape, 2, 2, 0, "b1_pool");                      // -> {28, 28, 64}
+  Node b1 = convtranspose2d(x, b1_shape, 64, 2, 2, 0, false, "b1_up1");  // -> {56, 56, 32}
+  b1 = batchnorm(b1, b1_shape, true, "b1_bn1");
+  b1 = convtranspose2d(b1, b1_shape, 128, 2, 2, 0, false, "b1_up2");  // -> {112, 112, 128}
+  b1 = batchnorm(b1, b1_shape, true, "b1_bn2");
+  b1 = conv2d(b1, b1_shape, 64, 3, 1, 1, false, "b1_down");  // -> {112, 112, 64}
+  b1 = maxpool2d(b1, b1_shape, 2, 2, 0, "b1_pool");          // -> {56, 56, 64}
 
   Shape b2_shape = initial_shape;
-  Node b2 = convtranspose2d(x, b2_shape, 64, 2, 2, 0, false, "b2_trans");  // -> {28, 28, 64}
-  b2 = convtranspose2d(b2, b2_shape, 64, 2, 2, 0, false, "b2_up2");        // -> {56, 56, 64}
-  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv");                // -> {56, 56, 64}
-  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv2");               // -> {56, 56, 64}
-  b2 = maxpool2d(b2, b2_shape, 2, 2, 0, "b2_pool");                        // -> {28, 28, 64}
+  Node b2 = convtranspose2d(x, b2_shape, 64, 2, 2, 0, false, "b2_trans");  // -> {56, 56, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn1");
+  b2 = convtranspose2d(b2, b2_shape, 64, 2, 2, 0, false, "b2_up2");  // -> {112, 112, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn2");
+  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv");   // -> {112, 112, 64}
+  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv2");  // -> {112, 112, 64}
+  b2 = b2 * -1;                                               // -> {112, 112, 64}
+  b2 = maxpool2d(b2, b2_shape, 2, 2, 0, "b2_pool");           // -> {56, 56, 64}
 
   Shape b3_shape = initial_shape;
-  Node b3 = convtranspose2d(x, b3_shape, 32, 2, 2, 0, false, "b3_up1");  // -> {28,28,16}
-  b3 = convtranspose2d(b3, b3_shape, 128, 4, 4, 0, false, "b3_up2");     // -> {112,112,128}
-  b3 = transpose(b3, b3_shape, 1, 2, "b3_transpose");                    // -> {112,112,128}
-  b3 = b3 * -1;                                                          // -> {112,112,128}
-  b3 = maxpool2d(b3, b3_shape, 4, 4, 0, "b3_pool");                      // -> {28, 28, 128}
-  b3 = conv2d(b3, b3_shape, 64, 3, 1, 1, false, "b3_down1");             // -> {28, 28, 64}
+  Node b3 = conv2d(x, b3_shape, 32, 3, 1, 1, false, "b3_conv");      // -> {28, 28, 32}
+  b3 = convtranspose2d(b3, b3_shape, 64, 2, 2, 0, false, "b3_up1");  // {56, 56, 64}
+  b3 = convtranspose2d(b3, b3_shape, 64, 2, 2, 0, false, "b3_up2");  // {112, 112, 64}
+  std::tie(b3, b3_shape) = v3_block(b3, b3_shape, "b3_block");       // -> {56, 56, 64}
 
   Shape y_shape = b1_shape;
   Node y = add({b1, b2, b3}, y_shape, "merge_b1_b2_b3");
-  y = conv2d(y, y_shape, 8, 1, 1, 0, false, "out_conv");
   y = relu(y, y_shape, "out_relu");
+  y = flatten(y, y_shape, 1, -1, "flatten");
 
   Node output = dense(y, y_shape, 100, true, "output");
+
+  finalize_graph(graph, allocator, output, opts);
+  return graph;
+}
+
+std::pair<Node, Shape> recursive_wide_fork_join(Node x, Shape shape, size_t depth,
+                                                const std::string &name) {
+  constexpr size_t kOutputChannels = 64;
+
+  // Depth-dependent channel sizes create asymmetric (alpha, beta) descriptors
+  // at each recursion level. Inner levels have large join tensors; outer levels
+  // have large local tensors. This forces the Full Solver's coordinated
+  // fork-join resolution to diverge from the greedy Branch-only / Join-only
+  // orderings.
+  const size_t kLocalChannels = 64 + depth * 256;
+  const size_t kJoinChannels = 832 - depth * 256;
+
+  if (depth == 0) {
+    Shape expanded_shape = shape;
+
+    Node expanded =
+        convtranspose2d(x, expanded_shape, kJoinChannels, 2, 2, 0, false, name + "_expand");
+
+    Node negative = expanded * -1;
+    negative->set_uid(name + "_neg");
+
+    Shape left_shape = expanded_shape;
+    Node left = maxpool2d(negative, left_shape, 2, 2, 0, name + "_left_pool");
+
+    Shape right_shape = expanded_shape;
+    Node right = avgpool2d(expanded, right_shape, 2, 2, 0, name + "_right_pool");
+
+    Shape mid_shape = expanded_shape;
+    Node mid = conv2d(expanded, mid_shape, kJoinChannels, 3, 2, 1, false, name + "_mid_conv");
+
+    Shape joined_shape = left_shape;
+    Node joined = add({left, right, mid}, joined_shape, name + "_join");
+
+    Node output = conv2d(joined, joined_shape, kOutputChannels, 1, 1, 0, false, name + "_compress");
+
+     return {output, joined_shape};
+  }
+
+  // ── Left branch: local (expand → pool → widen) ──
+  Shape local_shape = shape;
+
+  Node local =
+      convtranspose2d(x, local_shape, kLocalChannels, 2, 2, 0, false, name + "_local_expand");
+
+  local = maxpool2d(local, local_shape, 2, 2, 0, name + "_local_pool");
+
+  local = conv2d(local, local_shape, kJoinChannels, 1, 1, 0, false, name + "_local_widen");
+
+  // ── Right branch: complete recursively nested fork–join ──
+  Shape nested_shape = shape;
+
+  Node nested = conv2d(x, nested_shape, kOutputChannels, 1, 1, 0, false, name + "_nested_seed");
+
+  std::tie(nested, nested_shape) = recursive_wide_fork_join(
+      nested, nested_shape, depth - 1, name + "_d" + std::to_string(depth - 1));
+
+  nested = conv2d(nested, nested_shape, kJoinChannels, 1, 1, 0, false, name + "_nested_widen");
+
+  // ── Binary parent join ──
+  Shape joined_shape = local_shape;
+
+  Node joined = add({local, nested}, joined_shape, name + "_join");
+
+  Node output = conv2d(joined, joined_shape, kOutputChannels, 1, 1, 0, false, name + "_compress");
+
+  return {output, joined_shape};
+}
+
+Graph create_tunx_v4_graph(IAllocator &allocator, GraphOpts opts) {
+  Graph graph;
+
+  Node input = graph.input("input");
+  Shape shape = {1, 224, 224, 3};
+
+  Node x = conv2d(input, shape, 32, 7, 2, 3, false, "stem_conv");
+  // [32, 112, 112, 32]
+
+  x = batchnorm(x, shape, true, "stem_bn");
+
+  x = maxpool2d(x, shape, 2, 2, 0, "stem_pool");
+  // [32, 56, 56, 32]
+
+  x = conv2d(x, shape, 64, 1, 1, 0, false, "stem_project");
+  // [32, 56, 56, 64]
+
+  /*
+   * Three parent fork–joins plus one base fork–join:
+   *
+   *   rfj_d3
+   *      └── rfj_d2
+   *             └── rfj_d1
+   *                    └── rfj_d0
+   */
+  std::tie(x, shape) = recursive_wide_fork_join(x, shape, 3, "rfj_d3");
+
+  x = relu(x, shape, "out_relu");
+
+  x = avgpool2d(x, shape, 4, 4, 0, "out_pool");
+  // [32, 14, 14, 64]
+
+  x = flatten(x, shape, 1, -1, "flatten");
+
+  Node output = dense(x, shape, 100, true, "output");
 
   finalize_graph(graph, allocator, output, opts);
   return graph;
@@ -394,5 +543,6 @@ void ExampleGraphs::register_defaults() {
   register_graph("tunx_v1", create_tunx_v1_graph);
   register_graph("tunx_v2", create_tunx_v2_graph);
   register_graph("tunx_v3", create_tunx_v3_graph);
+  register_graph("tunx_v4", create_tunx_v4_graph);
 }
 }  // namespace tunx
