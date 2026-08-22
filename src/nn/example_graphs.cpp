@@ -238,34 +238,38 @@ Graph create_tunx_v1_graph(IAllocator &allocator, GraphOpts opts) {
   Node input = graph.input("input");
   Shape shape = {1, 224, 224, 3};
 
-  Node x = avgpool2d(input, shape, 4, 4, 0, "pool1");  // -> {56, 56, 3}
-  x = conv2d(x, shape, 8, 1, 1, 0, false, "conv1");    // -> {56, 56, 8}
+  Node x = conv2d(input, shape, 16, 7, 2, 3, false, "conv1");  // -> {112, 112, 16}
+  x = batchnorm(x, shape, true, "bn1");                        // -> {112, 112, 16}
+  x = maxpool2d(x, shape, 4, 4, 0, "pool1");                   // -> {28, 28, 16}
 
   const Shape initial_shape = shape;
 
   Shape b1_shape = initial_shape;
-  Node b1 = convtranspose2d(x, b1_shape, 32, 2, 2, 0, false, "b1_up1");  // -> {112, 112, 32}
-  b1 = batchnorm(b1, b1_shape, true, "b1_bn1");
-  b1 = convtranspose2d(b1, b1_shape, 64, 4, 4, 0, false, "b1_up2");  // -> {448, 448, 64}
-  b1 = batchnorm(b1, b1_shape, true, "b1_bn2");
-  b1 = conv2d(b1, b1_shape, 64, 3, 1, 1, false, "b1_down");  // -> {448, 448, 64}
-  b1 = maxpool2d(b1, b1_shape, 4, 4, 0, "b1_pool");          // -> {112, 112, 64}
+  Node b1 = convtranspose2d(x, b1_shape, 32, 2, 2, 0, false, "b1_up1");  // -> {56, 56, 32}
+  b1 = batchnorm(b1, b1_shape, true, "b1_bn1");                          // -> {56, 56, 32}
+  b1 = convtranspose2d(b1, b1_shape, 64, 4, 4, 0, false, "b1_up2");      // -> {224, 224, 64}
+  b1 = batchnorm(b1, b1_shape, true, "b1_bn2");                          // -> {224, 224, 64}
+  b1 = conv2d(b1, b1_shape, 64, 3, 1, 1, false, "b1_down");              // -> {224, 224, 64}
+  b1 = maxpool2d(b1, b1_shape, 4, 4, 0, "b1_pool");                      // -> {56, 56, 64}
 
   Shape b2_shape = initial_shape;
-  Node b2 = convtranspose2d(x, b2_shape, 64, 2, 2, 0, false, "b2_trans");  // -> {112, 112, 64}
-  b2 = batchnorm(b2, b2_shape, true, "b2_bn1");
-  b2 = convtranspose2d(b2, b2_shape, 64, 2, 2, 0, false, "b2_up2");  // -> {224, 224, 64}
-  b2 = batchnorm(b2, b2_shape, true, "b2_bn2");
-  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv");   // -> {224, 224, 64}
-  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv2");  // -> {224, 224, 64}
-  b2 = b2 * -1;                                               // -> {224, 224, 64}
-  b2 = maxpool2d(b2, b2_shape, 2, 2, 0, "b2_pool");           // -> {112, 112, 64}
+  Node b2 = convtranspose2d(x, b2_shape, 64, 2, 2, 0, false, "b2_trans");  // -> {56, 56, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn1");                            // -> {56, 56, 64}
+  b2 = convtranspose2d(b2, b2_shape, 64, 2, 2, 0, false, "b2_up2");        // -> {112, 112, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn2");                            // -> {112, 112, 64}
+  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv");                // -> {112, 112, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn2");                            // -> {112, 112, 64}
+  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv2");               // -> {112, 112, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn2");                            // -> {112, 112, 64}
+  b2 = b2 * -1;                                                            // -> {112, 112, 64}
+  b2 = maxpool2d(b2, b2_shape, 2, 2, 0, "b2_pool");                        // -> {56, 56, 64}
 
   Shape b3_shape = initial_shape;
-  Node b3 = convtranspose2d(x, b3_shape, 32, 2, 2, 0, false, "b3_up1");  // -> {112, 112, 32}
-  b3 = convtranspose2d(b3, b3_shape, 128, 4, 4, 0, false, "b3_up2");     // -> {448, 448, 128}
-  b3 = avgpool2d(b3, b3_shape, 4, 4, 0, "b3_pool");                      // -> {112, 112, 128}
-  b3 = conv2d(b3, b3_shape, 64, 3, 1, 1, false, "b3_down1");             // -> {112, 112, 64}
+  Node b3 = convtranspose2d(x, b3_shape, 32, 2, 2, 0, false, "b3_up1");  // -> {56, 56, 32}
+  b3 = convtranspose2d(b3, b3_shape, 128, 4, 4, 0, false, "b3_up2");     // -> {224, 224, 128}
+  b3 = avgpool2d(b3, b3_shape, 4, 4, 0, "b3_pool");                      // -> {56, 56, 128}
+  b3 = conv2d(b3, b3_shape, 64, 3, 1, 1, false, "b3_down1");             // -> {56, 56, 64}
+  b3 = batchnorm(b3, b3_shape, true, "b3_bn2");                          // -> {56, 56, 64}
 
   Shape y_shape = b1_shape;
   Node y = add({b1, b2, b3}, y_shape, "merge_b1_b2_b3");
@@ -280,17 +284,17 @@ Graph create_tunx_v1_graph(IAllocator &allocator, GraphOpts opts) {
 
 std::pair<Node, Shape> v2_block(Node x, Shape shape, const std::string &name) {
   Shape b1_shape = shape;
-  Node b1 = convtranspose2d(x, b1_shape, 128, 2, 2, 0, false, name + "_up1");  // -> {56, 56, 128}
-  b1 = maxpool2d(b1, b1_shape, 3, 1, 1, name + "_bn1");                        // -> {56, 56, 128}
+  Node b1 = convtranspose2d(x, b1_shape, 256, 2, 2, 0, false, name + "_up1");  // -> {224, 224, 128}
+  b1 = maxpool2d(b1, b1_shape, 3, 1, 1, name + "_bn1");                        // -> {112, 112, 128}
 
   Shape b2_shape = shape;
-  Node b2 = convtranspose2d(x, b2_shape, 128, 4, 4, 0, false, name + "_up2");  // -> {56, 56, 128}
-  Node b2_left = maxpool2d(b2 * -1, b2_shape, 2, 2, 0, name + "_left_pool");   // -> {56, 56, 128}
-  Node b2_right = avgpool2d(b2, b2_shape, 2, 2, 0, name + "_right_pool");      // -> {56, 56, 128}
+  Node b2 = convtranspose2d(x, b2_shape, 256, 4, 4, 0, false, name + "_up2");  // -> {224, 224, 128}
+  Node b2_left = maxpool2d(b2 * -1, b2_shape, 2, 2, 0, name + "_left_pool");   // -> {112, 112, 128}
+  Node b2_right = avgpool2d(b2, b2_shape, 2, 2, 0, name + "_right_pool");      // -> {112, 112, 128}
   Node c = add({b1, b2_left, b2_right}, b1_shape, name + "_add");
 
   Shape out_shape = b1_shape;
-  auto out = conv2d(c, out_shape, 64, 3, 1, 1, false, name + "_conv");
+  auto out = conv2d(c, out_shape, 128, 3, 1, 1, false, name + "_conv");
   return {out, out_shape};
 }
 
@@ -301,32 +305,32 @@ Graph create_tunx_v2_graph(IAllocator &allocator, GraphOpts opts) {
 
   Node x = conv2d(input, shape, 16, 7, 2, 3, false, "conv1");  // -> {112, 112, 16}
   x = batchnorm(x, shape, true, "bn1");                        // -> {112, 112, 16}
-  x = maxpool2d(x, shape, 4, 4, 0, "pool1");                   // -> {28, 28, 16}
+  x = maxpool2d(x, shape, 4, 4, 0, "pool1");                   // -> {56, 56, 16}
 
   const Shape initial_shape = shape;
 
   Shape b1_shape = initial_shape;
-  Node b1 = convtranspose2d(x, b1_shape, 32, 2, 2, 0, false, "b1_up1");  // -> {56, 56, 32}
-  b1 = batchnorm(b1, b1_shape, true, "b1_bn1");
-  b1 = convtranspose2d(b1, b1_shape, 64, 2, 2, 0, false, "b1_up2");  // -> {112, 112, 64}
-  b1 = batchnorm(b1, b1_shape, true, "b1_bn2");
-  b1 = conv2d(b1, b1_shape, 64, 3, 1, 1, false, "b1_down");  // -> {112, 112, 64}
-  b1 = maxpool2d(b1, b1_shape, 2, 2, 0, "b1_pool");          // -> {56, 56, 64}
+  Node b1 = convtranspose2d(x, b1_shape, 64, 2, 2, 0, false, "b1_up1");  // -> {112, 112, 64}
+  b1 = batchnorm(b1, b1_shape, true, "b1_bn1");                          // -> {112, 112, 64}
+  b1 = convtranspose2d(b1, b1_shape, 128, 2, 2, 0, false, "b1_up2");     // -> {224, 224, 128}
+  b1 = batchnorm(b1, b1_shape, true, "b1_bn2");                          // -> {224,224, 128}
+  b1 = conv2d(b1, b1_shape, 128, 3, 1, 1, false, "b1_down");             // -> {224, 224, 128}
+  b1 = maxpool2d(b1, b1_shape, 2, 2, 0, "b1_pool");                      // -> {112, 112, 128}
 
   Shape b2_shape = initial_shape;
-  Node b2 = convtranspose2d(x, b2_shape, 64, 2, 2, 0, false, "b2_trans");  // -> {56, 56, 64}
+  Node b2 = convtranspose2d(x, b2_shape, 128, 2, 2, 0, false, "b2_trans");  // -> {56, 56, 128}
   b2 = batchnorm(b2, b2_shape, true, "b2_bn1");
-  b2 = convtranspose2d(b2, b2_shape, 64, 2, 2, 0, false, "b2_up2");  // -> {112, 112, 64}
+  b2 = convtranspose2d(b2, b2_shape, 128, 2, 2, 0, false, "b2_up2");  // -> {112, 112, 128}
   b2 = batchnorm(b2, b2_shape, true, "b2_bn2");
-  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv");   // -> {112, 112, 64}
-  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv2");  // -> {112, 112, 64}
-  b2 = b2 * -1;                                               // -> {112, 112, 64}
-  b2 = maxpool2d(b2, b2_shape, 2, 2, 0, "b2_pool");           // -> {56, 56, 64}
+  b2 = conv2d(b2, b2_shape, 128, 3, 1, 1, false, "b2_conv");   // -> {112, 112, 128}
+  b2 = conv2d(b2, b2_shape, 128, 3, 1, 1, false, "b2_conv2");  // -> {112, 112, 128}
+  b2 = b2 * -1;                                                // -> {112, 112, 128}
+  b2 = maxpool2d(b2, b2_shape, 2, 2, 0, "b2_pool");            // -> {56, 56, 128}
 
   Shape b3_shape = initial_shape;
-  Node b3 = conv2d(x, b3_shape, 32, 3, 1, 1, false, "b3_conv");      // -> {28, 28, 32}
-  b3 = convtranspose2d(b3, b3_shape, 64, 5, 1, 2, false, "b3_up1");  // {28, 28, 64}
-  std::tie(b3, b3_shape) = v2_block(b3, b3_shape, "b3_block");       // -> {56, 56, 64}
+  Node b3 = conv2d(x, b3_shape, 64, 3, 1, 1, false, "b3_conv");       // -> {56, 56, 64}
+  b3 = convtranspose2d(b3, b3_shape, 128, 5, 1, 2, false, "b3_up1");  // {56, 56, 128}
+  std::tie(b3, b3_shape) = v2_block(b3, b3_shape, "b3_block");        // -> {112, 112, 128}
 
   Shape y_shape = b1_shape;
   Node y = add({b1, b2, b3}, y_shape, "merge_b1_b2_b3");
@@ -438,7 +442,7 @@ std::pair<Node, Shape> recursive_wide_fork_join(Node x, Shape shape, size_t dept
 
     Node output = conv2d(joined, joined_shape, kOutputChannels, 1, 1, 0, false, name + "_compress");
 
-     return {output, joined_shape};
+    return {output, joined_shape};
   }
 
   // ── Left branch: local (expand → pool → widen) ──

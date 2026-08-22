@@ -10,7 +10,7 @@
   "print_layer_memory_usage": true,
   "num_microbatches": 2,
   "device": "CUDA:0",
-  "model_name": "tunx_v1",
+  "model_name": "tunx_v3",
   "model_path": "",
   "dataset_name": "imagenet-100",
   "dataset_path": "../data/imagenet-100",

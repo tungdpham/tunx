@@ -236,6 +236,15 @@ static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimi
     }
   }
 
+  size_t parameters_mem = 0;
+  size_t parameters_grad_mem = 0;
+  for (const auto &param : graph.params()) {
+    if (param) {
+      if (param.data()) parameters_mem += param.data().num_bytes();
+      if (param.grad()) parameters_grad_mem += param.grad().num_bytes();
+    }
+  }
+
   auto &built_plan = executor.build_plans(inputs);
 
   ExecutionPlanStats forward_stats = executor.profile_forward_plan(inputs, built_plan.forward_plan);
@@ -267,6 +276,8 @@ static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimi
             {"host_pinned_b", std::to_string(stat.host_mem)},
             {"gradients_b", std::to_string(stat.gradients_mem)},
             {"optimizer_b", std::to_string(optimizer_mem)},
+            {"parameters_b", std::to_string(parameters_mem)},
+            {"parameters_grad_b", std::to_string(parameters_grad_mem)},
             {"activations_b", std::to_string(stat.activations_mem)},
             {"workspaces_b", std::to_string(stat.workspaces_mem)}};
         logger->log(row);
@@ -277,6 +288,10 @@ static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimi
   log_stats(forward_stats.edge_stats, "forward");
   log_stats(backward_stats.edge_stats, "backward");
 
+  fmt::print("{:-^120}\n", "");
+  fmt::print("Optimizer States Memory: {} bytes\n", optimizer_mem);
+  fmt::print("Parameters Memory: {} bytes\n", parameters_mem);
+  fmt::print("Parameters Gradients Memory: {} bytes\n", parameters_grad_mem);
   fmt::print("{:=^120}\n\n", "");
   if (logger) {
     logger->flush();
@@ -686,7 +701,7 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
   std::vector<std::string> mem_headers = {
       "allocator_type", "pass",          "layer_name",   "allocated_b",   "reserved_b",
       "peak_b",         "cached_b",      "fragmented_b", "host_pinned_b", "gradients_b",
-      "optimizer_b",    "activations_b", "workspaces_b"};
+      "optimizer_b",    "parameters_b",  "parameters_grad_b", "activations_b", "workspaces_b"};
 
   std::string mem_csv_path = "tunx_" + artifact_name + "_" + timestamp + "_memory_metrics.csv";
   if (!config.log_dir.empty()) mem_csv_path = config.log_dir + "/" + mem_csv_path;
