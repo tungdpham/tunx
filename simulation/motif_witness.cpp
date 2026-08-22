@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
@@ -37,6 +38,36 @@ void print_stats(std::map<std::string, std::vector<double>>& effs_by_name) {
   }
 }
 
+void dump_execution_order_with_memory(Graph& g, const std::vector<std::string>& order, const std::string& filename) {
+  std::ofstream out(filename);
+  if (order.empty()) return;
+  Allocator allocator;
+  GraphExecutor executor(g);
+  
+  size_t global_peak = 0;
+  size_t step_peak = 0;
+  allocator.subscribe("peak", [&](size_t new_mem) {
+    if (new_mem > global_peak) global_peak = new_mem;
+    if (new_mem > step_peak) step_peak = new_mem;
+  });
+  
+  executor.init_boundaries(&allocator);
+  out << "Init boundary: retained=" << allocator.allocated() 
+      << ", local_peak=" << allocator.allocated() 
+      << ", global_peak=" << global_peak << "\n";
+  
+  for (const auto& op_id : order) {
+    step_peak = allocator.allocated();
+    executor.run_op_node(&g.get_op(op_id), &allocator);
+    out << op_id << ": retained=" << allocator.allocated() 
+        << ", local_peak=" << step_peak 
+        << ", global_peak=" << global_peak << "\n";
+  }
+  
+  out << "Final global peak: " << global_peak << "\n";
+  allocator.unsubscribe("peak");
+}
+
 void run_motif_witness(MotifTarget target, const std::string& name, int trials) {
   std::cout << "\nGenerating Motif: " << name << "\n";
   std::vector<double> effs;
@@ -65,6 +96,21 @@ void run_motif_witness(MotifTarget target, const std::string& name, int trials) 
               : 0.0;
       scaled_effs.push_back(scaled_eff);
 
+      if (scaled_peaks.full > scaled_peaks.dfs) {
+        std::string safe_name = name;
+        std::replace(safe_name.begin(), safe_name.end(), ' ', '_');
+        std::replace(safe_name.begin(), safe_name.end(), '(', '_');
+        std::replace(safe_name.begin(), safe_name.end(), ')', '_');
+        std::string base_path = "failures/failure_" + safe_name + "_" + std::to_string(i);
+        save_graph_to_dot(scaled_graph, base_path + ".dot");
+
+        auto dfs_order = find_fw_naive_dfs_execution_order(scaled_graph);
+        dump_execution_order_with_memory(scaled_graph, dfs_order, base_path + "_dfs.txt");
+
+        auto full_order = find_fw_full_execution_order(scaled_graph);
+        dump_execution_order_with_memory(scaled_graph, full_order, base_path + "_full.txt");
+      }
+
       success++;
     } catch (const std::exception& e) {
       std::cout << "Failed to generate motif witness for " << name << " on attempt " << i << ": "
@@ -84,7 +130,7 @@ int main() {
   srand(static_cast<unsigned int>(time(nullptr)));
   std::vector<std::string> to_checks = {"MACRO"};
 
-  int trials = 20;
+  int trials = 100;
 
   // Mechanism Witnesses
   run_motif_witness(MotifTarget::Rank, "V1 (Rank)", trials);
