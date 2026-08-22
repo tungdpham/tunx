@@ -60,10 +60,12 @@ public:
 private:
   struct PlanKey {
     std::map<Node, Vec<size_t>> input_shapes;
+    bool enable_naive;
     bool enable_linear;
     bool enable_branching;
     bool enable_joining;
     bool operator<(const PlanKey &other) const {
+      if (enable_naive != other.enable_naive) return enable_naive < other.enable_naive;
       if (enable_linear != other.enable_linear) return enable_linear < other.enable_linear;
       if (enable_branching != other.enable_branching)
         return enable_branching < other.enable_branching;

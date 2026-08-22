@@ -86,10 +86,6 @@ static void log_edge_profiles(const std::map<Edge, EdgeProfile> &profiles,
 
 static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inputs,
                                      std::unique_ptr<CsvLogger> &csv_logger) {
-  ExecutionPlan naive_plan;
-  naive_plan.order = executor.graph().edges();
-  auto naive_stats = executor.profile_forward_plan(inputs, naive_plan);
-
   fmt::print("\n{:=^80}\n", " Execution Plan Stats ");
 
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
@@ -120,48 +116,18 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
     }
   };
 
-  fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
-  fmt::print("Naive Path: ");
-  for (size_t i = 0; i < naive_plan.order.size(); ++i) {
-    fmt::print("{}", naive_plan.order[i]->layer()->name());
-    if (i != naive_plan.order.size() - 1) fmt::print(" -> ");
-  }
-  fmt::print("\n\n");
-
-  if (csv_logger) {
-    for (size_t i = 0; i < naive_stats.edge_stats.size(); ++i) {
-      const auto &s = naive_stats.edge_stats[i];
-      std::unordered_map<std::string, std::string> row = {
-          {"plan", "Naive"},
-          {"step", std::to_string(i)},
-          {"layer_name", s.layer_name},
-          {"allocated_mem", std::to_string(s.allocated_mem)},
-          {"peak_mem", std::to_string(s.peak_mem)},
-      };
-      csv_logger->log(row);
-    }
-  }
-
-  profile_solver("Ranked", {false, false, false});
-  profile_solver("Linear", {true, false, false});
-  profile_solver("Branch", {true, true, false});
-  profile_solver("Join", {true, false, true});
-  profile_solver("Full Solver", {true, true, true});
+  profile_solver("Naive", {true, false, false, false});
+  profile_solver("Ranked", {false, false, false, false});
+  profile_solver("Linear", {false, true, false, false});
+  profile_solver("Branch", {false, true, true, false});
+  profile_solver("Join", {false, true, false, true});
+  profile_solver("Full Solver", {false, true, true, true});
 
   fmt::print("{:=^80}\n\n", "");
 }
 
 static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBundle &inputs,
                                               std::unique_ptr<CsvLogger> &csv_logger) {
-  ExecutionPlan naive_plan;
-  for (auto it = executor.graph().edges().rbegin(); it != executor.graph().edges().rend(); ++it) {
-    naive_plan.order.push_back(*it);
-  }
-
-  ExecutionPlan naive_forward_plan;
-  naive_forward_plan.order = executor.graph().edges();
-  auto naive_stats = executor.profile_backward_plan(inputs, naive_forward_plan, naive_plan);
-
   fmt::print("\n{:=^80}\n", " Backward Execution Plan Stats ");
 
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
@@ -192,40 +158,20 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
     }
   };
 
-  fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
-  fmt::print("Naive Path: ");
-  for (size_t i = 0; i < naive_plan.order.size(); ++i) {
-    fmt::print("{}", naive_plan.order[i]->layer()->name());
-    if (i != naive_plan.order.size() - 1) fmt::print(" -> ");
-  }
-  fmt::print("\n\n");
-
-  if (csv_logger) {
-    for (size_t i = 0; i < naive_stats.edge_stats.size(); ++i) {
-      const auto &s = naive_stats.edge_stats[i];
-      std::unordered_map<std::string, std::string> row = {
-          {"plan", "Naive"},
-          {"step", std::to_string(i)},
-          {"layer_name", s.layer_name},
-          {"allocated_mem", std::to_string(s.allocated_mem)},
-          {"peak_mem", std::to_string(s.peak_mem)},
-      };
-      csv_logger->log(row);
-    }
-  }
-
-  profile_solver("Ranked", {false, false, false});
-  profile_solver("Linear", {true, false, false});
-  profile_solver("Branch", {true, true, false});
-  profile_solver("Join", {true, false, true});
-  profile_solver("Full Solver", {true, true, true});
+  profile_solver("Naive", {true, false, false, false});
+  profile_solver("Ranked", {false, false, false, false});
+  profile_solver("Linear", {false, true, false, false});
+  profile_solver("Branch", {false, true, true, false});
+  profile_solver("Join", {false, true, false, true});
+  profile_solver("Full Solver", {false, true, true, true});
 
   fmt::print("{:=^80}\n\n", "");
 }
 
 static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimizer,
                                GraphExecutor &executor, TensorBundle &inputs, IAllocator &alloc,
-                               std::unique_ptr<CsvLogger> &logger, std::string allocator_name) {
+                               std::unique_ptr<CsvLogger> &logger, std::string allocator_name,
+                               std::string plan_name, SolverOptions options) {
   auto *previous_alloc = graph.workspace_allocator();
   graph.set_workspace_allocator(alloc);
 
@@ -245,7 +191,7 @@ static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimi
     }
   }
 
-  auto &built_plan = executor.build_plans(inputs);
+  auto &built_plan = executor.build_plans(inputs, options);
 
   ExecutionPlanStats forward_stats = executor.profile_forward_plan(inputs, built_plan.forward_plan);
   ExecutionPlanStats backward_stats =
@@ -265,6 +211,7 @@ static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimi
 
       if (logger) {
         std::unordered_map<std::string, std::string> row = {
+            {"plan_name", plan_name},
             {"allocator_type", allocator_name},
             {"pass", pass_name},
             {"layer_name", stat.layer_name},
@@ -699,7 +646,7 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
   }
 
   std::vector<std::string> mem_headers = {
-      "allocator_type", "pass",          "layer_name",   "allocated_b",   "reserved_b",
+      "plan_name", "allocator_type", "pass",          "layer_name",   "allocated_b",   "reserved_b",
       "peak_b",         "cached_b",      "fragmented_b", "host_pinned_b", "gradients_b",
       "optimizer_b",    "parameters_b",  "parameters_grad_b", "activations_b", "workspaces_b"};
 
@@ -730,11 +677,21 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
     log_execution_plan_stats_backward(executor, inputs, backward_plan_logger);
 
     auto &pool_allocator = PoolAllocator::instance(graph.device(), graph.handle().get_stream());
-    auto &packed_allocator = *built_plan.packed_allocator;
-    log_memory_metrics(graph, optimizer, executor, inputs, pool_allocator, memory_metrics_logger,
-                       "reactive");
-    log_memory_metrics(graph, optimizer, executor, inputs, packed_allocator, memory_metrics_logger,
-                       "packed");
+    auto profile_memory = [&](const std::string &plan_name, SolverOptions opts) {
+        auto &plan = executor.build_plans(inputs, opts);
+        auto &packed_allocator = *plan.packed_allocator;
+        log_memory_metrics(graph, optimizer, executor, inputs, pool_allocator, memory_metrics_logger,
+                           "reactive", plan_name, opts);
+        log_memory_metrics(graph, optimizer, executor, inputs, packed_allocator, memory_metrics_logger,
+                           "packed", plan_name, opts);
+    };
+
+    profile_memory("Naive", {true, false, false, false});
+    profile_memory("Ranked", {false, false, false, false});
+    profile_memory("Linear", {false, true, false, false});
+    profile_memory("Branch", {false, true, true, false});
+    profile_memory("Join", {false, true, false, true});
+    profile_memory("Full Solver", {false, true, true, true});
 
     if (optimizer) {
       optimizer->zero_grads();

@@ -4,7 +4,6 @@
  * This software is licensed under the MIT License. See the LICENSE file in the
  * project root for the full license text.
  */
-
 #include "nn/graph_executor.hpp"
 
 #include <fmt/core.h>
@@ -93,6 +92,7 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
     uid_to_node[node->uid()] = node;
   }
   PlanKey key;
+  key.enable_naive = options.enable_naive;
   key.enable_linear = options.enable_linear;
   key.enable_branching = options.enable_branching;
   key.enable_joining = options.enable_joining;
@@ -106,7 +106,12 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
   }
   MacroSolver planner(graph_, os_, options);
   auto [output_map, forward_edge_profiles, node_profiles] = profile_edges_forward(input_map);
-  ExecutionPlan forward_plan = planner.find_forward_order(forward_edge_profiles);
+  ExecutionPlan forward_plan;
+  if (options.enable_naive) {
+    forward_plan.order = graph_.edges();
+  } else {
+    forward_plan = planner.find_forward_order(forward_edge_profiles);
+  }
 
   TensorBundle output_grad_map;
   auto &grad_allocator = PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
@@ -140,7 +145,13 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
     backward_edge_profiles = std::move(profile_res.second);
     profile_res.first.clear();
     graph_.workspace_allocator()->evict_unused();
-    backward_plan = planner.find_backward_order(backward_edge_profiles);
+    if (options.enable_naive) {
+      for (auto it = graph_.edges().rbegin(); it != graph_.edges().rend(); ++it) {
+        backward_plan.order.push_back(*it);
+      }
+    } else {
+      backward_plan = planner.find_backward_order(backward_edge_profiles);
+    }
   }
 
   BuiltPlan plan{forward_plan,
@@ -167,6 +178,7 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
     uid_to_node[node->uid()] = node;
   }
   PlanKey key;
+  key.enable_naive = false;
   key.enable_linear = true;
   key.enable_branching = true;
   key.enable_joining = true;

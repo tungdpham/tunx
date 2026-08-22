@@ -20,6 +20,7 @@ struct MacroNode {
 };
 
 struct SolverOptions {
+  bool enable_naive = false;
   bool enable_linear = true;
   bool enable_branching = true;
   bool enable_joining = true;
@@ -62,37 +63,37 @@ public:
 class RankedSolver : public MacroSolver {
 public:
   RankedSolver(Graph &graph, std::ostream *os = nullptr)
-      : MacroSolver(graph, os, {false, false, false}) {}
+      : MacroSolver(graph, os, {false, false, false, false}) {}
 };
 
 class LinearSolver : public MacroSolver {
 public:
   LinearSolver(Graph &graph, std::ostream *os = nullptr)
-      : MacroSolver(graph, os, {true, false, false}) {}
+      : MacroSolver(graph, os, {false, true, false, false}) {}
 };
 
 class BranchingSolver : public MacroSolver {
 public:
   BranchingSolver(Graph &graph, std::ostream *os = nullptr)
-      : MacroSolver(graph, os, {true, true, false}) {}
+      : MacroSolver(graph, os, {false, true, true, false}) {}
 };
 
 class JoiningSolver : public MacroSolver {
 public:
   JoiningSolver(Graph &graph, std::ostream *os = nullptr)
-      : MacroSolver(graph, os, {true, false, true}) {}
+      : MacroSolver(graph, os, {false, true, false, true}) {}
 };
 
 class FlatBJSolver : public MacroSolver {
 public:
   FlatBJSolver(Graph &graph, std::ostream *os = nullptr)
-      : MacroSolver(graph, os, {true, true, true}) {}
+      : MacroSolver(graph, os, {false, true, true, true}) {}
 };
 
 class FullSolver : public MacroSolver {
 public:
   FullSolver(Graph &graph, std::ostream *os = nullptr)
-      : MacroSolver(graph, os, {true, true, true}) {}
+      : MacroSolver(graph, os, {false, true, true, true}) {}
 };
 
 }  // namespace tunx
