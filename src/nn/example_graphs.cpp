@@ -34,8 +34,8 @@ size_t channels(const Shape &shape) {
 }
 
 Node add(const Vec<Node> &inputs, Shape &shape, const std::string &name) {
-  auto layer = Add();
-  shape = layer.output_shapes({shape})[0];
+  auto layer = Add(name);
+  shape = layer.output_shapes(Vec<Shape>(inputs.size(), shape))[0];
   return layer(inputs);
 }
 
@@ -147,8 +147,8 @@ Node slice(Node input, Shape &shape, size_t axis, size_t start, size_t length,
   return layer(input);
 }
 
-Node flash_attention(Node input, Shape &shape, size_t embed_dim, size_t num_heads, bool is_causal,
-                     const std::string &name) {
+Node attention(Node input, Shape &shape, size_t embed_dim, size_t num_heads, bool is_causal,
+               const std::string &name) {
   auto layer = FlashAttentionBlock(embed_dim, num_heads, is_causal, name);
   shape = layer.output_shapes({shape})[0];
   return layer(input);
@@ -227,7 +227,7 @@ Node gpt_block(Node input, Shape &shape, size_t embed_dim, size_t num_heads, siz
                float dropout_rate, bool is_causal, const std::string &name) {
   Shape attn_shape = shape;
   Node attn = layernorm(input, attn_shape, 1e-5f, true, name + "_ln_1");
-  attn = flash_attention(attn, attn_shape, embed_dim, num_heads, is_causal, name + "_attn");
+  attn = attention(attn, attn_shape, embed_dim, num_heads, is_causal, name + "_attn");
   attn = dropout(attn, attn_shape, dropout_rate, name + "_attn_dropout");
   Node x = input + attn;
 
@@ -320,6 +320,45 @@ Node v1_residual_block(Node input, Shape &shape, size_t out_channels, const std:
   return relu(out, shape, name + "_relu");
 }
 
+Node v2_scheduling_block(Node input, Shape &shape, size_t out_channels, const std::string &name) {
+  const Shape seed_shape = shape;
+
+  // Branch 1: 14x14 -> 28x28.
+  // This is the smallest expansion. Its output is also its retained result.
+  Shape b1_shape = seed_shape;
+  Node b1 =
+      convtranspose2d(input, b1_shape, out_channels, 2, 2, 2, 2, 0, 0, false, name + "_b1_up2");
+  // b1: 28x28xC
+
+  // Branch 2: 14x14 -> 56x56 -> 28x28.
+  Shape b2_shape = seed_shape;
+  Node b2 =
+      convtranspose2d(input, b2_shape, out_channels, 4, 4, 4, 4, 0, 0, false, name + "_b2_up4");
+  b2 = avgpool2d(b2, b2_shape, 2, 2, 2, 2, 0, 0, name + "_b2_reduce");
+  // b2: 28x28xC
+
+  // Branch 3: 14x14 -> 84x84 -> 28x28.
+  Shape b3_shape = seed_shape;
+  Node b3 =
+      convtranspose2d(input, b3_shape, out_channels, 6, 6, 6, 6, 0, 0, false, name + "_b3_up6");
+  b3 = avgpool2d(b3, b3_shape, 3, 3, 3, 3, 0, 0, name + "_b3_reduce");
+  // b3: 28x28xC
+
+  // Branch 4: 14x14 -> 112x112 -> 28x28.
+  Shape b4_shape = seed_shape;
+  Node b4 =
+      convtranspose2d(input, b4_shape, out_channels, 8, 8, 8, 8, 0, 0, false, name + "_b4_up8");
+  b4 = avgpool2d(b4, b4_shape, 4, 4, 4, 4, 0, 0, name + "_b4_reduce");
+  // b4: 28x28xC
+
+  // All reduced branch outputs have identical shapes.
+  Shape merged_shape = b1_shape;
+  Node merged = add({b1, b2, b3, b4}, merged_shape, name + "_merge");
+
+  shape = merged_shape;
+  return merged;
+}
+
 void finalize_graph(Graph &graph, IAllocator &allocator, const Node &output, GraphOpts opts) {
   output->set_uid("output");
   graph.set_output(output);
@@ -342,64 +381,6 @@ Graph create_mnist_graph(IAllocator &allocator, GraphOpts opts) {
   x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool2");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 10, false, "output");
-  finalize_graph(graph, allocator, output, opts);
-  return graph;
-}
-
-Graph create_cifar10_vgg_graph(IAllocator &allocator, GraphOpts opts) {
-  Graph graph;
-  Node input = graph.input("input");
-  Shape shape = {1, 32, 32, 3};
-
-  Node x = conv2d(input, shape, 64, 3, 3, 1, 1, 1, 1, false, "conv0");
-  x = batchnorm(x, shape, true, "bn0");
-  x = conv2d(x, shape, 64, 3, 3, 1, 1, 1, 1, false, "conv1");
-  x = batchnorm(x, shape, true, "bn1");
-  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool0");
-  x = conv2d(x, shape, 128, 3, 3, 1, 1, 1, 1, false, "conv2");
-  x = batchnorm(x, shape, true, "bn2");
-  x = conv2d(x, shape, 128, 3, 3, 1, 1, 1, 1, false, "conv3");
-  x = batchnorm(x, shape, true, "bn3");
-  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool1");
-  x = conv2d(x, shape, 256, 3, 3, 1, 1, 1, 1, false, "conv4");
-  x = batchnorm(x, shape, true, "bn4");
-  x = conv2d(x, shape, 256, 3, 3, 1, 1, 1, 1, false, "conv5");
-  x = relu(x, shape, "relu5");
-  x = conv2d(x, shape, 256, 3, 3, 1, 1, 1, 1, false, "conv6");
-  x = batchnorm(x, shape, true, "bn6");
-  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool2");
-  x = conv2d(x, shape, 512, 3, 3, 1, 1, 1, 1, false, "conv7");
-  x = batchnorm(x, shape, true, "bn7");
-  x = conv2d(x, shape, 512, 3, 3, 1, 1, 1, 1, false, "conv8");
-  x = batchnorm(x, shape, true, "bn8");
-  x = conv2d(x, shape, 512, 3, 3, 1, 1, 1, 1, false, "conv9");
-  x = batchnorm(x, shape, true, "bn9");
-  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool3");
-  x = flatten(x, shape, 1, -1, "flatten");
-  x = dense(x, shape, 512, true, "fc0");
-  x = relu(x, shape, "relu10");
-  Node output = dense(x, shape, 10, true, "fc1");
-  finalize_graph(graph, allocator, output, opts);
-  return graph;
-}
-
-Graph create_cifar10_test_graph(IAllocator &allocator, GraphOpts opts) {
-  Graph graph;
-  Node input = graph.input("input");
-  Shape shape = {1, 32, 32, 3};
-
-  Node x = conv2d(input, shape, 64, 3, 3, 1, 1, 1, 1, false, "conv1");
-  x = batchnorm(x, shape, true, "bn1");
-  x = conv2d(x, shape, 128, 3, 3, 1, 1, 1, 1, false, "conv2");
-  x = batchnorm(x, shape, true, "bn2");
-  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool1");
-  x = basic_residual_block(x, shape, 256, 1, "res_block1");
-  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool2");
-  x = basic_residual_block(x, shape, 512, 1, "res_block2");
-  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "pool3");
-  x = avgpool2d(x, shape, 4, 4, 1, 1, 0, 0, "avgpool");
-  x = flatten(x, shape, 1, -1, "flatten");
-  Node output = dense(x, shape, 10, true, "output");
   finalize_graph(graph, allocator, output, opts);
   return graph;
 }
@@ -481,29 +462,6 @@ Graph create_cifar100_wrn16_8_graph(IAllocator &allocator, GraphOpts opts) {
   return graph;
 }
 
-Graph create_tiny_imagenet_resnet18_graph(IAllocator &allocator, GraphOpts opts) {
-  Graph graph;
-  Node input = graph.input("input");
-  Shape shape = {1, 64, 64, 3};
-
-  Node x = conv2d(input, shape, 32, 3, 3, 1, 1, 1, 1, false, "conv1");
-  x = batchnorm(x, shape, true, "bn1");
-  x = maxpool2d(x, shape, 2, 2, 2, 2, 0, 0, "maxpool");
-  x = basic_residual_block(x, shape, 64, 1, "layer1_block1");
-  x = basic_residual_block(x, shape, 64, 1, "layer1_block2");
-  x = basic_residual_block(x, shape, 128, 2, "layer2_block1");
-  x = basic_residual_block(x, shape, 128, 1, "layer2_block2");
-  x = basic_residual_block(x, shape, 256, 2, "layer3_block1");
-  x = basic_residual_block(x, shape, 256, 1, "layer3_block2");
-  x = basic_residual_block(x, shape, 512, 2, "layer4_block1");
-  x = basic_residual_block(x, shape, 512, 1, "layer4_block2");
-  x = avgpool2d(x, shape, 4, 4, 1, 1, 0, 0, "avgpool");
-  x = flatten(x, shape, 1, -1, "flatten");
-  Node output = dense(x, shape, 200, true, "fc");
-  finalize_graph(graph, allocator, output, opts);
-  return graph;
-}
-
 Graph create_tiny_imagenet_wrn16_8_graph(IAllocator &allocator, GraphOpts opts) {
   constexpr size_t width_factor = 8;
   constexpr float dropout_rate = 0.3f;
@@ -526,68 +484,6 @@ Graph create_tiny_imagenet_wrn16_8_graph(IAllocator &allocator, GraphOpts opts) 
   x = avgpool2d(x, shape, 8, 8, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 200, true, "fc");
-  finalize_graph(graph, allocator, output, opts);
-  return graph;
-}
-
-Graph create_tiny_imagenet_resnet50_graph(IAllocator &allocator, GraphOpts opts) {
-  Graph graph;
-  Node input = graph.input("input");
-  Shape shape = {1, 64, 64, 3};
-
-  Node x = conv2d(input, shape, 64, 3, 3, 1, 1, 1, 1, true, "conv1");
-  x = batchnorm(x, shape, true, "bn1");
-  x = maxpool2d(x, shape, 3, 3, 2, 2, 1, 1, "maxpool");
-  x = bottleneck_residual_block(x, shape, 64, 256, 1, "layer1_block1");
-  x = bottleneck_residual_block(x, shape, 64, 256, 1, "layer1_block2");
-  x = bottleneck_residual_block(x, shape, 64, 256, 1, "layer1_block3");
-  x = bottleneck_residual_block(x, shape, 128, 512, 2, "layer2_block1");
-  x = bottleneck_residual_block(x, shape, 128, 512, 1, "layer2_block2");
-  x = bottleneck_residual_block(x, shape, 128, 512, 1, "layer2_block3");
-  x = bottleneck_residual_block(x, shape, 128, 512, 1, "layer2_block4");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 2, "layer3_block1");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 1, "layer3_block2");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 1, "layer3_block3");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 1, "layer3_block4");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 1, "layer3_block5");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 1, "layer3_block6");
-  x = bottleneck_residual_block(x, shape, 512, 2048, 2, "layer4_block1");
-  x = bottleneck_residual_block(x, shape, 512, 2048, 1, "layer4_block2");
-  x = bottleneck_residual_block(x, shape, 512, 2048, 1, "layer4_block3");
-  x = avgpool2d(x, shape, 4, 4, 1, 1, 0, 0, "avgpool");
-  x = flatten(x, shape, 1, -1, "flatten");
-  Node output = dense(x, shape, 200, true, "fc");
-  finalize_graph(graph, allocator, output, opts);
-  return graph;
-}
-
-Graph create_resnet50_imagenet_graph(IAllocator &allocator, GraphOpts opts) {
-  Graph graph;
-  Node input = graph.input("input");
-  Shape shape = {1, 224, 224, 3};
-
-  Node x = conv2d(input, shape, 64, 7, 7, 2, 2, 3, 3, true, "conv1");
-  x = batchnorm(x, shape, true, "bn1");
-  x = maxpool2d(x, shape, 3, 3, 2, 2, 1, 1, "maxpool");
-  x = bottleneck_residual_block(x, shape, 64, 256, 1, "layer1_block1");
-  x = bottleneck_residual_block(x, shape, 64, 256, 1, "layer1_block2");
-  x = bottleneck_residual_block(x, shape, 64, 256, 1, "layer1_block3");
-  x = bottleneck_residual_block(x, shape, 128, 512, 2, "layer2_block1");
-  x = bottleneck_residual_block(x, shape, 128, 512, 1, "layer2_block2");
-  x = bottleneck_residual_block(x, shape, 128, 512, 1, "layer2_block3");
-  x = bottleneck_residual_block(x, shape, 128, 512, 1, "layer2_block4");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 2, "layer3_block1");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 1, "layer3_block2");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 1, "layer3_block3");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 1, "layer3_block4");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 1, "layer3_block5");
-  x = bottleneck_residual_block(x, shape, 256, 1024, 1, "layer3_block6");
-  x = bottleneck_residual_block(x, shape, 512, 2048, 2, "layer4_block1");
-  x = bottleneck_residual_block(x, shape, 512, 2048, 1, "layer4_block2");
-  x = bottleneck_residual_block(x, shape, 512, 2048, 1, "layer4_block3");
-  x = avgpool2d(x, shape, 7, 7, 1, 1, 0, 0, "avgpool");
-  x = flatten(x, shape, 1, -1, "flatten");
-  Node output = dense(x, shape, 1000, true, "fc");
   finalize_graph(graph, allocator, output, opts);
   return graph;
 }
@@ -619,74 +515,6 @@ Graph create_imagenet100_resnet50_graph(IAllocator &allocator, GraphOpts opts) {
   x = avgpool2d(x, shape, 7, 7, 1, 1, 0, 0, "avgpool");
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 100, true, "fc");
-  finalize_graph(graph, allocator, output, opts);
-  return graph;
-}
-
-Graph create_tiny_imagenet_vit_graph(IAllocator &allocator, GraphOpts opts) {
-  constexpr size_t patch_size = 4;
-  constexpr size_t embed_dim = 256;
-  constexpr size_t num_heads = 4;
-  constexpr size_t mlp_ratio = 4;
-  constexpr size_t depth = 4;
-  constexpr size_t num_classes = 200;
-  constexpr size_t num_patches = (64 / patch_size) * (64 / patch_size);
-  constexpr size_t seq_len = num_patches + 1;
-
-  Graph graph;
-  Node input = graph.input("input");
-  Shape shape = {1, 64, 64, 3};
-
-  Node x = conv2d(input, shape, embed_dim, patch_size, patch_size, patch_size, patch_size, 0, 0,
-                  true, "patch_embed");
-  x = flatten(x, shape, 1, 2, "flatten_patches");
-  x = class_token(x, shape, embed_dim, "class_token");
-  x = positional_embedding(x, shape, embed_dim, seq_len, "positional_embedding");
-  x = dropout(x, shape, 0.1f, "dropout");
-
-  for (size_t i = 0; i < depth; ++i) {
-    x = gpt_block(x, shape, embed_dim, num_heads, embed_dim * mlp_ratio, 0.1f, false,
-                  "encoder_" + std::to_string(i));
-  }
-
-  x = layernorm(x, shape, dtype_eps(DType_t::FP32), true, "ln_final");
-  x = slice(x, shape, 1, 0, 1, "extract_cls");
-  x = flatten(x, shape, 1, -1, "flatten_cls");
-  Node output = dense(x, shape, num_classes, true, "head");
-  finalize_graph(graph, allocator, output, opts);
-  return graph;
-}
-
-Graph create_tiny_imagenet_flash_vit_graph(IAllocator &allocator, GraphOpts opts) {
-  constexpr size_t patch_size = 4;
-  constexpr size_t embed_dim = 256;
-  constexpr size_t num_heads = 4;
-  constexpr size_t mlp_ratio = 4;
-  constexpr size_t depth = 4;
-  constexpr size_t num_classes = 200;
-  constexpr size_t num_patches = (64 / patch_size) * (64 / patch_size);
-  constexpr size_t seq_len = num_patches + 1;
-
-  Graph graph;
-  Node input = graph.input("input");
-  Shape shape = {1, 64, 64, 3};
-
-  Node x = conv2d(input, shape, embed_dim, patch_size, patch_size, patch_size, patch_size, 0, 0,
-                  true, "patch_embed");
-  x = flatten(x, shape, 1, 2, "flatten_patches");
-  x = class_token(x, shape, embed_dim, "class_token");
-  x = positional_embedding(x, shape, embed_dim, seq_len, "positional_embedding");
-  x = dropout(x, shape, 0.1f, "dropout");
-
-  for (size_t i = 0; i < depth; ++i) {
-    x = gpt_block(x, shape, embed_dim, num_heads, embed_dim * mlp_ratio, 0.1f, false,
-                  "encoder_" + std::to_string(i));
-  }
-
-  x = layernorm(x, shape, dtype_eps(DType_t::FP32), true, "ln_final");
-  // x = slice(x, shape, 1, 0, 1, "extract_cls");
-  x = flatten(x, shape, 1, -1, "flatten_cls");
-  Node output = dense(x, shape, num_classes, true, "head");
   finalize_graph(graph, allocator, output, opts);
   return graph;
 }
@@ -760,6 +588,46 @@ Graph create_tunx_v1_graph(IAllocator &allocator, GraphOpts opts) {
   return graph;
 }
 
+Graph create_tunx_v2_graph(IAllocator &allocator, GraphOpts opts) {
+  Graph graph;
+  Node input = graph.input("input");
+  Shape shape = {1, 224, 224, 3};
+
+  /*
+   * First reduce spatial resolution without placing a caching operator
+   * after a large activation.
+   *
+   * 224x224x3 -> 14x14x3
+   */
+  Node x = avgpool2d(input, shape, 16, 16, 16, 16, 0, 0, "seed_pool");
+
+  /*
+   * Small learnable seed:
+   * 14x14x3 -> 14x14x8
+   *
+   * This activation is cached by all ConvTranspose2D branches, but it is
+   * small and all branches refer to the same tensor storage.
+   */
+  x = conv2d(x, shape, 8, 1, 1, 1, 1, 0, 0, false, "seed_projection");
+
+  /*
+   * Four independent expansion branches.
+   *
+   * They are constructed smallest-to-largest intentionally. A naive DFS
+   * order is therefore likely to execute the largest transient last.
+   */
+  x = v2_scheduling_block(x, shape, 64, "expand_fork");
+
+  // 28x28x64 -> 1x1x64
+  x = avgpool2d(x, shape, 28, 28, 1, 1, 0, 0, "global_avgpool");
+
+  x = flatten(x, shape, 1, -1, "flatten");
+  Node output = dense(x, shape, 100, true, "output");
+
+  finalize_graph(graph, allocator, output, opts);
+  return graph;
+}
+
 }  // namespace
 
 std::unordered_map<std::string, std::function<Graph(IAllocator &, GraphOpts)>>
@@ -770,20 +638,13 @@ void ExampleGraphs::register_defaults() {
 
   register_graph("inception_v1", create_inception_v1_graph);
 
-  register_graph("cifar10_vgg", create_cifar10_vgg_graph);
-  register_graph("cifar10_test", create_cifar10_test_graph);
   register_graph("cifar10_resnet9", create_cifar10_resnet9_graph);
 
   register_graph("cifar100_resnet18", create_cifar100_resnet18_graph);
   register_graph("cifar100_wrn16_8", create_cifar100_wrn16_8_graph);
 
-  register_graph("tiny_imagenet_resnet18", create_tiny_imagenet_resnet18_graph);
   register_graph("tiny_imagenet_wrn16_8", create_tiny_imagenet_wrn16_8_graph);
-  register_graph("tiny_imagenet_resnet50", create_tiny_imagenet_resnet50_graph);
-  register_graph("tiny_imagenet_vit", create_tiny_imagenet_vit_graph);
-  register_graph("tiny_imagenet_flash_vit", create_tiny_imagenet_flash_vit_graph);
 
-  register_graph("imagenet_resnet50", create_resnet50_imagenet_graph);
   register_graph("imagenet100_resnet50", create_imagenet100_resnet50_graph);
 
   register_graph("gpt2_small", [](IAllocator &allocator, GraphOpts opts) {
@@ -798,6 +659,7 @@ void ExampleGraphs::register_defaults() {
 
   // graphs for benchmarking
   register_graph("tunx_v1", create_tunx_v1_graph);
+  register_graph("tunx_v2", create_tunx_v2_graph);
 }
 
 }  // namespace tunx

@@ -89,11 +89,11 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
   naive_plan.order = executor.graph().edges();
   auto naive_stats = executor.profile_forward_plan(inputs, naive_plan);
 
-  std::ofstream debug_stream("debug_bfd_solver.txt");
+  std::ofstream debug_stream("debug_macro_solver.txt");
 
   auto &built_plan = executor.build_plans(inputs);
-  auto &bfd_plan = built_plan.forward_plan;
-  auto bfd_stats = executor.profile_forward_plan(inputs, bfd_plan);
+  auto &macro_plan = built_plan.forward_plan;
+  auto macro_stats = executor.profile_forward_plan(inputs, macro_plan);
 
   fmt::print("\n{:=^80}\n", " Execution Plan Stats ");
   fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
@@ -104,11 +104,11 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
   }
   fmt::print("\n\n");
 
-  fmt::print("BFD Order Peak Memory: {} bytes\n", bfd_stats.peak_mem);
-  fmt::print("BFD Path: ");
-  for (size_t i = 0; i < bfd_plan.order.size(); ++i) {
-    fmt::print("{}", bfd_plan.order[i]->layer()->name());
-    if (i != bfd_plan.order.size() - 1) fmt::print(" -> ");
+  fmt::print("MACRO Order Peak Memory: {} bytes\n", macro_stats.peak_mem);
+  fmt::print("MACRO Path: ");
+  for (size_t i = 0; i < macro_plan.order.size(); ++i) {
+    fmt::print("{}", macro_plan.order[i]->layer()->name());
+    if (i != macro_plan.order.size() - 1) fmt::print(" -> ");
   }
   fmt::print("\n");
   fmt::print("{:=^80}\n\n", "");
@@ -125,10 +125,10 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
       };
       csv_logger->log(row);
     }
-    for (size_t i = 0; i < bfd_stats.edge_stats.size(); ++i) {
-      const auto &s = bfd_stats.edge_stats[i];
+    for (size_t i = 0; i < macro_stats.edge_stats.size(); ++i) {
+      const auto &s = macro_stats.edge_stats[i];
       std::unordered_map<std::string, std::string> row = {
-          {"plan", "bfd"},
+          {"plan", "macro"},
           {"step", std::to_string(i)},
           {"layer_name", s.layer_name},
           {"allocated_mem", std::to_string(s.allocated_mem)},
@@ -151,8 +151,8 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
   auto naive_stats = executor.profile_backward_plan(inputs, naive_forward_plan, naive_plan);
 
   auto &built_plan = executor.build_plans(inputs);
-  auto &bfd_plan = built_plan.backward_plan;
-  auto bfd_stats = executor.profile_backward_plan(inputs, built_plan.forward_plan, bfd_plan);
+  auto &macro_plan = built_plan.backward_plan;
+  auto macro_stats = executor.profile_backward_plan(inputs, built_plan.forward_plan, macro_plan);
 
   fmt::print("\n{:=^80}\n", " Backward Execution Plan Stats ");
   fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
@@ -163,11 +163,11 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
   }
   fmt::print("\n\n");
 
-  fmt::print("BFD Order Peak Memory: {} bytes\n", bfd_stats.peak_mem);
-  fmt::print("BFD Path: ");
-  for (size_t i = 0; i < bfd_plan.order.size(); ++i) {
-    fmt::print("{}", bfd_plan.order[i]->layer()->name());
-    if (i != bfd_plan.order.size() - 1) fmt::print(" -> ");
+  fmt::print("MACRO Order Peak Memory: {} bytes\n", macro_stats.peak_mem);
+  fmt::print("MACRO Path: ");
+  for (size_t i = 0; i < macro_plan.order.size(); ++i) {
+    fmt::print("{}", macro_plan.order[i]->layer()->name());
+    if (i != macro_plan.order.size() - 1) fmt::print(" -> ");
   }
   fmt::print("\n");
   fmt::print("{:=^80}\n\n", "");
@@ -184,10 +184,10 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
       };
       csv_logger->log(row);
     }
-    for (size_t i = 0; i < bfd_stats.edge_stats.size(); ++i) {
-      const auto &s = bfd_stats.edge_stats[i];
+    for (size_t i = 0; i < macro_stats.edge_stats.size(); ++i) {
+      const auto &s = macro_stats.edge_stats[i];
       std::unordered_map<std::string, std::string> row = {
-          {"plan", "bfd"},
+          {"plan", "macro"},
           {"step", std::to_string(i)},
           {"layer_name", s.layer_name},
           {"allocated_mem", std::to_string(s.allocated_mem)},

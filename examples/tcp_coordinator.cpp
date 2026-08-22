@@ -93,8 +93,9 @@ int main(int argc, char *argv[]) {
   }
 
   Endpoint coordinator_endpoint = Endpoint::tcp(tcp_config.host, tcp_config.port);
-  
-  if (tcp_config.local_worker_position < 0 || tcp_config.local_worker_position >= tcp_config.workers.size()) {
+
+  if (tcp_config.local_worker_position < 0 ||
+      tcp_config.local_worker_position >= static_cast<int>(tcp_config.workers.size())) {
     throw std::runtime_error("Local worker position out of bounds");
   }
   Endpoint local_worker_endpoint = tcp_config.workers[tcp_config.local_worker_position].endpoint;
@@ -106,13 +107,13 @@ int main(int argc, char *argv[]) {
 
   // Sample compute times for ComputeBandwidthPartitioner
   std::unique_ptr<PartitionerBase> partitioner;
-  
+
   Tensor batch_data, batch_labels;
   if (train_dataset->get_batch(train_config.batch_size, batch_data, batch_labels)) {
     cout << "Profiling graph edges for ComputeBandwidthPartitioner..." << endl;
     GraphExecutor executor(graph);
     TensorBundle input_map({{"input", batch_data}});
-    
+
     // Warmup
     for (int i = 0; i < 5; ++i) {
       executor.forward(input_map);
@@ -127,36 +128,39 @@ int main(int argc, char *argv[]) {
         if (!tcp_config.workers[i].interconnect_speeds.empty()) {
           mesh.link_speeds.push_back(tcp_config.workers[i].interconnect_speeds[0]);
         } else {
-          mesh.link_speeds.push_back(3000000.0); // fallback 3GB/s
+          mesh.link_speeds.push_back(3000000.0);  // fallback 3GB/s
         }
       }
     }
-    
+
     // Use the first compute power as the baseline multiplier
     double baseline_power = mesh.compute_powers.empty() ? 1.0 : mesh.compute_powers[0];
 
-    auto compute_cost_fn = [edge_profiles, baseline_power](const Edge& edge) -> double {
+    auto compute_cost_fn = [edge_profiles, baseline_power](const Edge &edge) -> double {
       auto it = edge_profiles.find(edge);
       if (it != edge_profiles.end()) {
         return it->second.exec_time * baseline_power;
       }
-      return 1.0; 
+      return 1.0;
     };
 
-    auto activation_size_fn = [node_profiles](const Node& node) -> double {
+    auto activation_size_fn = [node_profiles](const Node &node) -> double {
       auto it = node_profiles.find(node);
       if (it != node_profiles.end()) {
         return static_cast<double>(it->second);
       }
-      return 1048576.0; // fallback to 1MB if unknown
+      return 1048576.0;  // fallback to 1MB if unknown
     };
 
-    partitioner = std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn, activation_size_fn);
+    partitioner =
+        std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn, activation_size_fn);
     train_dataset->reset();
   } else {
-    cout << "Warning: Could not get a batch to profile. Falling back to uniform GraphPartitioner." << endl;
+    cout << "Warning: Could not get a batch to profile. Falling back to uniform GraphPartitioner."
+         << endl;
     std::vector<size_t> fallback_ratios;
-    for (const auto& w : tcp_config.workers) fallback_ratios.push_back(static_cast<size_t>(w.compute_power));
+    for (const auto &w : tcp_config.workers)
+      fallback_ratios.push_back(static_cast<size_t>(w.compute_power));
     partitioner = std::make_unique<GraphPartitioner>(fallback_ratios);
   }
 
