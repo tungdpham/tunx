@@ -320,43 +320,179 @@ Node v1_residual_block(Node input, Shape &shape, size_t out_channels, const std:
   return relu(out, shape, name + "_relu");
 }
 
-Node v2_scheduling_block(Node input, Shape &shape, size_t out_channels, const std::string &name) {
-  const Shape seed_shape = shape;
+std::pair<Node, Shape> v2_expand_reduce_branch(Node input, const Shape &input_shape,
+                                               size_t out_channels, size_t scale,
+                                               const std::string &name) {
+  if (scale < 2 || scale % 2 != 0) {
+    throw std::invalid_argument("V2 expansion scale must be an even integer >= 2");
+  }
 
-  // Branch 1: 14x14 -> 28x28.
-  // This is the smallest expansion. Its output is also its retained result.
-  Shape b1_shape = seed_shape;
-  Node b1 =
-      convtranspose2d(input, b1_shape, out_channels, 2, 2, 2, 2, 0, 0, false, name + "_b1_up2");
-  // b1: 28x28xC
+  Shape shape = input_shape;
 
-  // Branch 2: 14x14 -> 56x56 -> 28x28.
-  Shape b2_shape = seed_shape;
-  Node b2 =
-      convtranspose2d(input, b2_shape, out_channels, 4, 4, 4, 4, 0, 0, false, name + "_b2_up4");
-  b2 = avgpool2d(b2, b2_shape, 2, 2, 2, 2, 0, 0, name + "_b2_reduce");
-  // b2: 28x28xC
+  /*
+   * For a 14x14 input:
+   *
+   * scale = 2  ->  28x28
+   * scale = 4  ->  56x56
+   * scale = 6  ->  84x84
+   * scale = 8  -> 112x112
+   * scale = 10 -> 140x140
+   *
+   * kernel == stride and padding == 0 give exact integer upscaling.
+   */
+  Node x = convtranspose2d(input, shape, out_channels, scale, scale, scale, scale, 0, 0, false,
+                           name + "_expand");
 
-  // Branch 3: 14x14 -> 84x84 -> 28x28.
-  Shape b3_shape = seed_shape;
-  Node b3 =
-      convtranspose2d(input, b3_shape, out_channels, 6, 6, 6, 6, 0, 0, false, name + "_b3_up6");
-  b3 = avgpool2d(b3, b3_shape, 3, 3, 3, 3, 0, 0, name + "_b3_reduce");
-  // b3: 28x28xC
+  /*
+   * Reduce every branch to 28x28.
+   *
+   * ConvTranspose2D caches only the compact shared input. AvgPool2D
+   * must be classified as not requiring its input values for backward.
+   */
+  if (scale > 2) {
+    const size_t reduction = scale / 2;
 
-  // Branch 4: 14x14 -> 112x112 -> 28x28.
-  Shape b4_shape = seed_shape;
-  Node b4 =
-      convtranspose2d(input, b4_shape, out_channels, 8, 8, 8, 8, 0, 0, false, name + "_b4_up8");
-  b4 = avgpool2d(b4, b4_shape, 4, 4, 4, 4, 0, 0, name + "_b4_reduce");
-  // b4: 28x28xC
+    x = avgpool2d(x, shape, reduction, reduction, reduction, reduction, 0, 0, name + "_reduce");
+  }
 
-  // All reduced branch outputs have identical shapes.
-  Shape merged_shape = b1_shape;
-  Node merged = add({b1, b2, b3, b4}, merged_shape, name + "_merge");
+  return {x, shape};  // Always 28x28xout_channels.
+}
 
-  shape = merged_shape;
-  return merged;
+Node v2_nested_group(Node input, Shape &shape, size_t out_channels, size_t scale1, size_t scale2,
+                     size_t scale3, const std::string &name) {
+  const Shape input_shape = shape;
+
+  auto [b1, b1_shape] =
+      v2_expand_reduce_branch(input, input_shape, out_channels, scale1, name + "_b1");
+
+  auto [b2, b2_shape] =
+      v2_expand_reduce_branch(input, input_shape, out_channels, scale2, name + "_b2");
+
+  auto [b3, b3_shape] =
+      v2_expand_reduce_branch(input, input_shape, out_channels, scale3, name + "_b3");
+
+  /*
+   * Each input is 28x28xC.
+   * Concatenation produces 28x28x(3C).
+   *
+   * Concat backward only splits the incoming gradient and should not
+   * retain the three forward inputs.
+   */
+  auto [output, output_shape] =
+      concat({b1, b2, b3}, {b1_shape, b2_shape, b3_shape}, 3, name + "_concat");
+
+  shape = output_shape;
+  return output;
+}
+
+std::pair<Node, Shape> v3_expand_reduce_branch(Node input, const Shape &input_shape,
+                                               size_t out_channels, size_t expansion_scale,
+                                               const std::string &name) {
+  constexpr size_t retained_scale = 3;
+
+  if (expansion_scale < retained_scale || expansion_scale % retained_scale != 0) {
+    throw std::invalid_argument("V3 expansion scale must be divisible by 3");
+  }
+
+  Shape shape = input_shape;
+
+  /*
+   * From a 14x14 seed:
+   *
+   * scale 3  ->  42x42
+   * scale 6  ->  84x84
+   * scale 9  -> 126x126
+   * scale 12 -> 168x168
+   */
+  Node x = convtranspose2d(input, shape, out_channels, expansion_scale, expansion_scale,
+                           expansion_scale, expansion_scale, 0, 0, false, name + "_expand");
+
+  const size_t reduction = expansion_scale / retained_scale;
+
+  if (reduction > 1) {
+    x = avgpool2d(x, shape, reduction, reduction, reduction, reduction, 0, 0, name + "_reduce");
+  }
+
+  return {x, shape};  // 42x42xout_channels
+}
+
+Node v3_nested_group(Node input, Shape &shape, size_t out_channels, size_t scale1, size_t scale2,
+                     size_t scale3, size_t scale4, const std::string &name) {
+  const Shape input_shape = shape;
+
+  auto [b1, b1_shape] =
+      v3_expand_reduce_branch(input, input_shape, out_channels, scale1, name + "_b1");
+
+  auto [b2, b2_shape] =
+      v3_expand_reduce_branch(input, input_shape, out_channels, scale2, name + "_b2");
+
+  auto [b3, b3_shape] =
+      v3_expand_reduce_branch(input, input_shape, out_channels, scale3, name + "_b3");
+
+  auto [b4, b4_shape] =
+      v3_expand_reduce_branch(input, input_shape, out_channels, scale4, name + "_b4");
+
+  /*
+   * Four 42x42xC outputs become one 42x42x(4C) group result.
+   * Concat should not retain its forward inputs for backward.
+   */
+  auto [output, output_shape] =
+      concat({b1, b2, b3, b4}, {b1_shape, b2_shape, b3_shape, b4_shape}, 3, name + "_concat");
+
+  shape = output_shape;
+  return output;
+}
+
+Node v4_pressure_group(Node input, Shape &shape, size_t out_channels, size_t num_small_branches,
+                       const std::string &name) {
+  const Shape input_shape = shape;
+
+  Vec<Node> branches;
+  Vec<Shape> branch_shapes;
+
+  branches.reserve(num_small_branches + 1);
+  branch_shapes.reserve(num_small_branches + 1);
+
+  /*
+   * Small branches are deliberately declared first.
+   *
+   * 14x14 -> 42x42, with no subsequent reduction.
+   * Each output remains live until group_join.
+   */
+  for (size_t i = 0; i < num_small_branches; ++i) {
+    auto [branch, branch_shape] = v3_expand_reduce_branch(input, input_shape, out_channels, 3,
+                                                          name + "_small_" + std::to_string(i));
+
+    branches.push_back(branch);
+    branch_shapes.push_back(branch_shape);
+  }
+
+  /*
+   * Large branch is deliberately declared last:
+   *
+   * 14x14 -> 126x126 -> 42x42
+   *
+   * Naive scheduling encounters it after all small outputs have
+   * accumulated. MACRO should execute it first.
+   */
+  auto [large, large_shape] =
+      v3_expand_reduce_branch(input, input_shape, out_channels, 9, name + "_large");
+
+  branches.push_back(large);
+  branch_shapes.push_back(large_shape);
+
+  /*
+   * All branch outputs have shape 42x42xC.
+   *
+   * Add compresses 18 retained branch outputs into one output of the
+   * same size. Its strongly negative net allocation rewards completing
+   * the group rather than leaving all its branches partially finished.
+   */
+  Shape output_shape = large_shape;
+  Node output = add(branches, output_shape, name + "_join");
+
+  shape = output_shape;
+  return output;
 }
 
 void finalize_graph(Graph &graph, IAllocator &allocator, const Node &output, GraphOpts opts) {
@@ -594,32 +730,173 @@ Graph create_tunx_v2_graph(IAllocator &allocator, GraphOpts opts) {
   Shape shape = {1, 224, 224, 3};
 
   /*
-   * First reduce spatial resolution without placing a caching operator
-   * after a large activation.
+   * Construct a compact common seed:
    *
-   * 224x224x3 -> 14x14x3
+   * 224x224x3 -> 14x14x3 -> 14x14x8
    */
-  Node x = avgpool2d(input, shape, 16, 16, 16, 16, 0, 0, "seed_pool");
+  Node seed = avgpool2d(input, shape, 16, 16, 16, 16, 0, 0, "seed_pool");
+
+  seed = conv2d(seed, shape, 8, 1, 1, 1, 1, 0, 0, false, "seed_projection");
+
+  const Shape seed_shape = shape;
 
   /*
-   * Small learnable seed:
-   * 14x14x3 -> 14x14x8
+   * Outer group 1: relatively small inner fork.
    *
-   * This activation is cached by all ConvTranspose2D branches, but it is
-   * small and all branches refer to the same tensor storage.
+   * Expanded resolutions:
+   *   28x28, 56x56, 84x84
    */
-  x = conv2d(x, shape, 8, 1, 1, 1, 1, 0, 0, false, "seed_projection");
+  Shape g1_shape = seed_shape;
+  Node g1 = v2_nested_group(seed, g1_shape, 64, 2, 4, 6, "outer_g1");
 
   /*
-   * Four independent expansion branches.
+   * Outer group 2: medium inner fork.
    *
-   * They are constructed smallest-to-largest intentionally. A naive DFS
-   * order is therefore likely to execute the largest transient last.
+   * Expanded resolutions:
+   *   56x56, 84x84, 112x112
    */
-  x = v2_scheduling_block(x, shape, 64, "expand_fork");
+  Shape g2_shape = seed_shape;
+  Node g2 = v2_nested_group(seed, g2_shape, 64, 4, 6, 8, "outer_g2");
 
-  // 28x28x64 -> 1x1x64
-  x = avgpool2d(x, shape, 28, 28, 1, 1, 0, 0, "global_avgpool");
+  /*
+   * Outer group 3: largest inner fork.
+   *
+   * Expanded resolutions:
+   *   84x84, 112x112, 140x140
+   */
+  Shape g3_shape = seed_shape;
+  Node g3 = v2_nested_group(seed, g3_shape, 64, 6, 8, 10, "outer_g3");
+
+  /*
+   * Each group output is:
+   *
+   * 28x28x(3 * 64) = 28x28x192
+   *
+   * Add is used for the outer join so the channel count remains 192.
+   */
+  Shape merged_shape = g1_shape;
+  Node merged = add({g1, g2, g3}, merged_shape, "outer_merge");
+
+  shape = merged_shape;
+
+  // 28x28x192 -> 1x1x192
+  Node x = avgpool2d(merged, shape, 28, 28, 1, 1, 0, 0, "global_avgpool");
+
+  x = flatten(x, shape, 1, -1, "flatten");
+  Node output = dense(x, shape, 100, true, "output");
+
+  finalize_graph(graph, allocator, output, opts);
+  return graph;
+}
+
+Graph create_tunx_v3_graph(IAllocator &allocator, GraphOpts opts) {
+  Graph graph;
+  Node input = graph.input("input");
+  Shape shape = {1, 224, 224, 3};
+
+  // 224x224x3 -> 14x14x3
+  Node seed = avgpool2d(input, shape, 16, 16, 16, 16, 0, 0, "seed_pool");
+
+  // 14x14x3 -> 14x14x8
+  seed = conv2d(seed, shape, 8, 1, 1, 1, 1, 0, 0, false, "seed_projection");
+
+  const Shape seed_shape = shape;
+  constexpr size_t branch_channels = 32;
+
+  /*
+   * Groups are declared from low to high expansion pressure so the
+   * naive insertion order is intentionally unfavorable.
+   */
+
+  Shape g1_shape = seed_shape;
+  Node g1 = v3_nested_group(seed, g1_shape, branch_channels, 3, 3, 3, 6, "outer_g1");
+
+  Shape g2_shape = seed_shape;
+  Node g2 = v3_nested_group(seed, g2_shape, branch_channels, 3, 3, 6, 9, "outer_g2");
+
+  Shape g3_shape = seed_shape;
+  Node g3 = v3_nested_group(seed, g3_shape, branch_channels, 3, 6, 9, 9, "outer_g3");
+
+  Shape g4_shape = seed_shape;
+  Node g4 = v3_nested_group(seed, g4_shape, branch_channels, 6, 9, 9, 12, "outer_g4");
+
+  /*
+   * Every group output is:
+   *
+   * 42x42x(4 * 32) = 42x42x128
+   *
+   * Use a binary join tree. A completed pairwise Add converts two
+   * retained group outputs into one and therefore has a strongly
+   * negative net-memory effect.
+   *
+   * These nodes are intentionally created only after all four groups,
+   * making insertion order less favorable if naive scheduling follows
+   * node construction order.
+   */
+  Shape pair12_shape = g1_shape;
+  Node pair12 = add({g1, g2}, pair12_shape, "outer_pair12");
+
+  Shape pair34_shape = g3_shape;
+  Node pair34 = add({g3, g4}, pair34_shape, "outer_pair34");
+
+  Shape merged_shape = pair12_shape;
+  Node merged = add({pair12, pair34}, merged_shape, "outer_merge");
+
+  shape = merged_shape;
+
+  // 42x42x128 -> 1x1x128
+  Node x = avgpool2d(merged, shape, 42, 42, 1, 1, 0, 0, "global_avgpool");
+
+  x = flatten(x, shape, 1, -1, "flatten");
+  Node output = dense(x, shape, 100, true, "output");
+
+  finalize_graph(graph, allocator, output, opts);
+  return graph;
+}
+
+Graph create_tunx_v4_graph(IAllocator &allocator, GraphOpts opts) {
+  Graph graph;
+  Node input = graph.input("input");
+  Shape shape = {1, 224, 224, 3};
+
+  // 224x224x3 -> 14x14x3
+  Node seed = avgpool2d(input, shape, 16, 16, 16, 16, 0, 0, "seed_pool");
+
+  // 14x14x3 -> 14x14x8
+  seed = conv2d(seed, shape, 8, 1, 1, 1, 1, 0, 0, false, "seed_projection");
+
+  const Shape seed_shape = shape;
+
+  constexpr size_t branch_channels = 32;
+  constexpr size_t small_branches = 17;
+
+  /*
+   * Outer fork containing three nested 18-way fork-join groups.
+   */
+  Shape g1_shape = seed_shape;
+  Node g1 = v4_pressure_group(seed, g1_shape, branch_channels, small_branches, "pressure_g1");
+
+  Shape g2_shape = seed_shape;
+  Node g2 = v4_pressure_group(seed, g2_shape, branch_channels, small_branches, "pressure_g2");
+
+  /*
+   * Release one group output as soon as G1 and G2 complete.
+   *
+   * Two 42x42x32 inputs become one 42x42x32 output.
+   */
+  Shape pair12_shape = g1_shape;
+  Node pair12 = add({g1, g2}, pair12_shape, "outer_pair12");
+
+  Shape g3_shape = seed_shape;
+  Node g3 = v4_pressure_group(seed, g3_shape, branch_channels, small_branches, "pressure_g3");
+
+  Shape merged_shape = pair12_shape;
+  Node merged = add({pair12, g3}, merged_shape, "outer_merge");
+
+  shape = merged_shape;
+
+  // 42x42x32 -> 1x1x32
+  Node x = avgpool2d(merged, shape, 42, 42, 1, 1, 0, 0, "global_avgpool");
 
   x = flatten(x, shape, 1, -1, "flatten");
   Node output = dense(x, shape, 100, true, "output");
@@ -660,6 +937,7 @@ void ExampleGraphs::register_defaults() {
   // graphs for benchmarking
   register_graph("tunx_v1", create_tunx_v1_graph);
   register_graph("tunx_v2", create_tunx_v2_graph);
+  register_graph("tunx_v3", create_tunx_v3_graph);
+  register_graph("tunx_v4", create_tunx_v4_graph);
 }
-
 }  // namespace tunx

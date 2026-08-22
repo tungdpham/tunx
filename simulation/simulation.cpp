@@ -17,7 +17,6 @@
 #include "graph_executor.h"
 #include "graph_generator.h"
 #include "macro_solver.h"
-#include "macro_solver_v2.h"
 #include "memory_packer.h"
 
 std::vector<std::string> find_fw_macro_candidate_execution_order(Graph& graph,
@@ -29,18 +28,6 @@ std::vector<std::string> find_fw_macro_candidate_execution_order(Graph& graph,
 std::vector<std::string> find_bw_macro_candidate_execution_order(Graph& graph,
                                                                  std::ostream* os = nullptr) {
   MacroSolver solver(graph, os);
-  return solver.find_backward_order();
-}
-
-std::vector<std::string> find_fw_macro_v2_candidate_execution_order(Graph& graph,
-                                                                    std::ostream* os = nullptr) {
-  MacroSolverV2 solver(graph, os);
-  return solver.find_forward_order();
-}
-
-std::vector<std::string> find_bw_macro_v2_candidate_execution_order(Graph& graph,
-                                                                    std::ostream* os = nullptr) {
-  MacroSolverV2 solver(graph, os);
   return solver.find_backward_order();
 }
 
@@ -543,24 +530,18 @@ void run_simulation_trials(int original_trials, const std::string& title,
 
     auto fw_best_order = find_fw_fork_join_execution_order(g);
     auto fw_macro_order = find_fw_macro_candidate_execution_order(g);
-    auto fw_macro_v2_order = find_fw_macro_v2_candidate_execution_order(g);
     auto fw_dfs_order = find_fw_naive_dfs_execution_order(g);
 
-    std::map<std::string, std::vector<std::string>> fw_orders = {{"BEST", fw_best_order},
-                                                                 {"MACRO", fw_macro_order},
-                                                                 {"MACRO_V2", fw_macro_v2_order},
-                                                                 {"DFS", fw_dfs_order}};
+    std::map<std::string, std::vector<std::string>> fw_orders = {
+        {"BEST", fw_best_order}, {"MACRO", fw_macro_order}, {"DFS", fw_dfs_order}};
 
     auto fw_effs = rank_execution_orders(g, fw_orders);
 
     auto bw_best_order = find_bw_fork_join_execution_order(g);
     auto bw_macro_order = find_bw_macro_candidate_execution_order(g);
-    auto bw_macro_v2_order = find_bw_macro_v2_candidate_execution_order(g);
     auto bw_dfs_order = find_bw_naive_dfs_execution_order(g);
-    std::map<std::string, std::vector<std::string>> bw_orders = {{"BEST", bw_best_order},
-                                                                 {"MACRO", bw_macro_order},
-                                                                 {"MACRO_V2", bw_macro_v2_order},
-                                                                 {"DFS", bw_dfs_order}};
+    std::map<std::string, std::vector<std::string>> bw_orders = {
+        {"BEST", bw_best_order}, {"MACRO", bw_macro_order}, {"DFS", bw_dfs_order}};
     auto bw_effs = rank_backward_execution_orders(g, bw_orders);
     auto fw_packing_effs = rank_packing_efficiencies(g, fw_orders, false);
     auto bw_packing_effs = rank_packing_efficiencies(g, bw_orders, true);
@@ -580,9 +561,7 @@ void run_simulation_trials(int original_trials, const std::string& title,
         };
         print_path("BEST", fw_best_order);
         print_path(name, fw_orders[name]);
-        if (name == "MACRO_V2") {
-          find_fw_macro_v2_candidate_execution_order(g, &log);
-        } else {
+        if (name == "MACRO") {
           find_fw_macro_candidate_execution_order(g, &log);
         }
         log << "\n";
@@ -607,9 +586,7 @@ void run_simulation_trials(int original_trials, const std::string& title,
         print_path("BEST", bw_best_order);
         print_path("DFS", bw_dfs_order);
         print_path(name, bw_orders[name]);
-        if (name == "MACRO_V2") {
-          find_bw_macro_v2_candidate_execution_order(g, &log);
-        } else {
+        if (name == "MACRO") {
           find_bw_macro_candidate_execution_order(g, &log);
         }
         log << "\n";
