@@ -919,6 +919,7 @@ void ExampleGraphs::register_defaults() {
 
   register_graph("cifar100_resnet18", create_cifar100_resnet18_graph);
   register_graph("cifar100_wrn16_8", create_cifar100_wrn16_8_graph);
+  register_graph("tunx_v5", create_tunx_v5_graph);
 
   register_graph("tiny_imagenet_wrn16_8", create_tiny_imagenet_wrn16_8_graph);
 
