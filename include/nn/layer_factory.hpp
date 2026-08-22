@@ -30,9 +30,13 @@
 #include "nn/graph.hpp"  // IWYU pragma: export
 #include "nn/layer.hpp"
 #include "nn/layers_impl/add.hpp"
+#include "nn/layers_impl/add_scalar.hpp"
 #include "nn/layers_impl/div.hpp"
+#include "nn/layers_impl/div_scalar.hpp"
 #include "nn/layers_impl/mul.hpp"
+#include "nn/layers_impl/mul_scalar.hpp"
 #include "nn/layers_impl/sub.hpp"
+#include "nn/layers_impl/sub_scalar.hpp"
 #include "nn/param.hpp"
 #include "tensor/ops.hpp"
 
@@ -53,6 +57,37 @@ inline Node operator/(const Node &a, const Node &b) {
   Div div_layer;
   return div_layer(a, b);
 }
+
+inline Node operator+(const Node &a, double b) {
+  AddScalar add_layer(AddScalarOp::Config{b});
+  return add_layer(a);
+}
+inline Node operator+(double a, const Node &b) {
+  AddScalar add_layer(AddScalarOp::Config{a});
+  return add_layer(b);
+}
+inline Node operator-(const Node &a, double b) {
+  SubScalar sub_layer(SubScalarOp::Config{b});
+  return sub_layer(a);
+}
+inline Node operator-(double a, const Node &b) {
+  MulScalar mul_layer(MulScalarOp::Config{-1.0});
+  AddScalar add_layer(AddScalarOp::Config{a});
+  return add_layer(mul_layer(b));
+}
+inline Node operator*(const Node &a, double b) {
+  MulScalar mul_layer(MulScalarOp::Config{b});
+  return mul_layer(a);
+}
+inline Node operator*(double a, const Node &b) {
+  MulScalar mul_layer(MulScalarOp::Config{a});
+  return mul_layer(b);
+}
+inline Node operator/(const Node &a, double b) {
+  DivScalar div_layer(DivScalarOp::Config{b});
+  return div_layer(a);
+}
+
 }  // namespace tunx
 
 namespace tunx {
@@ -123,6 +158,11 @@ public:
     register_layer_type<Sub>();
     register_layer_type<Mul>();
     register_layer_type<Div>();
+    
+    register_layer_type<AddScalar>();
+    register_layer_type<SubScalar>();
+    register_layer_type<MulScalar>();
+    register_layer_type<DivScalar>();
   }
 
   static Vec<std::string> available_types() {

@@ -70,9 +70,22 @@ std::string MacroSolver::merge_macros(const std::string &parent, const std::stri
   merged.edges.insert(merged.edges.end(), child_macro.edges.begin(), child_macro.edges.end());
   if (log_stream_) {
     *log_stream_ << "Merging parent " << parent << " [a: " << parent_macro.a
-                 << " b: " << parent_macro.b << "] with child " << child << " [a: " << child_macro.a
-                 << " b: " << child_macro.b << "] into " << id << " [a: " << merged.a
-                 << " b: " << merged.b << "] (reason: " << reason << ")\n";
+                 << " b: " << parent_macro.b << ", ops: [";
+    for (size_t i = 0; i < parent_macro.edges.size(); ++i) {
+      *log_stream_ << parent_macro.edges[i]->uid()
+                   << (i + 1 == parent_macro.edges.size() ? "" : ", ");
+    }
+    *log_stream_ << "]] with child " << child << " [a: " << child_macro.a << " b: " << child_macro.b
+                 << ", ops: [";
+    for (size_t i = 0; i < child_macro.edges.size(); ++i) {
+      *log_stream_ << child_macro.edges[i]->uid()
+                   << (i + 1 == child_macro.edges.size() ? "" : ", ");
+    }
+    *log_stream_ << "]] into " << id << " [a: " << merged.a << " b: " << merged.b << ", ops: [";
+    for (size_t i = 0; i < merged.edges.size(); ++i) {
+      *log_stream_ << merged.edges[i]->uid() << (i + 1 == merged.edges.size() ? "" : ", ");
+    }
+    *log_stream_ << "]] (reason: " << reason << ")\n";
   }
   std::set<std::string> merged_deps = macro_deps_.at(parent);
   for (const std::string &dependency : macro_deps_.at(child)) {
@@ -275,37 +288,48 @@ ExecutionPlan MacroSolver::find_forward_order(const std::map<Edge, EdgeProfile> 
     const std::string current = pending.front();
     pending.pop_front();
     if (!macros_.contains(current)) continue;
-    if (macro_deps_.at(current).size() == 1) {
-      const std::string parent = *macro_deps_.at(current).begin();
-      if (macro_dependents_.at(parent).size() == 1 && macros_.at(current) < macros_.at(parent)) {
-        pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
-        continue;
+    if (options_.enable_linear) {
+      if (macro_deps_.at(current).size() == 1) {
+        const std::string parent = *macro_deps_.at(current).begin();
+        if (macro_dependents_.at(parent).size() == 1 && macros_.at(current) < macros_.at(parent)) {
+          pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
+          continue;
+        }
       }
     }
     if (macro_deps_.at(current).size() > 1) {
-      const std::string prepared = prepare_join_branches(current, next_macro_id);
-      if (prepared != current) {
-        pending.push_front(prepared);
-        continue;
-      }
-      std::string worst_parent;
-      for (const std::string &parent : macro_deps_.at(current)) {
-        if (macro_dependents_.at(parent).size() != 1 ||
-            has_peers_forward(parent, out_deg, cached_tensors) ||
-            !(macros_.at(current) < macros_.at(parent))) {
+      std::string prepared = current;
+      if (options_.enable_branching) {
+        // merge ancestors branches
+        prepared = prepare_join_branches(current, next_macro_id);
+        if (prepared != current) {
+          pending.push_front(prepared);
           continue;
         }
-        if (worst_parent.empty() || macros_.at(worst_parent) < macros_.at(parent)) {
-          worst_parent = parent;
-        }
       }
-      if (!worst_parent.empty())
-        pending.push_front(merge_macros(worst_parent, current, next_macro_id, "join"));
+      if (options_.enable_joining) {
+        // merge current join
+        std::string worst_parent;
+        for (const std::string &parent : macro_deps_.at(current)) {
+          if (macro_dependents_.at(parent).size() != 1 ||
+              has_peers_forward(parent, out_deg, cached_tensors) ||
+              !(macros_.at(current) < macros_.at(parent))) {
+            continue;
+          }
+          if (worst_parent.empty() || macros_.at(worst_parent) < macros_.at(parent)) {
+            worst_parent = parent;
+          }
+        }
+        if (!worst_parent.empty())
+          pending.push_front(merge_macros(worst_parent, current, next_macro_id, "join"));
+      }
     }
   }
 
   if (macros_.contains(virtual_join_id)) {
-    prepare_join_branches(virtual_join_id, next_macro_id);
+    if (options_.enable_branching) {
+      prepare_join_branches(virtual_join_id, next_macro_id);
+    }
     for (const auto &terminal : macro_deps_.at(virtual_join_id)) {
       macro_dependents_.at(terminal).erase(virtual_join_id);
     }
@@ -447,37 +471,46 @@ ExecutionPlan MacroSolver::find_backward_order(const std::map<Edge, EdgeProfile>
     const std::string current = pending.front();
     pending.pop_front();
     if (!macros_.contains(current)) continue;
-    if (macro_deps_.at(current).size() == 1) {
-      const std::string parent = *macro_deps_.at(current).begin();
-      if (macro_dependents_.at(parent).size() == 1 && macros_.at(current) < macros_.at(parent)) {
-        pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
-        continue;
+    if (options_.enable_linear) {
+      if (macro_deps_.at(current).size() == 1) {
+        const std::string parent = *macro_deps_.at(current).begin();
+        if (macro_dependents_.at(parent).size() == 1 && macros_.at(current) < macros_.at(parent)) {
+          pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
+          continue;
+        }
       }
     }
     if (macro_deps_.at(current).size() > 1) {
-      const std::string prepared = prepare_join_branches(current, next_macro_id);
-      if (prepared != current) {
-        pending.push_front(prepared);
-        continue;
-      }
-      std::string worst_parent;
-      for (const std::string &parent : macro_deps_.at(current)) {
-        if (macro_dependents_.at(parent).size() != 1 ||
-            has_peers_backward(parent, out_deg, cached_tensors) ||
-            !(macros_.at(current) < macros_.at(parent))) {
+      std::string prepared = current;
+      if (options_.enable_branching) {
+        prepared = prepare_join_branches(current, next_macro_id);
+        if (prepared != current) {
+          pending.push_front(prepared);
           continue;
         }
-        if (worst_parent.empty() || macros_.at(worst_parent) < macros_.at(parent)) {
-          worst_parent = parent;
-        }
       }
-      if (!worst_parent.empty())
-        pending.push_front(merge_macros(worst_parent, current, next_macro_id, "join"));
+      if (options_.enable_joining) {
+        std::string worst_parent;
+        for (const std::string &parent : macro_deps_.at(current)) {
+          if (macro_dependents_.at(parent).size() != 1 ||
+              has_peers_backward(parent, out_deg, cached_tensors) ||
+              !(macros_.at(current) < macros_.at(parent))) {
+            continue;
+          }
+          if (worst_parent.empty() || macros_.at(worst_parent) < macros_.at(parent)) {
+            worst_parent = parent;
+          }
+        }
+        if (!worst_parent.empty())
+          pending.push_front(merge_macros(worst_parent, current, next_macro_id, "join"));
+      }
     }
   }
 
   if (macros_.contains(virtual_join_id)) {
-    prepare_join_branches(virtual_join_id, next_macro_id);
+    if (options_.enable_branching) {
+      prepare_join_branches(virtual_join_id, next_macro_id);
+    }
     for (const auto &terminal : macro_deps_.at(virtual_join_id)) {
       macro_dependents_.at(terminal).erase(virtual_join_id);
     }

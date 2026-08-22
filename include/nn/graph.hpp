@@ -6,11 +6,13 @@
 #include <iostream>
 #include <memory>
 #include <set>
+#include <map>
 #include <string>
 
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
 #include "nn/edge.hpp"
+#include "nn/edge_profile.hpp"
 #include "nn/engines/engine_handle.hpp"
 #include "nn/node.hpp"
 #include "nn/param.hpp"
@@ -72,7 +74,7 @@ public:
                 std::initializer_list<Node> consumers);
 
   void sort();
-  void save_dot(const std::string &filename) const;
+  void save_dot(const std::string &filename, const std::map<Edge, EdgeProfile> *edge_profiles = nullptr, const std::map<Node, size_t> *node_profiles = nullptr) const;
 
   Node make_node(std::string uid = "");
 

@@ -210,19 +210,30 @@ void Graph::sort() {
   nodes_ = std::move(sorted_nodes);
 }
 
-void Graph::save_dot(const std::string &filename) const {
+void Graph::save_dot(const std::string &filename, const std::map<Edge, EdgeProfile> *edge_profiles, const std::map<Node, size_t> *node_profiles) const {
   std::ofstream output(filename);
   if (!output) throw std::runtime_error("Failed to open DOT file: " + filename);
 
   output << "digraph Graph {\n  rankdir=LR;\n";
   for (const Node &node : nodes_) {
-    output << "  \"node_" << node->uid() << "\" [shape=ellipse, label=\"" << node->uid()
-           << "\"];\n";
+    output << "  \"node_" << node->uid() << "\" [shape=ellipse, label=\"" << node->uid();
+    if (node_profiles && node_profiles->count(node)) {
+      output << "\\nsize: " << node_profiles->at(node);
+    }
+    output << "\"];\n";
   }
   for (size_t index = 0; index < edges_.size(); ++index) {
     const Edge &edge = edges_[index];
     output << "  \"edge_" << index << "\" [shape=box, label=\"" << index << ": "
-           << edge->layer()->name() << "\"];\n";
+           << edge->layer()->name();
+    if (edge_profiles && edge_profiles->count(edge)) {
+      const auto& prof = edge_profiles->at(edge);
+      output << "\\na: " << prof.total_mem;
+      output << "\\nb: " << prof.net_mem;
+      output << "\\nworkspace: " << prof.workspace_mem;
+      output << "\\nresidual: " << prof.total_mem - prof.workspace_mem - prof.output_mem;
+    }
+    output << "\"];\n";
     for (const Node &producer : edge->producers()) {
       output << "  \"node_" << producer->uid() << "\" -> \"edge_" << index << "\";\n";
     }

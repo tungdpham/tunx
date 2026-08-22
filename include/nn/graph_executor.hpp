@@ -9,6 +9,7 @@
 #include "nn/execution_plan.hpp"
 #include "nn/graph.hpp"
 #include "nn/layer.hpp"
+#include "nn/macro_solver.hpp"
 #include "nn/memory_packer.hpp"
 #include "nn/tensor_bundle.hpp"
 
@@ -19,6 +20,7 @@ struct BuiltPlan {
   ExecutionPlan backward_plan;
   std::map<Edge, EdgeProfile> forward_edge_profiles;
   std::map<Edge, EdgeProfile> backward_edge_profiles;
+  std::map<Node, size_t> node_profiles;
   std::shared_ptr<PackedAllocator> packed_allocator;
 };
 
@@ -32,18 +34,20 @@ public:
   TensorBundle forward(TensorBundle &input_map);
   TensorBundle backward(TensorBundle &output_grad_map);
 
-  const BuiltPlan &build_plans(TensorBundle &input_map);
+  const BuiltPlan &build_plans(TensorBundle &input_map, SolverOptions options = {});
 
   ExecutionPlanStats profile_forward_plan(TensorBundle &input_map, const ExecutionPlan &plan);
-  ExecutionPlanStats profile_backward_plan(TensorBundle &input_map, const ExecutionPlan &forward_plan, const ExecutionPlan &backward_plan);
+  ExecutionPlanStats profile_backward_plan(TensorBundle &input_map,
+                                           const ExecutionPlan &forward_plan,
+                                           const ExecutionPlan &backward_plan);
 
   ExecutionPlan &active_forward_plan() { return active_built_plan_.forward_plan; }
   const ExecutionPlan &active_forward_plan() const { return active_built_plan_.forward_plan; }
   ExecutionPlan &active_backward_plan() { return active_built_plan_.backward_plan; }
   const ExecutionPlan &active_backward_plan() const { return active_built_plan_.backward_plan; }
 
-  std::tuple<TensorBundle, std::map<Edge, EdgeProfile>, std::map<Node, size_t>> profile_edges_forward(
-      TensorBundle &input_map);
+  std::tuple<TensorBundle, std::map<Edge, EdgeProfile>, std::map<Node, size_t>>
+  profile_edges_forward(TensorBundle &input_map);
   std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edges_backward(
       TensorBundle &output_grad_map);
 
@@ -56,7 +60,16 @@ public:
 private:
   struct PlanKey {
     std::map<Node, Vec<size_t>> input_shapes;
-    bool operator<(const PlanKey &other) const { return input_shapes < other.input_shapes; }
+    bool enable_linear;
+    bool enable_branching;
+    bool enable_joining;
+    bool operator<(const PlanKey &other) const {
+      if (enable_linear != other.enable_linear) return enable_linear < other.enable_linear;
+      if (enable_branching != other.enable_branching)
+        return enable_branching < other.enable_branching;
+      if (enable_joining != other.enable_joining) return enable_joining < other.enable_joining;
+      return input_shapes < other.input_shapes;
+    }
   };
 
   struct Entry {

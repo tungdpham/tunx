@@ -19,10 +19,17 @@ struct MacroNode {
   long long b = 0;
 };
 
+struct SolverOptions {
+  bool enable_linear = true;
+  bool enable_branching = true;
+  bool enable_joining = true;
+};
+
 class MacroSolver {
 private:
   Graph &graph_;
   std::ostream *log_stream_;
+  SolverOptions options_;
 
   // generated
   std::map<std::string, MacroNode> macros_;
@@ -43,11 +50,49 @@ private:
   std::string prepare_join_branches(const std::string &join, int &next_macro_id);
 
 public:
-  MacroSolver(Graph &graph, std::ostream *log_stream = nullptr)
+  MacroSolver(Graph &graph, std::ostream *log_stream = nullptr, SolverOptions options = {})
       : graph_(graph),
-        log_stream_(log_stream) {}
+        log_stream_(log_stream),
+        options_(options) {}
 
   ExecutionPlan find_forward_order(const std::map<Edge, EdgeProfile> &edge_profiles);
   ExecutionPlan find_backward_order(const std::map<Edge, EdgeProfile> &edge_profiles);
 };
+
+class RankedSolver : public MacroSolver {
+public:
+  RankedSolver(Graph &graph, std::ostream *os = nullptr)
+      : MacroSolver(graph, os, {false, false, false}) {}
+};
+
+class LinearSolver : public MacroSolver {
+public:
+  LinearSolver(Graph &graph, std::ostream *os = nullptr)
+      : MacroSolver(graph, os, {true, false, false}) {}
+};
+
+class BranchingSolver : public MacroSolver {
+public:
+  BranchingSolver(Graph &graph, std::ostream *os = nullptr)
+      : MacroSolver(graph, os, {true, true, false}) {}
+};
+
+class JoiningSolver : public MacroSolver {
+public:
+  JoiningSolver(Graph &graph, std::ostream *os = nullptr)
+      : MacroSolver(graph, os, {true, false, true}) {}
+};
+
+class FlatBJSolver : public MacroSolver {
+public:
+  FlatBJSolver(Graph &graph, std::ostream *os = nullptr)
+      : MacroSolver(graph, os, {true, true, true}) {}
+};
+
+class FullSolver : public MacroSolver {
+public:
+  FullSolver(Graph &graph, std::ostream *os = nullptr)
+      : MacroSolver(graph, os, {true, true, true}) {}
+};
+
 }  // namespace tunx

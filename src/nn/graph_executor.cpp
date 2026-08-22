@@ -9,6 +9,8 @@
 
 #include <fmt/core.h>
 
+#include <ostream>
+
 #include "device/device_allocator.hpp"
 #include "device/device_manager.hpp"
 #include "device/pool_allocator.hpp"
@@ -85,12 +87,16 @@ void GraphExecutor::cleanup_released(std::map<Node, Entry> &entries) {
   }
 }
 
-const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map) {
+const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptions options) {
   std::map<std::string, Node> uid_to_node;
   for (const auto &node : graph_.nodes()) {
     uid_to_node[node->uid()] = node;
   }
   PlanKey key;
+  key.enable_linear = options.enable_linear;
+  key.enable_branching = options.enable_branching;
+  key.enable_joining = options.enable_joining;
+
   for (const auto &[uid, tensor] : input_map) {
     auto node = uid_to_node[uid];
     key.input_shapes[node] = tensor.shape();
@@ -98,7 +104,7 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map) {
   if (built_plans_.count(key)) {
     return built_plans_.at(key);
   }
-  MacroSolver planner(graph_, os_);
+  MacroSolver planner(graph_, os_, options);
   auto [output_map, forward_edge_profiles, node_profiles] = profile_edges_forward(input_map);
   ExecutionPlan forward_plan = planner.find_forward_order(forward_edge_profiles);
 
@@ -137,8 +143,12 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map) {
     backward_plan = planner.find_backward_order(backward_edge_profiles);
   }
 
-  BuiltPlan plan{forward_plan, backward_plan, std::move(forward_edge_profiles),
-                 std::move(backward_edge_profiles), nullptr};
+  BuiltPlan plan{forward_plan,
+                 backward_plan,
+                 std::move(forward_edge_profiles),
+                 std::move(backward_edge_profiles),
+                 std::move(node_profiles),
+                 nullptr};
 
   pack_memory(plan, input_map, output_grad_map);
 
@@ -157,6 +167,9 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
     uid_to_node[node->uid()] = node;
   }
   PlanKey key;
+  key.enable_linear = true;
+  key.enable_branching = true;
+  key.enable_joining = true;
   for (const auto &[uid, tensor] : input_map) {
     auto &node = uid_to_node.at(uid);
     key.input_shapes[node] = tensor.shape();
@@ -253,8 +266,8 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
   return grad_input_map;
 }
 
-std::tuple<TensorBundle, std::map<Edge, EdgeProfile>, std::map<Node, size_t>> GraphExecutor::profile_edges_forward(
-    TensorBundle &input_map) {
+std::tuple<TensorBundle, std::map<Edge, EdgeProfile>, std::map<Node, size_t>>
+GraphExecutor::profile_edges_forward(TensorBundle &input_map) {
   std::map<Edge, EdgeProfile> edge_profiles;
   std::map<Node, size_t> node_profiles;
   std::map<std::string, Node> uid_to_node;

@@ -28,6 +28,7 @@
 #include "nn/edge_profile.hpp"
 #include "nn/execution_plan.hpp"
 #include "nn/graph_executor.hpp"
+#include "nn/macro_solver.hpp"
 #include "nn/metrics_computer.hpp"
 #include "nn/metrics_logger.hpp"
 #include "nn/tensor_bundle.hpp"
@@ -89,13 +90,36 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
   naive_plan.order = executor.graph().edges();
   auto naive_stats = executor.profile_forward_plan(inputs, naive_plan);
 
-  std::ofstream debug_stream("debug_macro_solver.txt");
-
-  auto &built_plan = executor.build_plans(inputs);
-  auto &macro_plan = built_plan.forward_plan;
-  auto macro_stats = executor.profile_forward_plan(inputs, macro_plan);
-
   fmt::print("\n{:=^80}\n", " Execution Plan Stats ");
+
+  auto profile_solver = [&](const std::string &name, SolverOptions opts) {
+    auto &built_plan = executor.build_plans(inputs, opts);
+    auto &macro_plan = built_plan.forward_plan;
+    auto macro_stats = executor.profile_forward_plan(inputs, macro_plan);
+
+    fmt::print("{} Order Peak Memory: {} bytes\n", name, macro_stats.peak_mem);
+    fmt::print("{} Path: ", name);
+    for (size_t i = 0; i < macro_plan.order.size(); ++i) {
+      fmt::print("{}", macro_plan.order[i]->layer()->name());
+      if (i != macro_plan.order.size() - 1) fmt::print(" -> ");
+    }
+    fmt::print("\n\n");
+
+    if (csv_logger) {
+      for (size_t i = 0; i < macro_stats.edge_stats.size(); ++i) {
+        const auto &s = macro_stats.edge_stats[i];
+        std::unordered_map<std::string, std::string> row = {
+            {"plan", name},
+            {"step", std::to_string(i)},
+            {"layer_name", s.layer_name},
+            {"allocated_mem", std::to_string(s.allocated_mem)},
+            {"peak_mem", std::to_string(s.peak_mem)},
+        };
+        csv_logger->log(row);
+      }
+    }
+  };
+
   fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
   fmt::print("Naive Path: ");
   for (size_t i = 0; i < naive_plan.order.size(); ++i) {
@@ -104,31 +128,11 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
   }
   fmt::print("\n\n");
 
-  fmt::print("MACRO Order Peak Memory: {} bytes\n", macro_stats.peak_mem);
-  fmt::print("MACRO Path: ");
-  for (size_t i = 0; i < macro_plan.order.size(); ++i) {
-    fmt::print("{}", macro_plan.order[i]->layer()->name());
-    if (i != macro_plan.order.size() - 1) fmt::print(" -> ");
-  }
-  fmt::print("\n");
-  fmt::print("{:=^80}\n\n", "");
-
   if (csv_logger) {
     for (size_t i = 0; i < naive_stats.edge_stats.size(); ++i) {
       const auto &s = naive_stats.edge_stats[i];
       std::unordered_map<std::string, std::string> row = {
-          {"plan", "naive"},
-          {"step", std::to_string(i)},
-          {"layer_name", s.layer_name},
-          {"allocated_mem", std::to_string(s.allocated_mem)},
-          {"peak_mem", std::to_string(s.peak_mem)},
-      };
-      csv_logger->log(row);
-    }
-    for (size_t i = 0; i < macro_stats.edge_stats.size(); ++i) {
-      const auto &s = macro_stats.edge_stats[i];
-      std::unordered_map<std::string, std::string> row = {
-          {"plan", "macro"},
+          {"plan", "Naive"},
           {"step", std::to_string(i)},
           {"layer_name", s.layer_name},
           {"allocated_mem", std::to_string(s.allocated_mem)},
@@ -137,6 +141,14 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
       csv_logger->log(row);
     }
   }
+
+  profile_solver("Ranked", {false, false, false});
+  profile_solver("Linear", {true, false, false});
+  profile_solver("Branch", {true, true, false});
+  profile_solver("Join", {true, false, true});
+  profile_solver("Full Solver", {true, true, true});
+
+  fmt::print("{:=^80}\n\n", "");
 }
 
 static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBundle &inputs,
@@ -150,11 +162,36 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
   naive_forward_plan.order = executor.graph().edges();
   auto naive_stats = executor.profile_backward_plan(inputs, naive_forward_plan, naive_plan);
 
-  auto &built_plan = executor.build_plans(inputs);
-  auto &macro_plan = built_plan.backward_plan;
-  auto macro_stats = executor.profile_backward_plan(inputs, built_plan.forward_plan, macro_plan);
-
   fmt::print("\n{:=^80}\n", " Backward Execution Plan Stats ");
+
+  auto profile_solver = [&](const std::string &name, SolverOptions opts) {
+    auto &built_plan = executor.build_plans(inputs, opts);
+    auto &macro_plan = built_plan.backward_plan;
+    auto macro_stats = executor.profile_backward_plan(inputs, built_plan.forward_plan, macro_plan);
+
+    fmt::print("{} Order Peak Memory: {} bytes\n", name, macro_stats.peak_mem);
+    fmt::print("{} Path: ", name);
+    for (size_t i = 0; i < macro_plan.order.size(); ++i) {
+      fmt::print("{}", macro_plan.order[i]->layer()->name());
+      if (i != macro_plan.order.size() - 1) fmt::print(" -> ");
+    }
+    fmt::print("\n\n");
+
+    if (csv_logger) {
+      for (size_t i = 0; i < macro_stats.edge_stats.size(); ++i) {
+        const auto &s = macro_stats.edge_stats[i];
+        std::unordered_map<std::string, std::string> row = {
+            {"plan", name},
+            {"step", std::to_string(i)},
+            {"layer_name", s.layer_name},
+            {"allocated_mem", std::to_string(s.allocated_mem)},
+            {"peak_mem", std::to_string(s.peak_mem)},
+        };
+        csv_logger->log(row);
+      }
+    }
+  };
+
   fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
   fmt::print("Naive Path: ");
   for (size_t i = 0; i < naive_plan.order.size(); ++i) {
@@ -163,31 +200,11 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
   }
   fmt::print("\n\n");
 
-  fmt::print("MACRO Order Peak Memory: {} bytes\n", macro_stats.peak_mem);
-  fmt::print("MACRO Path: ");
-  for (size_t i = 0; i < macro_plan.order.size(); ++i) {
-    fmt::print("{}", macro_plan.order[i]->layer()->name());
-    if (i != macro_plan.order.size() - 1) fmt::print(" -> ");
-  }
-  fmt::print("\n");
-  fmt::print("{:=^80}\n\n", "");
-
   if (csv_logger) {
     for (size_t i = 0; i < naive_stats.edge_stats.size(); ++i) {
       const auto &s = naive_stats.edge_stats[i];
       std::unordered_map<std::string, std::string> row = {
-          {"plan", "naive"},
-          {"step", std::to_string(i)},
-          {"layer_name", s.layer_name},
-          {"allocated_mem", std::to_string(s.allocated_mem)},
-          {"peak_mem", std::to_string(s.peak_mem)},
-      };
-      csv_logger->log(row);
-    }
-    for (size_t i = 0; i < macro_stats.edge_stats.size(); ++i) {
-      const auto &s = macro_stats.edge_stats[i];
-      std::unordered_map<std::string, std::string> row = {
-          {"plan", "macro"},
+          {"plan", "Naive"},
           {"step", std::to_string(i)},
           {"layer_name", s.layer_name},
           {"allocated_mem", std::to_string(s.allocated_mem)},
@@ -196,6 +213,14 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
       csv_logger->log(row);
     }
   }
+
+  profile_solver("Ranked", {false, false, false});
+  profile_solver("Linear", {true, false, false});
+  profile_solver("Branch", {true, true, false});
+  profile_solver("Join", {true, false, true});
+  profile_solver("Full Solver", {true, true, true});
+
+  fmt::print("{:=^80}\n\n", "");
 }
 
 static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimizer,
@@ -301,8 +326,6 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     }
     return train_dataset->get_batch(config.batch_size, data, labels);
   };
-
-  graph.save_dot("current_graph.dot");
 
   GraphExecutor executor(graph);
 
@@ -677,9 +700,14 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
   if (train_dataset->get_batch(config.batch_size, batch_data, batch_labels)) {
     Tensor device_input = to_device(batch_data, graph.device());
     TensorBundle inputs{{"input", device_input}};
+    std::ofstream debug_file("debug_macro_logs.txt");
+
     GraphExecutor executor(graph);
+    executor.set_log_stream(&debug_file);
 
     auto &built_plan = executor.build_plans(inputs);
+    graph.save_dot("current_graph.dot", &built_plan.forward_edge_profiles,
+                   &built_plan.node_profiles);
     log_edge_profiles(built_plan.forward_edge_profiles, forward_profiles_logger);
     log_execution_plan_stats(executor, inputs, forward_plan_logger);
 
