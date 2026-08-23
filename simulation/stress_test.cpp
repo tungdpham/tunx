@@ -223,26 +223,20 @@ void run_forward_trials(int trials, const std::string& title, const std::string&
     Graph g = graph_generator();
 
     bool oracle_complete = false;
-    auto fw_best_order = find_fw_fork_join_execution_order(g, 1000000, &oracle_complete);
+    auto fw_best_order = find_fw_fork_join_execution_order(g, 10000000, &oracle_complete);
     auto fw_macro_order = find_fw_macro_candidate_execution_order(g);
     auto fw_ranked_order = find_fw_ranked_execution_order(g);
     auto fw_linear_order = find_fw_linear_execution_order(g);
     auto fw_branching_order = find_fw_branching_execution_order(g);
     auto fw_joining_order = find_fw_joining_execution_order(g);
-    auto fw_flat_bj_order = find_fw_flat_bj_execution_order(g);
     auto fw_full_order = find_fw_full_execution_order(g);
     auto fw_dfs_order = find_fw_naive_dfs_execution_order(g);
 
     std::map<std::string, std::vector<std::string>> fw_orders = {
-        {"BEST", fw_best_order},
-        {"MACRO", fw_macro_order},
-        {"BRANCHING", fw_branching_order},
-        {"JOINING", fw_joining_order},
-        {"LINEAR", fw_linear_order},
-        {"RANKED", fw_ranked_order},
-        {"FLAT_BJ", fw_flat_bj_order},
-        {"FULL", fw_full_order},
-        {"DFS", fw_dfs_order},
+        {"BEST", fw_best_order},           {"MACRO", fw_macro_order},
+        {"BRANCHING", fw_branching_order}, {"JOINING", fw_joining_order},
+        {"LINEAR", fw_linear_order},       {"RANKED", fw_ranked_order},
+        {"FULL", fw_full_order},           {"DFS", fw_dfs_order},
     };
 
     auto fw_effs = rank_execution_orders(g, fw_orders);
@@ -286,7 +280,7 @@ void run_backward_trials(int trials, const std::string& title, const std::string
   while (trials--) {
     Graph g = graph_generator();
 
-    auto bw_best_order = find_bw_fork_join_execution_order(g);
+    auto bw_best_order = find_bw_fork_join_execution_order(g, 10000000);
     auto bw_macro_order = find_bw_macro_candidate_execution_order(g);
     auto bw_ranked_order = find_bw_ranked_execution_order(g);
     auto bw_linear_order = find_bw_linear_execution_order(g);
@@ -336,53 +330,61 @@ void run_backward_trials(int trials, const std::string& title, const std::string
   print_stats(bw_efficiencies);
 }
 
-int main() {
-  srand(static_cast<unsigned int>(time(nullptr)));
+int main(int argc, char* argv[]) {
+  unsigned int seed;
+  if (argc > 1) {
+    seed = static_cast<unsigned int>(std::stoul(argv[1]));
+  } else {
+    seed = static_cast<unsigned int>(time(nullptr));
+  }
+  std::cout << "Using seed: " << seed << std::endl;
+  srand(seed);
   std::vector<std::string> to_checks = {"MACRO"};
 
-  int trials = 1000;
+  int trials = 10000;
 
   // Stress tests (Forward)
   run_forward_trials(
       trials, "Independent Operators", "independent_operators",
-      []() { return random_m_sequences_graph(10, 1); }, to_checks);
+      []() { return random_m_sequences_graph(9, 1); }, to_checks);
   run_forward_trials(
       trials, "Parallel Sequences", "parallel_sequences",
       []() { return random_m_sequences_graph(4, 4); }, to_checks);
   run_forward_trials(trials, "Join", "join", []() { return random_joining_graph(4); }, to_checks);
   run_forward_trials(
       trials, "Order-Invariant Branch", "order_invariant_branch",
-      []() { return random_order_invariant_branching_graph(3); }, to_checks);
+      []() { return random_order_invariant_branching_graph(3, 15); }, to_checks);
   run_forward_trials(
       trials, "Order-Invariant Fork Join", "order_invariant_fork_join",
-      []() { return random_order_invariant_fork_join_graph(4); }, to_checks);
+      []() { return random_order_invariant_fork_join_graph(4, 15); }, to_checks);
   run_forward_trials(
-      trials, "Order-Dependent Branch", "branch", []() { return random_branching_graph(3); },
+      trials, "Order-Dependent Branch", "branch", []() { return random_branching_graph(3, 15); },
       to_checks);
   run_forward_trials(
-      trials, "Order-Dependent Fork Join", "fork_join", []() { return random_fork_join_graph(4); },
-      to_checks);
+      trials, "Order-Dependent Fork Join", "fork_join",
+      []() { return random_fork_join_graph(4, 15); }, to_checks);
 
   // Stress tests (Backward)
   run_backward_trials(
       trials, "Independent Operators", "independent_operators",
-      []() { return random_m_sequences_graph(10, 1); }, to_checks);
+      []() { return random_m_sequences_graph(9, 1); }, to_checks);
   run_backward_trials(
       trials, "Parallel Sequences", "parallel_sequences",
       []() { return random_m_sequences_graph(4, 4); }, to_checks);
-  run_backward_trials(trials, "Join", "join", []() { return random_joining_graph(4); }, to_checks);
+  run_backward_trials(
+      trials, "Join", "join", []() { return random_joining_graph(4, 15); }, to_checks);
   run_backward_trials(
       trials, "Order-Invariant Branch", "order_invariant_branch",
-      []() { return random_order_invariant_branching_graph(3); }, to_checks);
+      []() { return random_order_invariant_branching_graph(3, 15); }, to_checks);
   run_backward_trials(
       trials, "Order-Invariant Fork Join", "order_invariant_fork_join",
-      []() { return random_order_invariant_fork_join_graph(4); }, to_checks);
+      []() { return random_order_invariant_fork_join_graph(4, 15); }, to_checks);
   run_backward_trials(
-      trials, "Order-Dependent Branch", "branch", []() { return random_branching_graph(3); },
+      trials, "Order-Dependent Branch", "branch", []() { return random_branching_graph(3, 15); },
       to_checks);
   run_backward_trials(
-      trials, "Order-Dependent Fork Join", "fork_join", []() { return random_fork_join_graph(4); },
-      to_checks);
+      trials, "Order-Dependent Fork Join", "fork_join",
+      []() { return random_fork_join_graph(4, 15); }, to_checks);
 
   return 0;
 }

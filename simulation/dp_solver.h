@@ -4,6 +4,7 @@
 #include <bitset>
 #include <cmath>
 #include <functional>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <set>
@@ -61,7 +62,11 @@ inline std::vector<std::string> find_fw_fork_join_execution_order(Graph& graph, 
     if (const auto it = memo.find(completed); it != memo.end()) return it->second;
     if (memo.size() >= max_states) {
       state_limit_reached = true;
-      if (oracle_complete) *oracle_complete = false;
+      if (oracle_complete) {
+        std::cerr << "[ DP Solver ] State limit reached. Aborting "
+                  << "DP-based optimization for fork-join graph." << std::endl;
+        *oracle_complete = false;
+      }
       return Schedule{std::numeric_limits<size_t>::max(), {}};
     }
     if (allocator.allocated() >= baseline_peak) {

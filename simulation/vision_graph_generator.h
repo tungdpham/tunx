@@ -26,10 +26,8 @@ struct Shape4D {
   bool operator==(const Shape4D& other) const {
     return n == other.n && c == other.c && h == other.h && w == other.w;
   }
-  
-  bool operator!=(const Shape4D& other) const {
-    return !(*this == other);
-  }
+
+  bool operator!=(const Shape4D& other) const { return !(*this == other); }
 };
 
 struct OpProfile {
@@ -87,7 +85,7 @@ public:
     std::string name = prefix;
     if (current_branch_ != -1) name += "_b" + std::to_string(current_branch_);
     if (current_depth_ != -1) name += "_d" + std::to_string(current_depth_);
-    
+
     int count = name_counts_[name]++;
     if (count == 0) return name;
     return name + "_" + std::to_string(count);
@@ -365,7 +363,7 @@ public:
     std::string name = prefix;
     if (current_branch_ != -1) name += "_b" + std::to_string(current_branch_);
     if (current_depth_ != -1) name += "_d" + std::to_string(current_depth_);
-    
+
     int count = name_counts_[name]++;
     if (count == 0) return name;
     return name + "_" + std::to_string(count);
@@ -385,47 +383,52 @@ public:
 
   ConfiguredOp sample_vision_op(const Shape4D& in) {
     int op_type = random_between(0, 5);
-    if (op_type == 0) { // Conv2D
-      size_t oc_choices[] = {std::max<size_t>(16, in.c / 2), in.c, std::min<size_t>(1024, in.c * 2)};
+    if (op_type == 0) {  // Conv2D
+      size_t oc_choices[] = {std::max<size_t>(16, in.c / 2), in.c,
+                             std::min<size_t>(1024, in.c * 2)};
       size_t oc = oc_choices[random_between(0, 2)];
       size_t k = (random_between(0, 1) == 0) ? 1 : 3;
       size_t s = (in.h >= 14 && random_between(0, 4) == 0) ? 2 : 1;
       size_t p = (k - 1) / 2;
-      
+
       Shape4D out = {in.n, oc, (in.h + 2 * p - k) / s + 1, (in.w + 2 * p - k) / s + 1};
-      size_t workspace = oc * in.c * k * k * 4; 
+      size_t workspace = oc * in.c * k * k * 4;
       size_t residual = out.bytes();
-      
-      return {"conv2d_oc" + std::to_string(oc) + "_k" + std::to_string(k) + "_s" + std::to_string(s),
-              kConv, out, workspace, residual};
-    } else if (op_type == 1) { // Conv2DTranspose
-      size_t oc_choices[] = {std::max<size_t>(16, in.c / 2), in.c, std::min<size_t>(1024, in.c * 2)};
+
+      return {
+          "conv2d_oc" + std::to_string(oc) + "_k" + std::to_string(k) + "_s" + std::to_string(s),
+          kConv, out, workspace, residual};
+    } else if (op_type == 1) {  // Conv2DTranspose
+      size_t oc_choices[] = {std::max<size_t>(16, in.c / 2), in.c,
+                             std::min<size_t>(1024, in.c * 2)};
       size_t oc = oc_choices[random_between(0, 2)];
       size_t k = (random_between(0, 1) == 0) ? 2 : 4;
       size_t s = (in.h <= 56 && random_between(0, 4) == 0) ? 2 : 1;
       size_t p = (k == 4 && s == 2) ? 1 : 0;
-      
+
       size_t out_h = (in.h - 1) * s - 2 * p + k;
       size_t out_w = (in.w - 1) * s - 2 * p + k;
       Shape4D out = {in.n, oc, out_h, out_w};
-      size_t workspace = oc * in.c * k * k * 4; 
+      size_t workspace = oc * in.c * k * k * 4;
       size_t residual = out.bytes();
-      
-      return {"conv2dtranspose_oc" + std::to_string(oc) + "_k" + std::to_string(k) + "_s" + std::to_string(s),
+
+      return {"conv2dtranspose_oc" + std::to_string(oc) + "_k" + std::to_string(k) + "_s" +
+                  std::to_string(s),
               kConv, out, workspace, residual};
-    } else if (op_type == 2) { // BatchNorm
-      size_t workspace = in.c * 4 * 4; 
+    } else if (op_type == 2) {  // BatchNorm
+      size_t workspace = in.c * 4 * 4;
       size_t residual = in.bytes();
       return {"batchnorm_c" + std::to_string(in.c), kBatchNorm, in, workspace, residual};
-    } else if (op_type == 3) { // ReLU
+    } else if (op_type == 3) {  // ReLU
       return {"relu", kRelu, in, 0, in.bytes()};
-    } else if (op_type == 4) { // AvgPool
+    } else if (op_type == 4) {  // AvgPool
       size_t k = (random_between(0, 1) == 0) ? 2 : 3;
       size_t s = (in.h >= 14 && random_between(0, 3) == 0) ? 2 : 1;
       size_t p = k / 2;
       Shape4D out = {in.n, in.c, (in.h + 2 * p - k) / s + 1, (in.w + 2 * p - k) / s + 1};
-      return {"avgpool_k" + std::to_string(k) + "_s" + std::to_string(s), kAvgPool, out, 0, out.bytes()};
-    } else { // Transpose
+      return {"avgpool_k" + std::to_string(k) + "_s" + std::to_string(s), kAvgPool, out, 0,
+              out.bytes()};
+    } else {  // Transpose
       return {"transpose", kTranspose, in, in.bytes(), in.bytes()};
     }
   }
@@ -437,7 +440,9 @@ public:
       s = in.h / out.h;
     }
     size_t workspace = out.c * in.c * k * k * 4;
-    return {"project_to_c" + std::to_string(out.c) + "_h" + std::to_string(out.h) + "_s" + std::to_string(s), kConv, out, workspace, out.bytes()};
+    return {"project_to_c" + std::to_string(out.c) + "_h" + std::to_string(out.h) + "_s" +
+                std::to_string(s),
+            kConv, out, workspace, out.bytes()};
   }
 
   int add_tensor(IRGraph& ir, const std::string& name, Shape4D shape) {
@@ -464,14 +469,8 @@ public:
       outputs.push_back(add_tensor(ir, name + "_out_" + std::to_string(i), shape));
     }
 
-    size_t workspace = shape.bytes() * 0.05; 
-    ir.ops.push_back({name,
-                      unique_id(name),
-                      {0.05, 0.0, false},
-                      {input},
-                      outputs,
-                      workspace,
-                      0});
+    size_t workspace = shape.bytes() * 0.05;
+    ir.ops.push_back({name, unique_id(name), {0.05, 0.0, false}, {input}, outputs, workspace, 0});
     return outputs;
   }
 
@@ -479,14 +478,8 @@ public:
     const Shape4D shape = ir.tensors[output].shape;
     size_t workspace = shape.bytes() * kAdd.workspace_ratio;
     size_t residual = shape.bytes() * kAdd.residual_ratio;
-    
-    ir.ops.push_back({name,
-                      unique_id(name),
-                      kAdd,
-                      inputs,
-                      {output},
-                      workspace,
-                      residual});
+
+    ir.ops.push_back({name, unique_id(name), kAdd, inputs, {output}, workspace, residual});
   }
 
 private:
@@ -567,7 +560,7 @@ inline IRGraph scale_rank(const IRGraph& orig, uint32_t seed) {
       const Shape4D orig_in = orig.tensors[op.inputs[0]].shape;
       const Shape4D orig_out = orig.tensors[op.outputs[0]].shape;
       const int input = scaler.add_tensor(scaled, "rank_input", orig_in);
-      
+
       auto sampled = scaler.sample_vision_op(orig_in);
       if (replica == 0) sampled.profile = op.profile;
 
@@ -632,7 +625,8 @@ inline IRGraph scale_linear(const IRGraph& orig, uint32_t seed) {
 }
 
 inline void append_branch_tree(IRGraph& ir, IRScaler& scaler, int input, size_t depth,
-                               std::vector<int>& leaves, const Shape4D& target_shape, int branch = -1) {
+                               std::vector<int>& leaves, const Shape4D& target_shape,
+                               int branch = -1) {
   scaler.set_context(branch, depth);
   if (depth == 0) {
     auto sampled = scaler.sample_vision_op(ir.tensors[input].shape);
@@ -686,14 +680,15 @@ inline IRGraph scale_branch(const IRGraph& orig, uint32_t seed) {
   return scaled;
 }
 
-inline void append_join_tree(IRGraph& ir, IRScaler& scaler, int output, size_t depth, int branch = -1) {
+inline void append_join_tree(IRGraph& ir, IRScaler& scaler, int output, size_t depth,
+                             int branch = -1) {
   scaler.set_context(branch, depth);
   const Shape4D shape = ir.tensors[output].shape;
   if (depth == 0) {
     const int input = scaler.add_tensor(ir, "nested_join_input", shape);
     ir.graph_inputs.push_back(input);
     auto sampled = scaler.sample_vision_op(shape);
-    
+
     if (sampled.out_shape != shape) {
       const int inter = scaler.add_tensor(ir, "nested_join_inter", sampled.out_shape);
       scaler.add_unary(ir, input, inter, sampled);
@@ -763,12 +758,12 @@ inline void append_fork_join(IRGraph& ir, IRScaler& scaler, int input, int outpu
       scaler.set_context(i, nested_depth);
       auto sampled = scaler.sample_vision_op(ir.tensors[fork_outputs[i]].shape);
       if (sampled.out_shape != shape) {
-         const int inter = scaler.add_tensor(ir, "nested_fj_inter", sampled.out_shape);
-         scaler.add_unary(ir, fork_outputs[i], inter, sampled);
-         auto proj = scaler.project_op(sampled.out_shape, shape);
-         scaler.add_unary(ir, inter, branch_output, proj);
+        const int inter = scaler.add_tensor(ir, "nested_fj_inter", sampled.out_shape);
+        scaler.add_unary(ir, fork_outputs[i], inter, sampled);
+        auto proj = scaler.project_op(sampled.out_shape, shape);
+        scaler.add_unary(ir, inter, branch_output, proj);
       } else {
-         scaler.add_unary(ir, fork_outputs[i], branch_output, sampled);
+        scaler.add_unary(ir, fork_outputs[i], branch_output, sampled);
       }
     }
     branch_outputs.push_back(branch_output);
@@ -888,12 +883,6 @@ extern std::vector<std::string> find_fw_branching_execution_order(Graph& graph,
 extern std::vector<std::string> find_fw_joining_execution_order(Graph& graph,
                                                                 std::ostream* os = nullptr);
 
-inline std::vector<std::string> find_fw_flat_bj_execution_order(Graph& graph,
-                                                                std::ostream* os = nullptr) {
-  FlatBJSolver solver(graph, os);
-  return solver.find_forward_order();
-}
-
 inline std::vector<std::string> find_fw_full_execution_order(Graph& graph,
                                                              std::ostream* os = nullptr) {
   FullSolver solver(graph, os);
@@ -926,7 +915,6 @@ inline AblationPeaks evaluate_ablations(Graph& g) {
       {"LINEAR", find_fw_linear_execution_order(g)},
       {"BRANCH", find_fw_branching_execution_order(g)},
       {"JOIN", find_fw_joining_execution_order(g)},
-      {"FLAT_BJ", find_fw_flat_bj_execution_order(g)},
       {"FULL", find_fw_full_execution_order(g)}};
 
   AblationPeaks peaks;

@@ -42,7 +42,6 @@ struct SolverOptions {
   bool enable_linear = true;
   bool enable_branching = true;
   bool enable_joining = true;
-  bool enable_recursive_fork_join = true;
 };
 
 class MacroSolver {
@@ -383,31 +382,20 @@ public:
       pending.pop_front();
       if (!macros_.contains(current)) continue;
 
-      if (options_.enable_linear && macro_deps_.at(current).size() == 1) {
-        const std::string parent = *macro_deps_.at(current).begin();
-        if (macro_dependents_.at(parent).size() == 1 && macros_.at(current) < macros_.at(parent)) {
-          pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
-          continue;
-        }
-      }
-
-      if (options_.enable_branching && macro_dependents_.at(current).size() > 1) {
-        std::string best_child;
-        for (const auto& child : macro_dependents_.at(current)) {
-          if (macro_deps_.at(child).size() == 1 && macros_.at(child) < macros_.at(current)) {
-            if (best_child.empty() || macros_.at(child) < macros_.at(best_child))
-              best_child = child;
+      if (options_.enable_linear) {
+        if (macro_deps_.at(current).size() == 1) {
+          const std::string parent = *macro_deps_.at(current).begin();
+          if (macro_dependents_.at(parent).size() == 1 &&
+              macros_.at(current) < macros_.at(parent)) {
+            pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
+            continue;
           }
-        }
-        if (!best_child.empty()) {
-          pending.push_front(merge_macros(current, best_child, next_macro_id, "branch"));
-          continue;
         }
       }
 
       if (macro_deps_.at(current).size() > 1) {
         std::string prepared = current;
-        if (options_.enable_recursive_fork_join) {
+        if (options_.enable_branching) {
           prepared = prepare_join_branches(current, next_macro_id);
           if (prepared != current) {
             pending.push_front(prepared);
@@ -423,7 +411,7 @@ public:
       }
     }
     if (macros_.contains(virtual_join_id)) {
-      if (options_.enable_branching || options_.enable_recursive_fork_join) {
+      if (options_.enable_branching) {
         prepare_join_branches(virtual_join_id, next_macro_id);
       }
       for (const auto& terminal : macro_deps_.at(virtual_join_id)) {
@@ -513,9 +501,11 @@ public:
     auto dependents = deps_and_dependents.first;
 
     std::set<std::string> cached_tensors;
+    std::map<std::string, int> cache_deg;
     for (auto& [uuid, node] : graph_.op_nodes()) {
       for (auto* t : node.cache()) {
         cached_tensors.insert(t->uuid());
+        cache_deg[t->uuid()]++;
       }
     }
 
@@ -537,6 +527,11 @@ public:
       long long memory_consumes = node.residual_mem();
       for (auto* t : node.outputs()) {
         if (in_deg[t->uuid()] == 1) {
+          memory_consumes += t->size();
+        }
+      }
+      for (auto* t : node.cache()) {
+        if (cache_deg[t->uuid()] == 1) {
           memory_consumes += t->size();
         }
       }
@@ -597,23 +592,9 @@ public:
         }
       }
 
-      if (options_.enable_branching && macro_dependents_.at(current).size() > 1) {
-        std::string best_child;
-        for (const auto& child : macro_dependents_.at(current)) {
-          if (macro_deps_.at(child).size() == 1 && macros_.at(child) < macros_.at(current)) {
-            if (best_child.empty() || macros_.at(child) < macros_.at(best_child))
-              best_child = child;
-          }
-        }
-        if (!best_child.empty()) {
-          pending.push_front(merge_macros(current, best_child, next_macro_id, "branch"));
-          continue;
-        }
-      }
-
       if (macro_deps_.at(current).size() > 1) {
         std::string prepared = current;
-        if (options_.enable_recursive_fork_join) {
+        if (options_.enable_branching) {
           prepared = prepare_join_branches(current, next_macro_id);
           if (prepared != current) {
             pending.push_front(prepared);
@@ -629,7 +610,7 @@ public:
       }
     }
     if (macros_.contains(virtual_join_id)) {
-      if (options_.enable_branching || options_.enable_recursive_fork_join) {
+      if (options_.enable_branching) {
         prepare_join_branches(virtual_join_id, next_macro_id);
       }
       for (const auto& terminal : macro_deps_.at(virtual_join_id)) {
@@ -702,37 +683,31 @@ public:
 class RankedSolver : public MacroSolver {
 public:
   RankedSolver(Graph& graph, std::ostream* os = nullptr)
-      : MacroSolver(graph, os, {false, false, false, false}) {}
+      : MacroSolver(graph, os, {false, false, false}) {}
 };
 
 class LinearSolver : public MacroSolver {
 public:
   LinearSolver(Graph& graph, std::ostream* os = nullptr)
-      : MacroSolver(graph, os, {true, false, false, false}) {}
+      : MacroSolver(graph, os, {true, false, false}) {}
 };
 
 class BranchingSolver : public MacroSolver {
 public:
   BranchingSolver(Graph& graph, std::ostream* os = nullptr)
-      : MacroSolver(graph, os, {true, true, false, false}) {}
+      : MacroSolver(graph, os, {true, true, false}) {}
 };
 
 class JoiningSolver : public MacroSolver {
 public:
   JoiningSolver(Graph& graph, std::ostream* os = nullptr)
-      : MacroSolver(graph, os, {true, false, true, false}) {}
-};
-
-class FlatBJSolver : public MacroSolver {
-public:
-  FlatBJSolver(Graph& graph, std::ostream* os = nullptr)
-      : MacroSolver(graph, os, {true, true, true, false}) {}
+      : MacroSolver(graph, os, {true, false, true}) {}
 };
 
 class FullSolver : public MacroSolver {
 public:
   FullSolver(Graph& graph, std::ostream* os = nullptr)
-      : MacroSolver(graph, os, {true, true, true, true}) {}
+      : MacroSolver(graph, os, {true, true, true}) {}
 };
 
 inline std::vector<std::string> find_fw_macro_candidate_execution_order(
