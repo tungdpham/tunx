@@ -8,7 +8,6 @@
   "profiler_type": "NONE",
   "print_layer_profiling": true,
   "print_layer_memory_usage": true,
-  "num_microbatches": 2,
   "device": "CUDA:0",
   "model_name": "cifar10_resnet9",
   "model_path": "",
