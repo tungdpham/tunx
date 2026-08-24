@@ -663,6 +663,67 @@ class GPT2Small(nn.Module):
         return logits
 
 
+# --- Memory Efficient Pooling ---
+class MemoryEfficientMaxPool2d(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, kernel_size, stride, padding=0, dilation=1, ceil_mode=False):
+        out, indices = torch.ops.aten.max_pool2d_with_indices(
+            x, kernel_size, stride, padding, dilation, ceil_mode
+        )
+        print(f"Indices dtype: {indices.dtype}")
+        ctx.save_for_backward(indices)
+        ctx.input_size = x.size()
+        ctx.kernel_size = [kernel_size, kernel_size] if isinstance(kernel_size, int) else kernel_size
+        ctx.stride = [stride, stride] if isinstance(stride, int) else stride
+        ctx.padding = [padding, padding] if isinstance(padding, int) else padding
+        ctx.dilation = [dilation, dilation] if isinstance(dilation, int) else dilation
+        ctx.ceil_mode = ceil_mode
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        indices, = ctx.saved_tensors
+        dummy_input = torch.empty(ctx.input_size, device=grad_output.device, dtype=grad_output.dtype)
+        grad_input = torch.ops.aten.max_pool2d_with_indices_backward(
+            grad_output, dummy_input, ctx.kernel_size, ctx.stride, ctx.padding, ctx.dilation, ctx.ceil_mode, indices
+        )
+        return grad_input, None, None, None, None, None
+
+class MemoryEfficientAvgPool2d(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, kernel_size, stride, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+        out = torch.nn.functional.avg_pool2d(
+            x, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
+        )
+        ctx.input_size = x.size()
+        ctx.kernel_size = [kernel_size, kernel_size] if isinstance(kernel_size, int) else kernel_size
+        ctx.stride = [stride, stride] if isinstance(stride, int) else stride
+        ctx.padding = [padding, padding] if isinstance(padding, int) else padding
+        ctx.ceil_mode = ceil_mode
+        ctx.count_include_pad = count_include_pad
+        ctx.divisor_override = divisor_override
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        dummy_input = torch.empty(ctx.input_size, device=grad_output.device, dtype=grad_output.dtype)
+        grad_input = torch.ops.aten.avg_pool2d_backward(
+            grad_output, dummy_input, ctx.kernel_size, ctx.stride, ctx.padding, ctx.ceil_mode, ctx.count_include_pad, ctx.divisor_override
+        )
+        return grad_input, None, None, None, None, None, None
+
+class MemMaxPool2d(nn.MaxPool2d):
+    def forward(self, x):
+        return MemoryEfficientMaxPool2d.apply(
+            x, self.kernel_size, self.stride, self.padding, self.dilation, self.ceil_mode
+        )
+
+class MemAvgPool2d(nn.AvgPool2d):
+    def forward(self, x):
+        return MemoryEfficientAvgPool2d.apply(
+            x, self.kernel_size, self.stride, self.padding, self.ceil_mode, self.count_include_pad, self.divisor_override
+        )
+
 # --- Tunx v1 ---
 
 class TunxV1(nn.Module):
@@ -670,14 +731,14 @@ class TunxV1(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(16, eps=1e-5, momentum=0.1)
-        self.pool1 = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        self.pool1 = MemMaxPool2d(kernel_size=4, stride=4, padding=0)
         
         self.b1_up1 = nn.ConvTranspose2d(16, 32, kernel_size=2, stride=2, padding=0, bias=False)
         self.b1_bn1 = nn.BatchNorm2d(32, eps=1e-5, momentum=0.1)
         self.b1_up2 = nn.ConvTranspose2d(32, 64, kernel_size=4, stride=4, padding=0, bias=False)
         self.b1_bn2 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
         self.b1_down = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
-        self.b1_pool = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        self.b1_pool = MemMaxPool2d(kernel_size=4, stride=4, padding=0)
         
         self.b2_trans = nn.ConvTranspose2d(16, 64, kernel_size=2, stride=2, padding=0, bias=False)
         self.b2_bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
@@ -687,11 +748,11 @@ class TunxV1(nn.Module):
         self.b2_bn3 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
         self.b2_conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.b2_bn4 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
-        self.b2_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.b2_pool = MemMaxPool2d(kernel_size=2, stride=2, padding=0)
         
         self.b3_up1 = nn.ConvTranspose2d(16, 32, kernel_size=2, stride=2, padding=0, bias=False)
         self.b3_up2 = nn.ConvTranspose2d(32, 128, kernel_size=4, stride=4, padding=0, bias=False)
-        self.b3_pool = nn.AvgPool2d(kernel_size=4, stride=4, padding=0)
+        self.b3_pool = MemAvgPool2d(kernel_size=4, stride=4, padding=0)
         self.b3_down1 = nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.b3_bn2 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
         
@@ -742,11 +803,11 @@ class TunxV2Block(nn.Module):
     def __init__(self, in_channels: int):
         super().__init__()
         self.up1 = nn.ConvTranspose2d(in_channels, 256, kernel_size=2, stride=2, padding=0, bias=False)
-        self.pool1 = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
+        self.pool1 = MemMaxPool2d(kernel_size=3, stride=1, padding=1)
         
         self.up2 = nn.ConvTranspose2d(in_channels, 256, kernel_size=4, stride=4, padding=0, bias=False)
-        self.left_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-        self.right_pool = nn.AvgPool2d(kernel_size=2, stride=2, padding=0)
+        self.left_pool = MemMaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.right_pool = MemAvgPool2d(kernel_size=2, stride=2, padding=0)
         
         self.conv = nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1, bias=False)
         
@@ -766,14 +827,14 @@ class TunxV2(nn.Module):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(16, eps=1e-5, momentum=0.1)
-        self.pool1 = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        self.pool1 = MemMaxPool2d(kernel_size=4, stride=4, padding=0)
         
         self.b1_up1 = nn.ConvTranspose2d(16, 64, kernel_size=2, stride=2, padding=0, bias=False)
         self.b1_bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
         self.b1_up2 = nn.ConvTranspose2d(64, 128, kernel_size=2, stride=2, padding=0, bias=False)
         self.b1_bn2 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
         self.b1_down = nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False)
-        self.b1_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.b1_pool = MemMaxPool2d(kernel_size=2, stride=2, padding=0)
         
         self.b2_trans = nn.ConvTranspose2d(16, 128, kernel_size=2, stride=2, padding=0, bias=False)
         self.b2_bn1 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
@@ -781,7 +842,7 @@ class TunxV2(nn.Module):
         self.b2_bn2 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
         self.b2_conv = nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False)
         self.b2_conv2 = nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False)
-        self.b2_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.b2_pool = MemMaxPool2d(kernel_size=2, stride=2, padding=0)
         
         self.b3_conv = nn.Conv2d(16, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.b3_up1 = nn.ConvTranspose2d(64, 128, kernel_size=5, stride=1, padding=2, bias=False)
@@ -1357,6 +1418,10 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
         if inputs.is_floating_point():
             inputs = inputs.to(cfg.get("io_dtype", torch.float32))
 
+        # --- Memory Profiling for Batch 10 ---
+        if batch_idx == 10 and torch.cuda.is_available() and hasattr(torch.cuda.memory, "_record_memory_history"):
+            torch.cuda.memory._record_memory_history(max_entries=100000)
+
         optimizer.zero_grad()
 
         should_log_mem = (batch_idx + 1) % progress_interval == 0 and torch.cuda.is_available()
@@ -1391,6 +1456,13 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
             mem_peak_bwd = torch.cuda.max_memory_allocated(device) / (1024 ** 3)
             
         optimizer.step()
+
+        # --- Memory Profiling for Batch 10 ---
+        if batch_idx == 10 and torch.cuda.is_available() and hasattr(torch.cuda.memory, "_record_memory_history"):
+            torch.cuda.memory._dump_snapshot("memory_snapshot.pickle")
+            torch.cuda.memory._record_memory_history(enabled=False)
+            print("\n[+] Saved PyTorch memory snapshot to memory_snapshot.pickle")
+            print("    View it by uploading to https://pytorch.org/memory_viz")
 
         if cfg.get("scheduler_type") == "warmup_cosine_annealing" and "scheduler_obj" in cfg:
             cfg["scheduler_obj"].step()
