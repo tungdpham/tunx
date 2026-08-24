@@ -592,6 +592,77 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
   });
 }
 
+static void run_benchmark(Graph &graph, unique_ptr<Dataset> &train_dataset,
+                          const unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
+                          const TrainingConfig &config) {
+  cout << "\n>>> Starting Benchmark Mode (50 warmup steps + 2000 measured steps)..." << endl;
+  graph.set_mode(ExecutionMode::TRAIN);
+  train_dataset->shuffle();
+  train_dataset->reset();
+  
+  Tensor batch_data, batch_labels;
+  Device &model_device = graph.device();
+  auto &mem_pool = PoolAllocator::instance(model_device, model_device.default_stream());
+  
+  if (!train_dataset->get_batch(config.batch_size, batch_data, batch_labels)) {
+    cerr << "Failed to get batch for benchmark." << endl;
+    return;
+  }
+  
+  Tensor device_input = to_device(batch_data, model_device);
+  Tensor device_labels = to_device(batch_labels, model_device);
+  GraphExecutor executor(graph);
+  
+  auto step = [&]() {
+    TensorBundle inputs{{"input", device_input}};
+    TensorBundle outputs = executor.forward(inputs);
+    Tensor predictions = outputs.get("output");
+    
+    float loss;
+    criterion->compute_loss(predictions, device_labels, loss);
+    
+    Tensor loss_gradient = Tensor(predictions.shape(), predictions.dtype(), mem_pool);
+    criterion->compute_gradient(predictions, device_labels, loss_gradient);
+    
+    if (config.gradient_accumulation_steps > 1) {
+      loss_gradient *= (1.0f / static_cast<float>(config.gradient_accumulation_steps));
+    }
+    
+    TensorBundle output_grads{{"output", loss_gradient}};
+    executor.backward(output_grads);
+    
+    optimizer->update();
+    optimizer->zero_grads();
+  };
+  
+  cout << "Running 50 warmup steps..." << endl;
+  for (int i = 0; i < 50; ++i) {
+    step();
+  }
+  
+  model_device.default_stream().sync();
+  cout << "Warmup complete. Running 2000 measured steps..." << endl;
+  
+  auto start_time = chrono::high_resolution_clock::now();
+  for (int i = 0; i < 2000; ++i) {
+    step();
+  }
+  model_device.default_stream().sync();
+  
+  auto end_time = chrono::high_resolution_clock::now();
+  double elapsed_sec = chrono::duration_cast<chrono::microseconds>(end_time - start_time).count() / 1000000.0;
+  
+  bool is_lm = (config.dataset_name == "openwebtext");
+  if (is_lm) {
+    double throughput = (2000.0 * config.batch_size * 1024) / elapsed_sec;
+    cout << "Throughput: " << fixed << setprecision(2) << throughput << " tokens/s" << endl;
+  } else {
+    double throughput = (2000.0 * config.batch_size) / elapsed_sec;
+    cout << "Throughput: " << fixed << setprecision(2) << throughput << " samples/s" << endl;
+  }
+  cout << "Elapsed time for 2000 steps: " << fixed << setprecision(3) << elapsed_sec << " s" << endl;
+}
+
 void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Dataset> &val_dataset,
                  unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
                  unique_ptr<Scheduler> &scheduler, const TrainingConfig &config) {
@@ -699,6 +770,11 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
       optimizer->zero_grads();
     }
     train_dataset->reset();
+  }
+
+  if (config.benchmark_mode) {
+    run_benchmark(graph, train_dataset, optimizer, criterion, config);
+    return;
   }
 
   if (is_val) {

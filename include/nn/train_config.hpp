@@ -58,7 +58,8 @@ struct TrainingConfig {
   size_t prefetch_depth = 2;
   bool async_pipeline = true;
   bool augmentation = true;
-
+  bool benchmark_mode = false;
+  
   LogMode log_mode;
 
   size_t num_microbatches = 2;

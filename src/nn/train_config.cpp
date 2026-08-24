@@ -143,6 +143,7 @@ void TrainingConfig::load_from_json(const string &config_path) {
   prefetch_depth = config.value("prefetch_depth", prefetch_depth);
   async_pipeline = config.value("async_pipeline", async_pipeline);
   augmentation = config.value("augmentation", augmentation);
+  benchmark_mode = config.value("benchmark_mode", benchmark_mode);
 
   // Parse LogMode settings from JSON
   if (config.contains("log_mode")) {

@@ -36,6 +36,67 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# ======================== Memory Tracker ========================
+class MemoryTracker:
+    def __init__(self, model, optimizer, csv_path):
+        self.model = model
+        self.optimizer = optimizer
+        self.csv_file = open(csv_path, "w", newline="")
+        self.writer = csv.writer(self.csv_file)
+        self.writer.writerow(["plan_name","allocator_type","pass","layer_name","allocated_b","reserved_b","peak_b","cached_b","fragmented_b","host_pinned_b","gradients_b","optimizer_b","parameters_b","parameters_grad_b","activations_b","workspaces_b"])
+        
+        self.hooks = []
+        for name, module in model.named_modules():
+            if len(list(module.children())) == 0 and name != "":
+                self.hooks.append(module.register_forward_hook(self.make_hook(name, "forward")))
+                self.hooks.append(module.register_full_backward_hook(self.make_bwd_hook(name, "backward")))
+
+    def make_hook(self, name, pass_type):
+        def hook(module, inputs, outputs):
+            self.record(name, pass_type)
+        return hook
+
+    def make_bwd_hook(self, name, pass_type):
+        def hook(module, grad_input, grad_output):
+            self.record(name, pass_type)
+        return hook
+
+    def record(self, name, pass_type):
+        if not torch.cuda.is_available(): return
+        
+        allocated_b = torch.cuda.memory_allocated()
+        reserved_b = torch.cuda.memory_reserved()
+        peak_b = torch.cuda.max_memory_allocated()
+        cached_b = reserved_b - allocated_b
+        fragmented_b = 0
+        host_pinned_b = 0
+        
+        parameters_b = sum(p.nelement() * p.element_size() for p in self.model.parameters())
+        gradients_b = sum(p.grad.nelement() * p.grad.element_size() for p in self.model.parameters() if p.grad is not None)
+        
+        optimizer_b = 0
+        for state in self.optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    optimizer_b += v.nelement() * v.element_size()
+                    
+        parameters_grad_b = gradients_b
+        activations_b = allocated_b - parameters_b - gradients_b - optimizer_b
+        workspaces_b = 0
+        
+        self.writer.writerow([
+            "PyTorch", "caching", pass_type, name,
+            allocated_b, reserved_b, peak_b, cached_b,
+            fragmented_b, host_pinned_b, gradients_b, optimizer_b,
+            parameters_b, parameters_grad_b, activations_b, workspaces_b
+        ])
+        self.csv_file.flush()
+
+    def close(self):
+        for h in self.hooks:
+            h.remove()
+        self.csv_file.close()
+
 # ======================== Datasets ========================
 
 
@@ -670,7 +731,6 @@ class MemoryEfficientMaxPool2d(torch.autograd.Function):
         out, indices = torch.ops.aten.max_pool2d_with_indices(
             x, kernel_size, stride, padding, dilation, ceil_mode
         )
-        print(f"Indices dtype: {indices.dtype}")
         ctx.save_for_backward(indices)
         ctx.input_size = x.size()
         ctx.kernel_size = [kernel_size, kernel_size] if isinstance(kernel_size, int) else kernel_size
@@ -1400,6 +1460,56 @@ class WarmupCosineAnnealing(optim.lr_scheduler._LRScheduler):
             param_group['lr'] = new_lr
 
 
+def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
+    print("\n>>> Starting Benchmark Mode (50 warmup steps + 2000 measured steps)...")
+    model.train()
+    
+    inputs, targets = next(iter(train_loader))
+    inputs = inputs.to(device)
+    targets = targets.to(device)
+    if inputs.is_floating_point():
+        inputs = inputs.to(cfg.get("io_dtype", torch.float32))
+
+    is_lm = cfg.get("is_language_model", False)
+    compute_dtype = cfg.get("compute_dtype", torch.float32)
+
+    def step():
+        optimizer.zero_grad()
+        with torch.autocast(device_type=device.type, dtype=compute_dtype, enabled=(compute_dtype != torch.float32)):
+            outputs = model(inputs)
+            if is_lm:
+                B, T, V = outputs.shape
+                loss = criterion(outputs.view(B * T, V), targets.view(B * T))
+            else:
+                loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+
+    print("Running 50 warmup steps...")
+    for _ in range(50):
+        step()
+
+    torch.cuda.synchronize()
+    print("Warmup complete. Running 2000 measured steps...")
+    start_time = time.time()
+    
+    for _ in range(2000):
+        step()
+        
+    torch.cuda.synchronize()
+    elapsed = time.time() - start_time
+    
+    batch_size = inputs.shape[0]
+    if is_lm:
+        seq_len = inputs.shape[1]
+        throughput = (2000 * batch_size * seq_len) / elapsed
+        print(f"Throughput: {throughput:.2f} tokens/s")
+    else:
+        throughput = (2000 * batch_size) / elapsed
+        print(f"Throughput: {throughput:.2f} samples/s")
+    print(f"Elapsed time for 2000 steps: {elapsed:.3f} s")
+
+
 def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, batch_writer):
     """Train for one epoch."""
     model.train()
@@ -1407,11 +1517,18 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
     running_correct = 0
     running_total = 0
 
-    is_lm = cfg["is_language_model"]
+    is_lm = cfg.get("is_language_model", False)
 
     progress_interval = cfg.get("progress_print_interval", 100)
+    tracker = None
 
     for batch_idx, (inputs, targets) in enumerate(train_loader):
+        if batch_idx == 0:
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_path = os.path.join("logs", f"pytorch_metrics_{ts}.csv")
+            os.makedirs("logs", exist_ok=True)
+            tracker = MemoryTracker(model, optimizer, csv_path)
+
         step_start = time.time()
         inputs, targets = inputs.to(device), targets.to(device)
 
@@ -1456,6 +1573,10 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
             mem_peak_bwd = torch.cuda.max_memory_allocated(device) / (1024 ** 3)
             
         optimizer.step()
+
+        if batch_idx == 0 and tracker is not None:
+            tracker.close()
+            tracker = None
 
         # --- Memory Profiling for Batch 10 ---
         if batch_idx == 10 and torch.cuda.is_available() and hasattr(torch.cuda.memory, "_record_memory_history"):
@@ -1641,6 +1762,7 @@ def main():
     cfg["io_dtype"] = str_to_dtype(json_cfg.get("io_dtype", "FP32"))
     cfg["param_dtype"] = str_to_dtype(json_cfg.get("param_dtype", "FP32"))
     cfg["compute_dtype"] = str_to_dtype(json_cfg.get("compute_dtype", "FP32"))
+    cfg["benchmark_mode"] = json_cfg.get("benchmark_mode", False)
 
     args.model = internal_model_name
 
@@ -1764,6 +1886,10 @@ def main():
     val_writer.writerow(["epoch", "step", "loss", "accuracy_pct"])
 
     # Training loop
+    if cfg["benchmark_mode"]:
+        run_benchmark(model, train_loader, criterion, optimizer, device, cfg)
+        return
+
     print(f"\n>>> Starting training for {cfg['epochs']} epochs...")
     for epoch in range(1, cfg["epochs"] + 1):
         print(f"\n===== Epoch {epoch}/{cfg['epochs']} =====")
