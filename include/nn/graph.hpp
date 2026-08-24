@@ -6,12 +6,13 @@
 #include <iostream>
 #include <memory>
 #include <set>
+#include <map>
 #include <string>
 
-#include "device/del_allocator_v2.hpp"
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
 #include "nn/edge.hpp"
+#include "nn/edge_profile.hpp"
 #include "nn/engines/engine_handle.hpp"
 #include "nn/node.hpp"
 #include "nn/param.hpp"
@@ -63,8 +64,8 @@ public:
 
   Device &device() const { return param_allocator_->device(); }
 
-  const IAllocator *workspace_allocator() const { return workspace_allocator_.get(); }
-  IAllocator *workspace_allocator() { return workspace_allocator_.get(); }
+  IAllocator *workspace_allocator() { return workspace_allocator_; }
+  void set_workspace_allocator(IAllocator &allocator) { workspace_allocator_ = &allocator; }
 
   void add_edge(std::shared_ptr<LayerImpl> layer, const Vec<Node> &producers,
                 const Vec<Node> &consumers);
@@ -73,7 +74,7 @@ public:
                 std::initializer_list<Node> consumers);
 
   void sort();
-  void save_dot(const std::string &filename) const;
+  void save_dot(const std::string &filename, const std::map<Edge, EdgeProfile> *edge_profiles = nullptr, const std::map<Node, size_t> *node_profiles = nullptr) const;
 
   Node make_node(std::string uid = "");
 
@@ -96,7 +97,7 @@ public:
 private:
   // backend
   IAllocator *param_allocator_;
-  std::shared_ptr<DELAllocatorV2> workspace_allocator_;
+  IAllocator *workspace_allocator_;
   Engine engine_;
   engine_handle engine_handle_;
 

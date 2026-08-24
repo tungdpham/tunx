@@ -18,6 +18,7 @@
 #include <set>
 #include <stdexcept>
 
+#include "device/device_allocator.hpp"
 #include "device/dptr.hpp"
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
@@ -35,6 +36,7 @@ private:
   DELAllocator(Device &device, stream s)
       : device_(device),
         stream_(s),
+        slab_dptr_(nullptr),
         slab_ptr_(nullptr),
         capacity_(0),
         left_offset_(0),
@@ -50,7 +52,7 @@ public:
   ~DELAllocator() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (slab_ptr_) {
-      device_.deallocate_aligned_memory(slab_ptr_);
+      slab_dptr_ = dptr(nullptr);
       slab_ptr_ = nullptr;
     }
   }
@@ -177,10 +179,11 @@ public:
     capacity_ = align_up(size, DEFAULT_ALIGNMENT);
 
     if (slab_ptr_) {
-      device_.deallocate_aligned_memory(slab_ptr_);
+      slab_dptr_ = dptr(nullptr);
     }
 
-    slab_ptr_ = device_.allocate_aligned_memory(capacity_, DEFAULT_ALIGNMENT);
+    slab_dptr_ = tunx::DeviceAllocator::instance(device_, stream_).allocate(capacity_);
+    slab_ptr_ = slab_dptr_.get();
     if (!slab_ptr_) {
       throw std::runtime_error("DELAllocator: Failed to allocate master slab of size " +
                                std::to_string(capacity_) + " bytes");
@@ -208,6 +211,7 @@ private:
   Device &device_;
   stream stream_;
   mutable std::mutex mutex_;
+  dptr slab_dptr_;
   void *slab_ptr_;
   size_t capacity_;
   size_t left_offset_;

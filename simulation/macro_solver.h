@@ -38,11 +38,18 @@ inline bool compare_macros(const MacroNode& m1, const MacroNode& m2) {
 
 inline bool operator<(const MacroNode& m1, const MacroNode& m2) { return compare_macros(m1, m2); }
 
+struct SolverOptions {
+  bool enable_linear = true;
+  bool enable_branching = true;
+  bool enable_joining = true;
+};
+
 class MacroSolver {
 private:
   // core
   Graph& graph_;
   std::ostream* os_;
+  SolverOptions options_;
 
   // generated
   std::map<std::string, MacroNode> macros_;
@@ -152,14 +159,33 @@ private:
 
   std::map<std::string, int> ancestor_distances(const std::string& macro_id) const {
     std::map<std::string, int> distances;
-    std::queue<std::string> pending;
-    pending.push(macro_id);
     distances[macro_id] = 0;
-    while (!pending.empty()) {
-      const std::string current = pending.front();
-      pending.pop();
-      for (const auto& parent : macro_deps_.at(current)) {
-        if (distances.insert({parent, distances.at(current) + 1}).second) pending.push(parent);
+    
+    std::map<std::string, int> in_deg;
+    std::queue<std::string> q;
+    q.push(macro_id);
+    std::set<std::string> visited = {macro_id};
+    
+    while (!q.empty()) {
+      std::string u = q.front();
+      q.pop();
+      for (const auto& parent : macro_deps_.at(u)) {
+        in_deg[parent]++;
+        if (visited.insert(parent).second) {
+          q.push(parent);
+        }
+      }
+    }
+    
+    q.push(macro_id);
+    while (!q.empty()) {
+      std::string u = q.front();
+      q.pop();
+      for (const auto& parent : macro_deps_.at(u)) {
+        distances[parent] = std::max(distances[parent], distances[u] + 1);
+        if (--in_deg[parent] == 0) {
+          q.push(parent);
+        }
       }
     }
     return distances;
@@ -276,9 +302,10 @@ private:
   }
 
 public:
-  MacroSolver(Graph& graph, std::ostream* os = nullptr)
+  MacroSolver(Graph& graph, std::ostream* os = nullptr, SolverOptions options = {})
       : graph_(graph),
-        os_(os) {}
+        os_(os),
+        options_(options) {}
 
   std::vector<std::string> find_forward_order() {
     std::vector<std::string> op_ids;
@@ -287,7 +314,7 @@ public:
     }
 
     auto out_deg = get_out_deg(graph_);
-    auto deps_and_dependents = get_dependencies(graph_);
+    auto deps_and_dependents = get_op_dependencies(graph_);
     auto deps = deps_and_dependents.first;
     auto dependents = deps_and_dependents.second;
 
@@ -374,27 +401,38 @@ public:
       pending.pop_front();
       if (!macros_.contains(current)) continue;
 
-      if (macro_deps_.at(current).size() == 1) {
-        const std::string parent = *macro_deps_.at(current).begin();
-        if (macro_dependents_.at(parent).size() == 1 && macros_.at(current) < macros_.at(parent)) {
-          pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
-          continue;
+      if (options_.enable_linear) {
+        if (macro_deps_.at(current).size() == 1) {
+          const std::string parent = *macro_deps_.at(current).begin();
+          if (macro_dependents_.at(parent).size() == 1 &&
+              macros_.at(current) < macros_.at(parent)) {
+            pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
+            continue;
+          }
         }
       }
 
       if (macro_deps_.at(current).size() > 1) {
-        const std::string prepared = prepare_join_branches(current, next_macro_id);
-        if (prepared != current) {
-          pending.push_front(prepared);
-          continue;
+        std::string prepared = current;
+        if (options_.enable_branching) {
+          prepared = prepare_join_branches(current, next_macro_id);
+          if (prepared != current) {
+            pending.push_front(prepared);
+            continue;
+          }
         }
-        const std::string merged =
-            merge_join_parent(prepared, out_deg, cached_tensors, next_macro_id);
-        if (merged != prepared) pending.push_front(merged);
+
+        if (options_.enable_joining) {
+          const std::string merged =
+              merge_join_parent(prepared, out_deg, cached_tensors, next_macro_id);
+          if (merged != prepared) pending.push_front(merged);
+        }
       }
     }
     if (macros_.contains(virtual_join_id)) {
-      prepare_join_branches(virtual_join_id, next_macro_id);
+      if (options_.enable_branching) {
+        prepare_join_branches(virtual_join_id, next_macro_id);
+      }
       for (const auto& terminal : macro_deps_.at(virtual_join_id)) {
         macro_dependents_.at(terminal).erase(virtual_join_id);
       }
@@ -477,14 +515,16 @@ public:
       in_deg[t->uuid()]++;
     }
 
-    auto deps_and_dependents = get_dependencies(graph_);
+    auto deps_and_dependents = get_op_dependencies(graph_);
     auto deps = deps_and_dependents.second;
     auto dependents = deps_and_dependents.first;
 
     std::set<std::string> cached_tensors;
+    std::map<std::string, int> cache_deg;
     for (auto& [uuid, node] : graph_.op_nodes()) {
       for (auto* t : node.cache()) {
         cached_tensors.insert(t->uuid());
+        cache_deg[t->uuid()]++;
       }
     }
 
@@ -506,6 +546,11 @@ public:
       long long memory_consumes = node.residual_mem();
       for (auto* t : node.outputs()) {
         if (in_deg[t->uuid()] == 1) {
+          memory_consumes += t->size();
+        }
+      }
+      for (auto* t : node.cache()) {
+        if (cache_deg[t->uuid()] == 1) {
           memory_consumes += t->size();
         }
       }
@@ -558,7 +603,7 @@ public:
       pending.pop_front();
       if (!macros_.contains(current)) continue;
 
-      if (macro_deps_.at(current).size() == 1) {
+      if (options_.enable_linear && macro_deps_.at(current).size() == 1) {
         const std::string parent = *macro_deps_.at(current).begin();
         if (macro_dependents_.at(parent).size() == 1 && macros_.at(current) < macros_.at(parent)) {
           pending.push_front(merge_macros(parent, current, next_macro_id, "linear"));
@@ -567,18 +612,26 @@ public:
       }
 
       if (macro_deps_.at(current).size() > 1) {
-        const std::string prepared = prepare_join_branches(current, next_macro_id);
-        if (prepared != current) {
-          pending.push_front(prepared);
-          continue;
+        std::string prepared = current;
+        if (options_.enable_branching) {
+          prepared = prepare_join_branches(current, next_macro_id);
+          if (prepared != current) {
+            pending.push_front(prepared);
+            continue;
+          }
         }
-        const std::string merged =
-            merge_join_parent_backward(prepared, in_deg, cached_tensors, next_macro_id);
-        if (merged != prepared) pending.push_front(merged);
+
+        if (options_.enable_joining) {
+          const std::string merged =
+              merge_join_parent_backward(prepared, in_deg, cached_tensors, next_macro_id);
+          if (merged != prepared) pending.push_front(merged);
+        }
       }
     }
     if (macros_.contains(virtual_join_id)) {
-      prepare_join_branches(virtual_join_id, next_macro_id);
+      if (options_.enable_branching) {
+        prepare_join_branches(virtual_join_id, next_macro_id);
+      }
       for (const auto& terminal : macro_deps_.at(virtual_join_id)) {
         macro_dependents_.at(terminal).erase(virtual_join_id);
       }
@@ -645,3 +698,89 @@ public:
     return final_order;
   }
 };
+
+class RankedSolver : public MacroSolver {
+public:
+  RankedSolver(Graph& graph, std::ostream* os = nullptr)
+      : MacroSolver(graph, os, {false, false, false}) {}
+};
+
+class LinearSolver : public MacroSolver {
+public:
+  LinearSolver(Graph& graph, std::ostream* os = nullptr)
+      : MacroSolver(graph, os, {true, false, false}) {}
+};
+
+class BranchingSolver : public MacroSolver {
+public:
+  BranchingSolver(Graph& graph, std::ostream* os = nullptr)
+      : MacroSolver(graph, os, {true, true, false}) {}
+};
+
+class JoiningSolver : public MacroSolver {
+public:
+  JoiningSolver(Graph& graph, std::ostream* os = nullptr)
+      : MacroSolver(graph, os, {true, false, true}) {}
+};
+
+class FullSolver : public MacroSolver {
+public:
+  FullSolver(Graph& graph, std::ostream* os = nullptr)
+      : MacroSolver(graph, os, {true, true, true}) {}
+};
+
+inline std::vector<std::string> find_fw_macro_candidate_execution_order(
+    Graph& graph, std::ostream* os = nullptr) {
+  MacroSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+inline std::vector<std::string> find_fw_ranked_execution_order(Graph& graph, std::ostream* os) {
+  RankedSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+inline std::vector<std::string> find_fw_linear_execution_order(Graph& graph, std::ostream* os) {
+  LinearSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+inline std::vector<std::string> find_fw_branching_execution_order(Graph& graph, std::ostream* os) {
+  BranchingSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+inline std::vector<std::string> find_fw_joining_execution_order(Graph& graph, std::ostream* os) {
+  JoiningSolver solver(graph, os);
+  return solver.find_forward_order();
+}
+
+inline std::vector<std::string> find_bw_macro_candidate_execution_order(
+    Graph& graph, std::ostream* os = nullptr) {
+  MacroSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+inline std::vector<std::string> find_bw_ranked_execution_order(Graph& graph,
+                                                               std::ostream* os = nullptr) {
+  RankedSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+inline std::vector<std::string> find_bw_linear_execution_order(Graph& graph,
+                                                               std::ostream* os = nullptr) {
+  LinearSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+inline std::vector<std::string> find_bw_branching_execution_order(Graph& graph,
+                                                                  std::ostream* os = nullptr) {
+  BranchingSolver solver(graph, os);
+  return solver.find_backward_order();
+}
+
+inline std::vector<std::string> find_bw_joining_execution_order(Graph& graph,
+                                                                std::ostream* os = nullptr) {
+  JoiningSolver solver(graph, os);
+  return solver.find_backward_order();
+}

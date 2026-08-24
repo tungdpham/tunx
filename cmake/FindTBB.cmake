@@ -4,7 +4,7 @@ set(TBB_TARGETS TBB::tbb TBB::tbbmalloc)
 
 foreach(target IN LISTS TBB_TARGETS)
     if(TARGET ${target})
-        set_property(TARGET ${target} PROPERTY MAP_IMPORTED_CONFIG_DEBUG Release)
+        set_property(TARGET ${target} PROPERTY MAP_IMPORTED_CONFIG_DEBUG NONE Release)
     endif()
 endforeach()
 

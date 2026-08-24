@@ -66,18 +66,17 @@ public:
 };
 
 class PackedAllocator : public IAllocator, std::enable_shared_from_this<PackedAllocator> {
-  PackedAllocator(IAllocator* backend_alloc, size_t peak_memory,
-                  const std::map<std::string, size_t>& offsets);
+  PackedAllocator(size_t peak_memory, const std::map<std::string, size_t>& offsets);
 
 public:
-  static std::shared_ptr<PackedAllocator> create(IAllocator* backend_alloc, size_t peak_memory,
+  static std::shared_ptr<PackedAllocator> create(size_t peak_memory,
                                                  const std::map<std::string, size_t>& offsets) {
-    return std::shared_ptr<PackedAllocator>(
-        new PackedAllocator(backend_alloc, peak_memory, offsets));
+    return std::shared_ptr<PackedAllocator>(new PackedAllocator(peak_memory, offsets));
   }
 
   ~PackedAllocator() override;
 
+  void set_backend_allocator(IAllocator* allocator);
   void set_current_edge(const std::string& uid);
 
   dptr allocate(size_t size) override;
@@ -90,6 +89,7 @@ public:
   size_t add_allocation_hook(std::function<void(size_t)> hook) override;
   bool remove_allocation_hook(size_t hook_id) override;
   Device& device() const override;
+  size_t peak_memory() const { return peak_memory_; }
 
 private:
   IAllocator* backend_alloc_;
@@ -98,12 +98,14 @@ private:
 
   std::string current_edge_uid_;
   int current_alloc_index_ = 0;
-  size_t current_allocated = 0;
+  size_t current_allocated_ = 0;
 
   dptr create_dptr(size_t offset, size_t size);
 
   dptr base_dptr_;
   bool is_ensured_ = false;
+  size_t next_hook_id_ = 1;
+  std::map<size_t, std::function<void(size_t)>> hooks_;
 };
 
 }  // namespace tunx

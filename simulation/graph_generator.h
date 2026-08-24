@@ -28,9 +28,19 @@ inline size_t random_ws_size() {
   return 2048;
 }
 
+inline std::vector<ActivationNode*> random_cache(const std::vector<ActivationNode*>& inputs) {
+  std::vector<ActivationNode*> cache;
+  for (auto* input : inputs) {
+    if (rand() % 2 == 0) {
+      cache.push_back(input);
+    }
+  }
+  return cache;
+}
+
 inline ActivationNode* build_random_fork_join_dag(Graph& g, ActivationNode* input, int depth,
-                                                  int& node_counter) {
-  if (depth == 0) {
+                                                  int& node_counter, int max_ops = -1) {
+  if (depth == 0 || (max_ops > 0 && static_cast<int>(g.op_nodes().size()) >= max_ops)) {
     return input;
   }
 
@@ -41,50 +51,50 @@ inline ActivationNode* build_random_fork_join_dag(Graph& g, ActivationNode* inpu
   if (structure_type == 0) {
     // Sequential
     auto act = g.add_act(prefix + "_seq", random_act_size());
-    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {act}, {}, random_res_size());
-    return build_random_fork_join_dag(g, act, depth - 1, node_counter);
+    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {act}, random_cache({input}), random_res_size());
+    return build_random_fork_join_dag(g, act, depth - 1, node_counter, max_ops);
   } else if (structure_type == 1) {
     // Fork_join
     auto left_act = g.add_act(prefix + "_left", random_act_size());
-    g.add_op(prefix + "_left_conv", random_ws_size(), {input}, {left_act}, {}, random_res_size());
-    auto left_out = build_random_fork_join_dag(g, left_act, depth - 1, node_counter);
+    g.add_op(prefix + "_left_conv", random_ws_size(), {input}, {left_act}, random_cache({input}), random_res_size());
+    auto left_out = build_random_fork_join_dag(g, left_act, depth - 1, node_counter, max_ops);
 
     auto right_act = g.add_act(prefix + "_right", random_act_size());
-    g.add_op(prefix + "_right_conv", random_ws_size(), {input}, {right_act}, {}, random_res_size());
-    auto right_out = build_random_fork_join_dag(g, right_act, depth - 1, node_counter);
+    g.add_op(prefix + "_right_conv", random_ws_size(), {input}, {right_act}, random_cache({input}), random_res_size());
+    auto right_out = build_random_fork_join_dag(g, right_act, depth - 1, node_counter, max_ops);
 
     auto merge_act = g.add_act(prefix + "_merge", random_act_size());
-    g.add_op(prefix + "_add", random_ws_size(), {left_out, right_out}, {merge_act}, {},
-             random_res_size());
+    g.add_op(prefix + "_add", random_ws_size(), {left_out, right_out}, {merge_act},
+             random_cache({left_out, right_out}), random_res_size());
 
     return merge_act;
   } else {
     // Residual (skip connection)
     auto main_act = g.add_act(prefix + "_main", random_act_size());
-    g.add_op(prefix + "_main_conv", random_ws_size(), {input}, {main_act}, {}, random_res_size());
-    auto main_out = build_random_fork_join_dag(g, main_act, depth - 1, node_counter);
+    g.add_op(prefix + "_main_conv", random_ws_size(), {input}, {main_act}, random_cache({input}), random_res_size());
+    auto main_out = build_random_fork_join_dag(g, main_act, depth - 1, node_counter, max_ops);
 
     auto merge_act = g.add_act(prefix + "_res_add", random_act_size());
-    g.add_op(prefix + "_res_add", random_ws_size(), {main_out, input}, {merge_act}, {},
-             random_res_size());
+    g.add_op(prefix + "_res_add", random_ws_size(), {main_out, input}, {merge_act},
+             random_cache({main_out, input}), random_res_size());
 
     return merge_act;
   }
 }
 
-inline Graph random_fork_join_graph(int depth) {
+inline Graph random_fork_join_graph(int depth, int max_ops = -1) {
   Graph g;
   int node_counter = 0;
   auto input = g.add_act("input", 10000);
   g.set_inputs({input});
-  auto output = build_random_fork_join_dag(g, input, depth, node_counter);
+  auto output = build_random_fork_join_dag(g, input, depth, node_counter, max_ops);
   g.set_outputs({output});
   return g;
 }
 
-inline ActivationNode* build_random_static_fork_join_dag(Graph& g, ActivationNode* input, int depth,
-                                                         int& node_counter) {
-  if (depth == 0) {
+inline ActivationNode* build_random_order_invariant_fork_join_dag(Graph& g, ActivationNode* input,
+                                                                  int depth, int& node_counter, int max_ops = -1) {
+  if (depth == 0 || (max_ops > 0 && static_cast<int>(g.op_nodes().size()) >= max_ops)) {
     return input;
   }
 
@@ -93,48 +103,51 @@ inline ActivationNode* build_random_static_fork_join_dag(Graph& g, ActivationNod
 
   if (structure_type == 0) {
     auto act = g.add_act(prefix + "_seq", random_act_size());
-    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {act}, {}, random_res_size());
-    return build_random_static_fork_join_dag(g, act, depth - 1, node_counter);
+    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {act}, random_cache({input}), random_res_size());
+    return build_random_order_invariant_fork_join_dag(g, act, depth - 1, node_counter, max_ops);
   }
 
   if (structure_type == 1) {
     auto left_input = g.add_act(prefix + "_left_input", random_act_size());
     auto right_input = g.add_act(prefix + "_right_input", random_act_size());
-    g.add_op(prefix + "_split", random_ws_size(), {input}, {left_input, right_input}, {},
-             random_res_size());
+    g.add_op(prefix + "_split", random_ws_size(), {input}, {left_input, right_input},
+             random_cache({input}), random_res_size());
 
-    auto left_out = build_random_static_fork_join_dag(g, left_input, depth - 1, node_counter);
-    auto right_out = build_random_static_fork_join_dag(g, right_input, depth - 1, node_counter);
+    auto left_out =
+        build_random_order_invariant_fork_join_dag(g, left_input, depth - 1, node_counter, max_ops);
+    auto right_out =
+        build_random_order_invariant_fork_join_dag(g, right_input, depth - 1, node_counter, max_ops);
 
     auto merge_act = g.add_act(prefix + "_merge", random_act_size());
-    g.add_op(prefix + "_add", random_ws_size(), {left_out, right_out}, {merge_act}, {},
-             random_res_size());
+    g.add_op(prefix + "_add", random_ws_size(), {left_out, right_out}, {merge_act},
+             random_cache({left_out, right_out}), random_res_size());
     return merge_act;
   }
 
   auto main_input = g.add_act(prefix + "_main_input", random_act_size());
   auto skip_input = g.add_act(prefix + "_skip_input", random_act_size());
-  g.add_op(prefix + "_split", random_ws_size(), {input}, {main_input, skip_input}, {},
-           random_res_size());
+  g.add_op(prefix + "_split", random_ws_size(), {input}, {main_input, skip_input},
+           random_cache({input}), random_res_size());
 
-  auto main_out = build_random_static_fork_join_dag(g, main_input, depth - 1, node_counter);
+  auto main_out =
+      build_random_order_invariant_fork_join_dag(g, main_input, depth - 1, node_counter, max_ops);
   auto merge_act = g.add_act(prefix + "_res_merge", random_act_size());
-  g.add_op(prefix + "_res_add", random_ws_size(), {main_out, skip_input}, {merge_act}, {},
-           random_res_size());
+  g.add_op(prefix + "_res_add", random_ws_size(), {main_out, skip_input}, {merge_act},
+           random_cache({main_out, skip_input}), random_res_size());
   return merge_act;
 }
 
-inline Graph random_static_fork_join_graph(int depth) {
+inline Graph random_order_invariant_fork_join_graph(int depth, int max_ops = -1) {
   Graph g;
   int node_counter = 0;
   auto input = g.add_act("input", random_act_size());
   g.set_inputs({input});
-  auto output = build_random_static_fork_join_dag(g, input, depth, node_counter);
+  auto output = build_random_order_invariant_fork_join_dag(g, input, depth, node_counter, max_ops);
   g.set_outputs({output});
   return g;
 }
 
-inline Graph random_m_sequences_graph(int m, int length) {
+inline Graph random_m_sequences_graph(int m, int length, int max_ops = -1) {
   Graph g;
   int node_counter = 0;
   for (int i = 0; i < m; ++i) {
@@ -145,10 +158,11 @@ inline Graph random_m_sequences_graph(int m, int length) {
 
     ActivationNode* curr = input;
     for (int j = 0; j < length; ++j) {
+      if (max_ops > 0 && static_cast<int>(g.op_nodes().size()) >= max_ops) break;
       std::string prefix = "seq_" + std::to_string(i) + "_" + std::to_string(j) + "_" +
                            std::to_string(node_counter++);
       auto next_act = g.add_act(prefix, random_act_size());
-      g.add_op(prefix + "_op", random_ws_size(), {curr}, {next_act}, {}, random_res_size());
+      g.add_op(prefix + "_op", random_ws_size(), {curr}, {next_act}, random_cache({curr}), random_res_size());
       curr = next_act;
     }
     auto current_outputs = g.outputs();
@@ -159,8 +173,8 @@ inline Graph random_m_sequences_graph(int m, int length) {
 }
 
 inline void build_random_branching_dag(Graph& g, ActivationNode* input, int depth,
-                                       int& node_counter) {
-  if (depth == 0) {
+                                       int& node_counter, int max_ops = -1) {
+  if (depth == 0 || (max_ops > 0 && static_cast<int>(g.op_nodes().size()) >= max_ops)) {
     auto outputs = g.outputs();
     outputs.push_back(input);
     g.set_outputs(outputs);
@@ -172,31 +186,31 @@ inline void build_random_branching_dag(Graph& g, ActivationNode* input, int dept
 
   if (is_seq) {
     auto next_act = g.add_act(prefix + "_seq", random_act_size());
-    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {next_act}, {}, random_res_size());
-    build_random_branching_dag(g, next_act, depth - 1, node_counter);
+    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {next_act}, random_cache({input}), random_res_size());
+    build_random_branching_dag(g, next_act, depth - 1, node_counter, max_ops);
   } else {
     int num_branches = rand() % 2 + 2;
     for (int i = 0; i < num_branches; ++i) {
       auto next_act = g.add_act(prefix + "_branch" + std::to_string(i), random_act_size());
-      g.add_op(prefix + "_conv" + std::to_string(i), random_ws_size(), {input}, {next_act}, {},
-               random_res_size());
-      build_random_branching_dag(g, next_act, depth - 1, node_counter);
+      g.add_op(prefix + "_conv" + std::to_string(i), random_ws_size(), {input}, {next_act},
+               random_cache({input}), random_res_size());
+      build_random_branching_dag(g, next_act, depth - 1, node_counter, max_ops);
     }
   }
 }
 
-inline Graph random_branching_graph(int depth) {
+inline Graph random_branching_graph(int depth, int max_ops = -1) {
   Graph g;
   int node_counter = 0;
   auto input = g.add_act("input", random_act_size());
   g.set_inputs({input});
-  build_random_branching_dag(g, input, depth, node_counter);
+  build_random_branching_dag(g, input, depth, node_counter, max_ops);
   return g;
 }
 
-inline void build_random_static_branching_dag(Graph& g, ActivationNode* input, int depth,
-                                              int& node_counter) {
-  if (depth == 0) {
+inline void build_random_order_invariant_branching_dag(Graph& g, ActivationNode* input, int depth,
+                                                       int& node_counter, int max_ops = -1) {
+  if (depth == 0 || (max_ops > 0 && static_cast<int>(g.op_nodes().size()) >= max_ops)) {
     auto outputs = g.outputs();
     outputs.push_back(input);
     g.set_outputs(outputs);
@@ -206,8 +220,8 @@ inline void build_random_static_branching_dag(Graph& g, ActivationNode* input, i
   std::string prefix = "sb" + std::to_string(depth) + "_" + std::to_string(node_counter++);
   if (rand() % 3 > 0) {
     auto next_act = g.add_act(prefix + "_seq", random_act_size());
-    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {next_act}, {}, random_res_size());
-    build_random_static_branching_dag(g, next_act, depth - 1, node_counter);
+    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {next_act}, random_cache({input}), random_res_size());
+    build_random_order_invariant_branching_dag(g, next_act, depth - 1, node_counter, max_ops);
     return;
   }
 
@@ -218,24 +232,24 @@ inline void build_random_static_branching_dag(Graph& g, ActivationNode* input, i
     branch_inputs.push_back(
         g.add_act(prefix + "_branch_input" + std::to_string(i), random_act_size()));
   }
-  g.add_op(prefix + "_split", random_ws_size(), {input}, branch_inputs);
+  g.add_op(prefix + "_split", random_ws_size(), {input}, branch_inputs, random_cache({input}));
 
   for (auto* branch_input : branch_inputs) {
-    build_random_static_branching_dag(g, branch_input, depth - 1, node_counter);
+    build_random_order_invariant_branching_dag(g, branch_input, depth - 1, node_counter, max_ops);
   }
 }
 
-inline Graph random_static_branching_graph(int depth) {
+inline Graph random_order_invariant_branching_graph(int depth, int max_ops = -1) {
   Graph g;
   int node_counter = 0;
   auto input = g.add_act("input", random_act_size());
   g.set_inputs({input});
-  build_random_static_branching_dag(g, input, depth, node_counter);
+  build_random_order_invariant_branching_dag(g, input, depth, node_counter, max_ops);
   return g;
 }
 
-inline ActivationNode* build_random_joining_dag(Graph& g, int depth, int& node_counter) {
-  if (depth == 0) {
+inline ActivationNode* build_random_joining_dag(Graph& g, int depth, int& node_counter, int max_ops = -1) {
+  if (depth == 0 || (max_ops > 0 && static_cast<int>(g.op_nodes().size()) >= max_ops)) {
     std::string prefix = "j" + std::to_string(depth) + "_" + std::to_string(node_counter++);
     auto input = g.add_act(prefix + "_input", random_act_size());
     auto current_inputs = g.inputs();
@@ -248,26 +262,26 @@ inline ActivationNode* build_random_joining_dag(Graph& g, int depth, int& node_c
   bool is_seq = (rand() % 3 > 0);
 
   if (is_seq) {
-    auto input = build_random_joining_dag(g, depth - 1, node_counter);
+    auto input = build_random_joining_dag(g, depth - 1, node_counter, max_ops);
     auto output = g.add_act(prefix + "_seq_out", random_act_size());
-    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {output}, {}, random_res_size());
+    g.add_op(prefix + "_seq_conv", random_ws_size(), {input}, {output}, random_cache({input}), random_res_size());
     return output;
   } else {
     int num_joining = rand() % 2 + 2;
     std::vector<ActivationNode*> inputs;
     for (int i = 0; i < num_joining; ++i) {
-      inputs.push_back(build_random_joining_dag(g, depth - 1, node_counter));
+      inputs.push_back(build_random_joining_dag(g, depth - 1, node_counter, max_ops));
     }
     auto output = g.add_act(prefix + "_merge", random_act_size());
-    g.add_op(prefix + "_add", random_ws_size(), inputs, {output});
+    g.add_op(prefix + "_add", random_ws_size(), inputs, {output}, random_cache(inputs));
     return output;
   }
 }
 
-inline Graph random_joining_graph(int depth) {
+inline Graph random_joining_graph(int depth, int max_ops = -1) {
   Graph g;
   int node_counter = 0;
-  auto output = build_random_joining_dag(g, depth, node_counter);
+  auto output = build_random_joining_dag(g, depth, node_counter, max_ops);
   g.set_outputs({output});
   return g;
 }
@@ -416,5 +430,160 @@ inline Graph tunx_v1_graph() {
   g.set_inputs({a_input});
   g.set_outputs({a_output});
 
+  return g;
+}
+
+inline Graph sample_failure_graph() {
+  Graph g;
+
+  auto* input = g.add_act("input", 1280);
+  auto* b3_0_seq = g.add_act("b3_0_seq", 1280);
+  auto* b2_1_branch0 = g.add_act("b2_1_branch0", 5120);
+  auto* b2_1_branch1 = g.add_act("b2_1_branch1", 2560);
+  auto* b1_2_branch0 = g.add_act("b1_2_branch0", 5120);
+  auto* b1_2_branch1 = g.add_act("b1_2_branch1", 2560);
+  auto* b1_2_branch2 = g.add_act("b1_2_branch2", 2560);
+  auto* b1_3_seq = g.add_act("b1_3_seq", 1280);
+
+  g.add_op("b3_0_seq_conv", 2048, {input}, {b3_0_seq}, {}, 1024);
+
+  g.add_op("b2_1_conv0", 256, {b3_0_seq}, {b2_1_branch0}, {}, 4096);
+  g.add_op("b2_1_conv1", 2048, {b3_0_seq}, {b2_1_branch1}, {}, 1024);
+
+  g.add_op("b1_2_conv0", 512, {b2_1_branch0}, {b1_2_branch0}, {}, 4096);
+  g.add_op("b1_2_conv1", 1024, {b2_1_branch0}, {b1_2_branch1}, {}, 1024);
+  g.add_op("b1_2_conv2", 512, {b2_1_branch0}, {b1_2_branch2}, {}, 1024);
+
+  g.add_op("b1_3_seq_conv", 512, {b2_1_branch1}, {b1_3_seq}, {}, 512);
+
+  g.set_inputs({input});
+  g.set_outputs({b1_2_branch0, b1_2_branch1, b1_2_branch2, b1_3_seq});
+
+  return g;
+}
+inline Graph sample_failure_graph_2() {
+  Graph g;
+
+  auto* input = g.add_act("input", 5120);
+  auto* b3_0_seq = g.add_act("b3_0_seq", 5120);
+  auto* b2_1_branch0 = g.add_act("b2_1_branch0", 1280);
+  auto* b2_1_branch1 = g.add_act("b2_1_branch1", 1280);
+  auto* b2_1_branch2 = g.add_act("b2_1_branch2", 10240);
+  auto* b1_2_seq = g.add_act("b1_2_seq", 5120);
+  auto* b1_3_seq = g.add_act("b1_3_seq", 5120);
+  auto* b1_4_seq = g.add_act("b1_4_seq", 5120);
+
+  g.add_op("b3_0_seq_conv", 2048, {input}, {b3_0_seq}, {}, 1024);
+
+  g.add_op("b2_1_conv0", 256, {b3_0_seq}, {b2_1_branch0}, {}, 512);
+  g.add_op("b2_1_conv1", 1024, {b3_0_seq}, {b2_1_branch1}, {}, 2048);
+  g.add_op("b2_1_conv2", 512, {b3_0_seq}, {b2_1_branch2}, {}, 512);
+
+  g.add_op("b1_2_seq_conv", 1024, {b2_1_branch0}, {b1_2_seq}, {}, 512);
+  g.add_op("b1_3_seq_conv", 2048, {b2_1_branch1}, {b1_3_seq}, {}, 1024);
+  g.add_op("b1_4_seq_conv", 256, {b2_1_branch2}, {b1_4_seq}, {}, 1024);
+
+  g.set_inputs({input});
+  g.set_outputs({b1_2_seq, b1_3_seq, b1_4_seq});
+
+  return g;
+}
+
+inline Graph sample_failure_graph_3() {
+  Graph g;
+  auto* input = g.add_act("input", 2560);
+  auto* b3_0_branch0 = g.add_act("b3_0_branch0", 1280);
+  auto* b3_0_branch1 = g.add_act("b3_0_branch1", 1280);
+  auto* b2_1_branch0 = g.add_act("b2_1_branch0", 10240);
+  auto* b2_1_branch1 = g.add_act("b2_1_branch1", 10240);
+  auto* b2_1_branch2 = g.add_act("b2_1_branch2", 2560);
+  auto* b1_2_seq = g.add_act("b1_2_seq", 10240);
+  auto* b1_3_branch0 = g.add_act("b1_3_branch0", 10240);
+  auto* b1_3_branch1 = g.add_act("b1_3_branch1", 1280);
+  auto* b1_4_seq = g.add_act("b1_4_seq", 2560);
+  auto* b2_5_seq = g.add_act("b2_5_seq", 10240);
+  auto* b1_6_seq = g.add_act("b1_6_seq", 1280);
+
+  g.add_op("b3_0_conv0", 256, {input}, {b3_0_branch0}, {}, 4096);
+  g.add_op("b3_0_conv1", 2048, {input}, {b3_0_branch1}, {}, 2048);
+  g.add_op("b2_1_conv0", 256, {b3_0_branch0}, {b2_1_branch0}, {}, 512);
+  g.add_op("b1_2_seq_conv", 256, {b2_1_branch0}, {b1_2_seq}, {}, 4096);
+
+  g.add_op("b2_1_conv1", 256, {b3_0_branch0}, {b2_1_branch1}, {}, 512);
+  g.add_op("b1_3_conv0", 256, {b2_1_branch1}, {b1_3_branch0}, {}, 512);
+  g.add_op("b1_3_conv1", 512, {b2_1_branch1}, {b1_3_branch1}, {}, 1024);
+
+  g.add_op("b2_1_conv2", 512, {b3_0_branch0}, {b2_1_branch2}, {}, 4096);
+  g.add_op("b1_4_seq_conv", 256, {b2_1_branch2}, {b1_4_seq}, {}, 512);
+
+  g.add_op("b2_5_seq_conv", 2048, {b3_0_branch1}, {b2_5_seq}, {}, 512);
+  g.add_op("b1_6_seq_conv", 1024, {b2_5_seq}, {b1_6_seq}, {}, 4096);
+
+  g.set_inputs({input});
+  g.set_outputs({b1_2_seq, b1_3_branch0, b1_3_branch1, b1_4_seq, b1_6_seq});
+  return g;
+}
+
+inline Graph sample_failure_graph_4() {
+  Graph g;
+  auto* input = g.add_act("input", 5120);
+
+  auto* b3_0_seq = g.add_act("b3_0_seq", 2560);
+  g.add_op("b3_0_seq_conv", 512, {input}, {b3_0_seq}, {}, 1024);
+
+  auto* b2_1_branch0 = g.add_act("b2_1_branch0", 10240);
+  g.add_op("b2_1_conv0", 2048, {b3_0_seq}, {b2_1_branch0}, {}, 2048);
+
+  auto* b2_1_branch1 = g.add_act("b2_1_branch1", 1280);
+  g.add_op("b2_1_conv1", 512, {b3_0_seq}, {b2_1_branch1}, {}, 1024);
+
+  auto* b2_1_branch2 = g.add_act("b2_1_branch2", 1280);
+  g.add_op("b2_1_conv2", 2048, {b3_0_seq}, {b2_1_branch2}, {}, 4096);
+
+  auto* b1_2_seq = g.add_act("b1_2_seq", 10240);
+  g.add_op("b1_2_seq_conv", 1024, {b2_1_branch0}, {b1_2_seq}, {}, 2048);
+
+  auto* b1_3_seq = g.add_act("b1_3_seq", 2560);
+  g.add_op("b1_3_seq_conv", 256, {b2_1_branch1}, {b1_3_seq}, {}, 1024);
+
+  auto* b1_4_seq = g.add_act("b1_4_seq", 1280);
+  g.add_op("b1_4_seq_conv", 256, {b2_1_branch2}, {b1_4_seq}, {}, 1024);
+
+  g.set_inputs({input});
+  g.set_outputs({b1_2_seq, b1_3_seq, b1_4_seq});
+  return g;
+}
+
+inline Graph sample_failure_graph_5() {
+  Graph g;
+
+  auto* input = g.add_act("input", 1280);
+  auto* b3_0_branch0 = g.add_act("b3_0_branch0", 10240);
+  auto* b3_0_branch1 = g.add_act("b3_0_branch1", 10240);
+  auto* b2_1_branch0 = g.add_act("b2_1_branch0", 2560);
+  auto* b2_1_branch1 = g.add_act("b2_1_branch1", 2560);
+  auto* b1_2_seq = g.add_act("b1_2_seq", 5120);
+  auto* b1_3_seq = g.add_act("b1_3_seq", 1280);
+  auto* b2_4_seq = g.add_act("b2_4_seq", 5120);
+  auto* b1_5_seq = g.add_act("b1_5_seq", 1280);
+
+  // input branches into b3_0_branch0 and b3_0_branch1
+  g.add_op("b3_0_conv0", 512, {input}, {b3_0_branch0}, {}, 2048);
+  g.add_op("b3_0_conv1", 1024, {input}, {b3_0_branch1}, {}, 1024);
+
+  // b3_0_branch0 fans out to two branches
+  g.add_op("b2_1_conv0", 2048, {b3_0_branch0}, {b2_1_branch0}, {}, 4096);
+  g.add_op("b2_1_conv1", 256, {b3_0_branch0}, {b2_1_branch1}, {}, 4096);
+
+  // each branch continues sequentially
+  g.add_op("b1_2_seq_conv", 512, {b2_1_branch0}, {b1_2_seq}, {}, 512);
+  g.add_op("b1_3_seq_conv", 512, {b2_1_branch1}, {b1_3_seq}, {}, 1024);
+
+  // b3_0_branch1 continues sequentially
+  g.add_op("b2_4_seq_conv", 1024, {b3_0_branch1}, {b2_4_seq}, {}, 4096);
+  g.add_op("b1_5_seq_conv", 1024, {b2_4_seq}, {b1_5_seq}, {}, 1024);
+
+  g.set_inputs({input});
+  g.set_outputs({b1_2_seq, b1_3_seq, b1_5_seq});
   return g;
 }

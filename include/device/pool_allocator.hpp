@@ -10,6 +10,7 @@
 #include <map>
 #include <mutex>
 
+#include "device/device_allocator.hpp"
 #include "device/dptr.hpp"
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
@@ -55,7 +56,9 @@ public:
       ptr = it->second;
       free_blocks_.erase(it);
     } else {
-      ptr = device_.allocate_aligned_memory(size, DEFAULT_ALIGNMENT);
+      dptr alloc = tunx::DeviceAllocator::instance(device_, stream_).allocate(size);
+      ptr = alloc.get();
+      backend_allocs_.emplace(ptr, alloc);
     }
     set_allocated(allocated_ + size);
 
@@ -67,7 +70,7 @@ public:
   void clear() override {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto &pair : free_blocks_) {
-      device_.deallocate_aligned_memory(pair.second);
+      backend_allocs_.erase(pair.second);
     }
     free_blocks_.clear();
   }
@@ -78,17 +81,19 @@ public:
     if (it != free_blocks_.end()) {
       return;
     }
-    void *ptr = device_.allocate_aligned_memory(size, DEFAULT_ALIGNMENT);
+    dptr alloc = tunx::DeviceAllocator::instance(device_, stream_).allocate(size);
+    void *ptr = alloc.get();
+    backend_allocs_.emplace(ptr, alloc);
     free_blocks_.emplace(size, ptr);
   }
 
   size_t reserved() const override {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t total = 0;
-    for (const auto &pair : free_blocks_) {
-      total += pair.first;
+    for (const auto &pair : backend_allocs_) {
+      total += pair.second.capacity();
     }
-    return total + allocated_;
+    return total;
   }
 
   size_t allocated() const override {
@@ -138,18 +143,28 @@ public:
     return total;
   }
 
+  size_t peak_allocated() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return peak_allocated_;
+  }
+
   Device &device() const override { return device_; }
 
 private:
+  std::map<void *, dptr> backend_allocs_;
   std::multimap<size_t, void *> free_blocks_;
   Device &device_;
   stream stream_;
   mutable std::mutex mutex_;
   size_t allocated_ = 0;
+  size_t peak_allocated_ = 0;
   std::vector<std::function<void(size_t)>> allocation_hooks_;
 
   void set_allocated(size_t new_total) {
     allocated_ = new_total;
+    if (allocated_ > peak_allocated_) {
+      peak_allocated_ = allocated_;
+    }
     for (auto &hook : allocation_hooks_) {
       hook(allocated_);
     }
@@ -158,7 +173,12 @@ private:
   void reclaim(void *ptr, size_t size) {
     std::lock_guard<std::mutex> lock(mutex_);
     set_allocated(allocated_ - size);
-    free_blocks_.emplace(size, ptr);
+    auto it = backend_allocs_.find(ptr);
+    if (it != backend_allocs_.end()) {
+      free_blocks_.emplace(it->second.capacity(), ptr);
+    } else {
+      free_blocks_.emplace(size, ptr);
+    }
   }
 };
 

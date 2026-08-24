@@ -20,12 +20,15 @@
 #include <iostream>
 #include <memory>
 
+#include "common/csv_logger.hpp"
 #include "data_loading/batch_prefetcher.hpp"
+#include "device/iallocator.hpp"
 #include "device/pool_allocator.hpp"
 #include "device/stream.hpp"
 #include "nn/edge_profile.hpp"
 #include "nn/execution_plan.hpp"
 #include "nn/graph_executor.hpp"
+#include "nn/macro_solver.hpp"
 #include "nn/metrics_computer.hpp"
 #include "nn/metrics_logger.hpp"
 #include "nn/tensor_bundle.hpp"
@@ -83,114 +86,167 @@ static void log_edge_profiles(const std::map<Edge, EdgeProfile> &profiles,
 
 static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inputs,
                                      std::unique_ptr<CsvLogger> &csv_logger) {
-  ExecutionPlan naive_plan;
-  naive_plan.order = executor.graph().edges();
-  auto naive_stats = executor.profile_forward_plan(inputs, naive_plan);
-
-  std::ofstream debug_stream("debug_bfd_solver.txt");
-
-  auto &built_plan = executor.build_plans(inputs);
-  auto &bfd_plan = built_plan.forward_plan;
-  auto bfd_stats = executor.profile_forward_plan(inputs, bfd_plan);
-
   fmt::print("\n{:=^80}\n", " Execution Plan Stats ");
-  fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
-  fmt::print("Naive Path: ");
-  for (size_t i = 0; i < naive_plan.order.size(); ++i) {
-    fmt::print("{}", naive_plan.order[i]->layer()->name());
-    if (i != naive_plan.order.size() - 1) fmt::print(" -> ");
-  }
-  fmt::print("\n\n");
 
-  fmt::print("BFD Order Peak Memory: {} bytes\n", bfd_stats.peak_mem);
-  fmt::print("BFD Path: ");
-  for (size_t i = 0; i < bfd_plan.order.size(); ++i) {
-    fmt::print("{}", bfd_plan.order[i]->layer()->name());
-    if (i != bfd_plan.order.size() - 1) fmt::print(" -> ");
-  }
-  fmt::print("\n");
+  auto profile_solver = [&](const std::string &name, SolverOptions opts) {
+    auto &built_plan = executor.build_plans(inputs, opts);
+    auto &macro_plan = built_plan.forward_plan;
+    auto macro_stats = executor.profile_forward_plan(inputs, macro_plan);
+
+    fmt::print("{} Order Peak Memory: {} bytes\n", name, macro_stats.peak_mem);
+    fmt::print("{} Path: ", name);
+    for (size_t i = 0; i < macro_plan.order.size(); ++i) {
+      fmt::print("{}", macro_plan.order[i]->layer()->name());
+      if (i != macro_plan.order.size() - 1) fmt::print(" -> ");
+    }
+    fmt::print("\n\n");
+
+    if (csv_logger) {
+      for (size_t i = 0; i < macro_stats.edge_stats.size(); ++i) {
+        const auto &s = macro_stats.edge_stats[i];
+        std::unordered_map<std::string, std::string> row = {
+            {"plan", name},
+            {"step", std::to_string(i)},
+            {"layer_name", s.layer_name},
+            {"allocated_mem", std::to_string(s.allocated_mem)},
+            {"peak_mem", std::to_string(s.peak_mem)},
+        };
+        csv_logger->log(row);
+      }
+    }
+  };
+
+  profile_solver("Naive", {true, false, false, false});
+  profile_solver("Ranked", {false, false, false, false});
+  profile_solver("Linear", {false, true, false, false});
+  profile_solver("Branch", {false, true, true, false});
+  profile_solver("Join", {false, true, false, true});
+  profile_solver("Full Solver", {false, true, true, true});
+
   fmt::print("{:=^80}\n\n", "");
-
-  if (csv_logger) {
-    for (size_t i = 0; i < naive_stats.edge_stats.size(); ++i) {
-      const auto &s = naive_stats.edge_stats[i];
-      std::unordered_map<std::string, std::string> row = {
-          {"plan", "naive"},
-          {"step", std::to_string(i)},
-          {"layer_name", s.layer_name},
-          {"allocated_mem", std::to_string(s.allocated_mem)},
-          {"peak_mem", std::to_string(s.peak_mem)},
-      };
-      csv_logger->log(row);
-    }
-    for (size_t i = 0; i < bfd_stats.edge_stats.size(); ++i) {
-      const auto &s = bfd_stats.edge_stats[i];
-      std::unordered_map<std::string, std::string> row = {
-          {"plan", "bfd"},
-          {"step", std::to_string(i)},
-          {"layer_name", s.layer_name},
-          {"allocated_mem", std::to_string(s.allocated_mem)},
-          {"peak_mem", std::to_string(s.peak_mem)},
-      };
-      csv_logger->log(row);
-    }
-  }
 }
 
 static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBundle &inputs,
                                               std::unique_ptr<CsvLogger> &csv_logger) {
-  ExecutionPlan naive_plan;
-  for (auto it = executor.graph().edges().rbegin(); it != executor.graph().edges().rend(); ++it) {
-    naive_plan.order.push_back(*it);
-  }
-
-  auto naive_stats = executor.profile_backward_plan(inputs, naive_plan);
-
-  auto &built_plan = executor.build_plans(inputs);
-  auto &bfd_plan = built_plan.backward_plan;
-  auto bfd_stats = executor.profile_backward_plan(inputs, bfd_plan);
-
   fmt::print("\n{:=^80}\n", " Backward Execution Plan Stats ");
-  fmt::print("Naive Order Peak Memory: {} bytes\n", naive_stats.peak_mem);
-  fmt::print("Naive Path: ");
-  for (size_t i = 0; i < naive_plan.order.size(); ++i) {
-    fmt::print("{}", naive_plan.order[i]->layer()->name());
-    if (i != naive_plan.order.size() - 1) fmt::print(" -> ");
-  }
-  fmt::print("\n\n");
 
-  fmt::print("BFD Order Peak Memory: {} bytes\n", bfd_stats.peak_mem);
-  fmt::print("BFD Path: ");
-  for (size_t i = 0; i < bfd_plan.order.size(); ++i) {
-    fmt::print("{}", bfd_plan.order[i]->layer()->name());
-    if (i != bfd_plan.order.size() - 1) fmt::print(" -> ");
-  }
-  fmt::print("\n");
+  auto profile_solver = [&](const std::string &name, SolverOptions opts) {
+    auto &built_plan = executor.build_plans(inputs, opts);
+    auto &macro_plan = built_plan.backward_plan;
+    auto macro_stats = executor.profile_backward_plan(inputs, built_plan.forward_plan, macro_plan);
+
+    fmt::print("{} Order Peak Memory: {} bytes\n", name, macro_stats.peak_mem);
+    fmt::print("{} Path: ", name);
+    for (size_t i = 0; i < macro_plan.order.size(); ++i) {
+      fmt::print("{}", macro_plan.order[i]->layer()->name());
+      if (i != macro_plan.order.size() - 1) fmt::print(" -> ");
+    }
+    fmt::print("\n\n");
+
+    if (csv_logger) {
+      for (size_t i = 0; i < macro_stats.edge_stats.size(); ++i) {
+        const auto &s = macro_stats.edge_stats[i];
+        std::unordered_map<std::string, std::string> row = {
+            {"plan", name},
+            {"step", std::to_string(i)},
+            {"layer_name", s.layer_name},
+            {"allocated_mem", std::to_string(s.allocated_mem)},
+            {"peak_mem", std::to_string(s.peak_mem)},
+        };
+        csv_logger->log(row);
+      }
+    }
+  };
+
+  profile_solver("Naive", {true, false, false, false});
+  profile_solver("Ranked", {false, false, false, false});
+  profile_solver("Linear", {false, true, false, false});
+  profile_solver("Branch", {false, true, true, false});
+  profile_solver("Join", {false, true, false, true});
+  profile_solver("Full Solver", {false, true, true, true});
+
   fmt::print("{:=^80}\n\n", "");
+}
 
-  if (csv_logger) {
-    for (size_t i = 0; i < naive_stats.edge_stats.size(); ++i) {
-      const auto &s = naive_stats.edge_stats[i];
-      std::unordered_map<std::string, std::string> row = {
-          {"plan", "naive"},
-          {"step", std::to_string(i)},
-          {"layer_name", s.layer_name},
-          {"allocated_mem", std::to_string(s.allocated_mem)},
-          {"peak_mem", std::to_string(s.peak_mem)},
-      };
-      csv_logger->log(row);
+static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimizer,
+                               GraphExecutor &executor, TensorBundle &inputs, IAllocator &alloc,
+                               std::unique_ptr<CsvLogger> &logger, std::string allocator_name,
+                               std::string plan_name, SolverOptions options) {
+  auto *previous_alloc = graph.workspace_allocator();
+  graph.set_workspace_allocator(alloc);
+
+  size_t optimizer_mem = 0;
+  if (optimizer) {
+    for (const auto &tensor : optimizer->states()) {
+      if (tensor) optimizer_mem += tensor.num_bytes();
     }
-    for (size_t i = 0; i < bfd_stats.edge_stats.size(); ++i) {
-      const auto &s = bfd_stats.edge_stats[i];
-      std::unordered_map<std::string, std::string> row = {
-          {"plan", "bfd"},
-          {"step", std::to_string(i)},
-          {"layer_name", s.layer_name},
-          {"allocated_mem", std::to_string(s.allocated_mem)},
-          {"peak_mem", std::to_string(s.peak_mem)},
-      };
-      csv_logger->log(row);
+  }
+
+  size_t parameters_mem = 0;
+  size_t parameters_grad_mem = 0;
+  for (const auto &param : graph.params()) {
+    if (param) {
+      if (param.data()) parameters_mem += param.data().num_bytes();
+      if (param.grad()) parameters_grad_mem += param.grad().num_bytes();
     }
+  }
+
+  auto &built_plan = executor.build_plans(inputs, options);
+
+  ExecutionPlanStats forward_stats = executor.profile_forward_plan(inputs, built_plan.forward_plan);
+  ExecutionPlanStats backward_stats =
+      executor.profile_backward_plan(inputs, built_plan.forward_plan, built_plan.backward_plan);
+
+  fmt::print("\n{:=^120}\n", fmt::format(" Memory Metrics Breakdown {} ", allocator_name));
+  fmt::print("{:<10} | {:<20} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12}\n", "Pass", "Layer Name",
+             "Allocated", "Reserved", "Peak", "Cached", "Activations");
+  fmt::print("{:-<10}-+-{:-<20}-+-{:-<12}-+-{:-<12}-+-{:-<12}-+-{:-<12}-+-{:-<12}\n", "", "", "",
+             "", "", "", "");
+
+  auto log_stats = [&](const std::vector<EdgeMemStats> &edge_stats, const std::string &pass_name) {
+    for (const auto &stat : edge_stats) {
+      fmt::print("{:<10} | {:<20} | {:>12} | {:>12} | {:>12} | {:>12} | {:>12}\n", pass_name,
+                 stat.layer_name, stat.allocated_mem, stat.reserved_mem, stat.peak_mem,
+                 stat.cached_mem, stat.activations_mem);
+
+      if (logger) {
+        std::unordered_map<std::string, std::string> row = {
+            {"plan_name", plan_name},
+            {"allocator_type", allocator_name},
+            {"pass", pass_name},
+            {"layer_name", stat.layer_name},
+            {"allocated_b", std::to_string(stat.allocated_mem)},
+            {"reserved_b", std::to_string(stat.reserved_mem)},
+            {"peak_b", std::to_string(stat.peak_mem)},
+            {"cached_b", std::to_string(stat.cached_mem)},
+            {"fragmented_b", std::to_string(stat.fragmented_mem)},
+            {"host_pinned_b", std::to_string(stat.host_mem)},
+            {"gradients_b", std::to_string(stat.gradients_mem)},
+            {"optimizer_b", std::to_string(optimizer_mem)},
+            {"parameters_b", std::to_string(parameters_mem)},
+            {"parameters_grad_b", std::to_string(parameters_grad_mem)},
+            {"activations_b", std::to_string(stat.activations_mem)},
+            {"workspaces_b", std::to_string(stat.workspaces_mem)}};
+        logger->log(row);
+      }
+    }
+  };
+
+  log_stats(forward_stats.edge_stats, "forward");
+  log_stats(backward_stats.edge_stats, "backward");
+
+  fmt::print("{:-^120}\n", "");
+  fmt::print("Optimizer States Memory: {} bytes\n", optimizer_mem);
+  fmt::print("Parameters Memory: {} bytes\n", parameters_mem);
+  fmt::print("Parameters Gradients Memory: {} bytes\n", parameters_grad_mem);
+  fmt::print("{:=^120}\n\n", "");
+  if (logger) {
+    logger->flush();
+  }
+
+  graph.set_workspace_allocator(*previous_alloc);
+  for (auto &edge : graph.edges()) {
+    edge->layer()->set_workspace_allocator(previous_alloc);
   }
 }
 
@@ -233,26 +289,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     return train_dataset->get_batch(config.batch_size, data, labels);
   };
 
-  graph.save_dot("current_graph.dot");
-
   GraphExecutor executor(graph);
-
-  // profiling
-  if (config.print_layer_profiling) {
-    get_next(batch_data, batch_labels);
-    Tensor device_input = to_device(batch_data, model_device);
-    Tensor device_labels = to_device(batch_labels, model_device);
-    TensorBundle inputs{{"input", device_input}};
-    auto &built_plan = executor.build_plans(inputs);
-    log_edge_profiles(built_plan.forward_edge_profiles, forward_profiles_logger);
-    log_execution_plan_stats(executor, inputs, forward_plan_logger);
-
-    log_edge_profiles(built_plan.backward_edge_profiles, backward_profiles_logger);
-    log_execution_plan_stats_backward(executor, inputs, backward_plan_logger);
-
-    // avoid affecting training
-    train_dataset->reset();
-  }
 
   cout << "Training batches: " << train_dataset->size() << endl;
   while (get_next(batch_data, batch_labels) &&
@@ -555,10 +592,84 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
   });
 }
 
+static void run_benchmark(Graph &graph, unique_ptr<Dataset> &train_dataset,
+                          const unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
+                          const TrainingConfig &config) {
+  cout << "\n>>> Starting Benchmark Mode (50 warmup steps + 2000 measured steps)..." << endl;
+  graph.set_mode(ExecutionMode::TRAIN);
+  train_dataset->shuffle();
+  train_dataset->reset();
+  
+  Tensor batch_data, batch_labels;
+  Device &model_device = graph.device();
+  auto &mem_pool = PoolAllocator::instance(model_device, model_device.default_stream());
+  
+  if (!train_dataset->get_batch(config.batch_size, batch_data, batch_labels)) {
+    cerr << "Failed to get batch for benchmark." << endl;
+    return;
+  }
+  
+  Tensor device_input = to_device(batch_data, model_device);
+  Tensor device_labels = to_device(batch_labels, model_device);
+  GraphExecutor executor(graph);
+  
+  auto step = [&]() {
+    TensorBundle inputs{{"input", device_input}};
+    TensorBundle outputs = executor.forward(inputs);
+    Tensor predictions = outputs.get("output");
+    
+    float loss;
+    criterion->compute_loss(predictions, device_labels, loss);
+    
+    Tensor loss_gradient = Tensor(predictions.shape(), predictions.dtype(), mem_pool);
+    criterion->compute_gradient(predictions, device_labels, loss_gradient);
+    
+    if (config.gradient_accumulation_steps > 1) {
+      loss_gradient *= (1.0f / static_cast<float>(config.gradient_accumulation_steps));
+    }
+    
+    TensorBundle output_grads{{"output", loss_gradient}};
+    executor.backward(output_grads);
+    
+    optimizer->update();
+    optimizer->zero_grads();
+  };
+  
+  cout << "Running 50 warmup steps..." << endl;
+  for (int i = 0; i < 50; ++i) {
+    step();
+  }
+  
+  model_device.default_stream().sync();
+  cout << "Warmup complete. Running 2000 measured steps..." << endl;
+  
+  auto start_time = chrono::high_resolution_clock::now();
+  for (int i = 0; i < 2000; ++i) {
+    step();
+  }
+  model_device.default_stream().sync();
+  
+  auto end_time = chrono::high_resolution_clock::now();
+  double elapsed_sec = chrono::duration_cast<chrono::microseconds>(end_time - start_time).count() / 1000000.0;
+  
+  bool is_lm = (config.dataset_name == "openwebtext");
+  if (is_lm) {
+    double throughput = (2000.0 * config.batch_size * 1024) / elapsed_sec;
+    cout << "Throughput: " << fixed << setprecision(2) << throughput << " tokens/s" << endl;
+  } else {
+    double throughput = (2000.0 * config.batch_size) / elapsed_sec;
+    cout << "Throughput: " << fixed << setprecision(2) << throughput << " samples/s" << endl;
+  }
+  cout << "Elapsed time for 2000 steps: " << fixed << setprecision(3) << elapsed_sec << " s" << endl;
+}
+
 void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Dataset> &val_dataset,
                  unique_ptr<Optimizer> &optimizer, const unique_ptr<Loss> &criterion,
                  unique_ptr<Scheduler> &scheduler, const TrainingConfig &config) {
   optimizer->attach(graph);
+
+  std::string timestamp = csv_timestamp();
+  std::string artifact_name = training_artifact_name(config);
 
   cout << "Training batches: " << train_dataset->size() / config.batch_size << endl;
   cout << "Validation batches: " << val_dataset->size() / config.batch_size << endl;
@@ -568,13 +679,11 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
 
   bool is_val = config.max_steps == -1;
 
-  std::string timestamp = csv_timestamp();
-  std::string artifact_name = training_artifact_name(config);
-
   std::unique_ptr<CsvLogger> forward_profiles_logger;
   std::unique_ptr<CsvLogger> forward_plan_logger;
   std::unique_ptr<CsvLogger> backward_profiles_logger;
   std::unique_ptr<CsvLogger> backward_plan_logger;
+  std::unique_ptr<CsvLogger> memory_metrics_logger;
 
   if (config.print_layer_profiling) {
     std::vector<std::string> profile_headers = {"layer_name", "time_ms", "peak_mem_b", "net_mem_b"};
@@ -607,8 +716,66 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
                                                        bw_plan_csv_path, plan_headers);
   }
 
+  std::vector<std::string> mem_headers = {
+      "plan_name",    "allocator_type",    "pass",          "layer_name",
+      "allocated_b",  "reserved_b",        "peak_b",        "cached_b",
+      "fragmented_b", "host_pinned_b",     "gradients_b",   "optimizer_b",
+      "parameters_b", "parameters_grad_b", "activations_b", "workspaces_b",
+  };
+
+  std::string mem_csv_path = "tunx_" + artifact_name + "_" + timestamp + "_memory_metrics.csv";
+  if (!config.log_dir.empty()) mem_csv_path = config.log_dir + "/" + mem_csv_path;
+  memory_metrics_logger = std::make_unique<CsvLogger>("memory_metrics", mem_csv_path, mem_headers);
+
   MetricsLogger metrics_logger("tunx_" + artifact_name + "_" + timestamp, config.log_dir,
                                config.log_mode);
+
+  // Compute and log memory metrics before training
+  Tensor batch_data, batch_labels;
+  if (train_dataset->get_batch(config.batch_size, batch_data, batch_labels)) {
+    Tensor device_input = to_device(batch_data, graph.device());
+    TensorBundle inputs{{"input", device_input}};
+    std::ofstream debug_file("debug_macro_logs.txt");
+
+    GraphExecutor executor(graph);
+    executor.set_log_stream(&debug_file);
+
+    auto &built_plan = executor.build_plans(inputs);
+    graph.save_dot("current_graph.dot", &built_plan.forward_edge_profiles,
+                   &built_plan.node_profiles);
+    log_edge_profiles(built_plan.forward_edge_profiles, forward_profiles_logger);
+    log_execution_plan_stats(executor, inputs, forward_plan_logger);
+
+    log_edge_profiles(built_plan.backward_edge_profiles, backward_profiles_logger);
+    log_execution_plan_stats_backward(executor, inputs, backward_plan_logger);
+
+    auto &pool_allocator = PoolAllocator::instance(graph.device(), graph.handle().get_stream());
+    auto profile_memory = [&](const std::string &plan_name, SolverOptions opts) {
+      auto &plan = executor.build_plans(inputs, opts);
+      auto &packed_allocator = *plan.packed_allocator;
+      log_memory_metrics(graph, optimizer, executor, inputs, pool_allocator, memory_metrics_logger,
+                         "reactive", plan_name, opts);
+      log_memory_metrics(graph, optimizer, executor, inputs, packed_allocator,
+                         memory_metrics_logger, "packed", plan_name, opts);
+    };
+
+    profile_memory("Naive", {true, false, false, false});
+    // profile_memory("Ranked", {false, false, false, false});
+    // profile_memory("Linear", {false, true, false, false});
+    // profile_memory("Branch", {false, true, true, false});
+    // profile_memory("Join", {false, true, false, true});
+    profile_memory("Full Solver", {false, true, true, true});
+
+    if (optimizer) {
+      optimizer->zero_grads();
+    }
+    train_dataset->reset();
+  }
+
+  if (config.benchmark_mode) {
+    run_benchmark(graph, train_dataset, optimizer, criterion, config);
+    return;
+  }
 
   if (is_val) {
     train_val(graph, train_dataset, val_dataset, optimizer, criterion, scheduler, config,

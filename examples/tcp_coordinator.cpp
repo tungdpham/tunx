@@ -19,6 +19,7 @@
 #include "distributed/tcp_worker.hpp"
 #include "distributed/train.hpp"
 #include "nn/example_graphs.hpp"
+#include "nn/graph_executor.hpp"
 #include "partitioner/graph_partitioner.hpp"
 
 using namespace tunx;
@@ -60,6 +61,7 @@ int main(int argc, char *argv[]) {
 
   TCPConfig tcp_config;
   tcp_config.load_from_json(config_path);
+  tcp_config.print_config();
 
   Device &device = DeviceManager::instance().get(train_config.device_id);
   auto &allocator = PoolAllocator::instance(device, device.default_stream());
@@ -83,23 +85,84 @@ int main(int argc, char *argv[]) {
   auto scheduler =
       SchedulerFactory::create_from_config(train_config.scheduler_config, optimizer.get());
 
-  cout << "Configured " << tcp_config.worker_endpoints.size() << " remote endpoints:" << endl;
-  for (const auto &ep : tcp_config.worker_endpoints) {
-    cout << ep.to_json().dump(4) << endl;
+  cout << "Configured " << tcp_config.workers.size() << " workers:" << endl;
+  Vec<Endpoint> worker_endpoints;
+  for (const auto &w : tcp_config.workers) {
+    worker_endpoints.push_back(w.endpoint);
+    cout << w.endpoint.to_json().dump(4) << endl;
   }
 
   Endpoint coordinator_endpoint = Endpoint::tcp(tcp_config.host, tcp_config.port);
-  Endpoint local_worker_endpoint =
-      Endpoint::tcp(tcp_config.local_worker_host, tcp_config.local_worker_port);
 
-  tcp_config.worker_endpoints.push_back(local_worker_endpoint);
+  if (tcp_config.local_worker_position < 0 ||
+      tcp_config.local_worker_position >= static_cast<int>(tcp_config.workers.size())) {
+    throw std::runtime_error("Local worker position out of bounds");
+  }
+  Endpoint local_worker_endpoint = tcp_config.workers[tcp_config.local_worker_position].endpoint;
 
   cout << "Local worker endpoint: " << local_worker_endpoint.to_json().dump(4) << endl;
 
   // hard-coded for now
   auto worker = std::make_unique<TCPWorker>(local_worker_endpoint, train_config.device_id);
 
-  auto partitioner = make_unique<GraphPartitioner>(tcp_config.partition_ratios);
+  // Sample compute times for ComputeBandwidthPartitioner
+  std::unique_ptr<PartitionerBase> partitioner;
+
+  Tensor batch_data, batch_labels;
+  if (train_dataset->get_batch(train_config.batch_size, batch_data, batch_labels)) {
+    cout << "Profiling graph edges for ComputeBandwidthPartitioner..." << endl;
+    GraphExecutor executor(graph);
+    TensorBundle input_map({{"input", batch_data}});
+
+    // Warmup
+    for (int i = 0; i < 5; ++i) {
+      executor.forward(input_map);
+    }
+    // Measured step
+    auto [output_map, edge_profiles, node_profiles] = executor.profile_edges_forward(input_map);
+
+    DeviceMesh mesh;
+    for (size_t i = 0; i < tcp_config.workers.size(); ++i) {
+      mesh.compute_powers.push_back(tcp_config.workers[i].compute_power);
+      if (i < tcp_config.workers.size() - 1) {
+        if (!tcp_config.workers[i].interconnect_speeds.empty()) {
+          mesh.link_speeds.push_back(tcp_config.workers[i].interconnect_speeds[0]);
+        } else {
+          mesh.link_speeds.push_back(3000000.0);  // fallback 3GB/s
+        }
+      }
+    }
+
+    // Use the first compute power as the baseline multiplier
+    double baseline_power = mesh.compute_powers.empty() ? 1.0 : mesh.compute_powers[0];
+
+    auto compute_cost_fn = [edge_profiles, baseline_power](const Edge &edge) -> double {
+      auto it = edge_profiles.find(edge);
+      if (it != edge_profiles.end()) {
+        return it->second.exec_time * baseline_power;
+      }
+      return 1.0;
+    };
+
+    auto activation_size_fn = [node_profiles](const Node &node) -> double {
+      auto it = node_profiles.find(node);
+      if (it != node_profiles.end()) {
+        return static_cast<double>(it->second);
+      }
+      return 1048576.0;  // fallback to 1MB if unknown
+    };
+
+    partitioner =
+        std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn, activation_size_fn);
+    train_dataset->reset();
+  } else {
+    cout << "Warning: Could not get a batch to profile. Falling back to uniform GraphPartitioner."
+         << endl;
+    std::vector<size_t> fallback_ratios;
+    for (const auto &w : tcp_config.workers)
+      fallback_ratios.push_back(static_cast<size_t>(w.compute_power));
+    partitioner = std::make_unique<GraphPartitioner>(fallback_ratios);
+  }
 
   CoordinatorConfig coordinator_config{
       std::move(graph),
@@ -108,7 +171,7 @@ int main(int argc, char *argv[]) {
       std::move(partitioner),
       coordinator_endpoint,
       std::move(worker),
-      tcp_config.worker_endpoints,
+      std::move(worker_endpoints),
   };
 
   NetworkCoordinator coordinator(std::move(tcp_config), std::move(coordinator_config));

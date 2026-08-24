@@ -1,6 +1,6 @@
 {
-  "epochs": 1,
-  "batch_size": 64,
+  "epochs": 20,
+  "batch_size": 256,
   "max_steps": -1,
   "gradient_accumulation_steps": 1,
   "progress_print_interval": 10,
@@ -8,12 +8,11 @@
   "profiler_type": "NONE",
   "print_layer_profiling": true,
   "print_layer_memory_usage": true,
-  "num_microbatches": 2,
   "device": "CUDA:0",
-  "model_name": "inception_v1",
+  "model_name": "cifar10_resnet9",
   "model_path": "",
-  "dataset_name": "imagenet-100",
-  "dataset_path": "../data/imagenet-100",
+  "dataset_name": "cifar-10",
+  "dataset_path": "../data/cifar-10-batches-bin",
   "io_dtype": "FP32",
   "param_dtype": "FP32",
   "compute_dtype": "FP32",
@@ -23,16 +22,14 @@
     "beta1": 0.9,
     "beta2": 0.999,
     "epsilon": 1e-8,
-    "weight_decay": 3e-4,
+    "weight_decay": 0.0,
     "decouple_weight_decay": false
   },
   "scheduler": {
-    "type": "warmup_cosine_annealing",
-    "start_lr": 0.00015,
-    "base_lr": 0.0003,
-    "warmup_steps": 100,
-    "T_max": 10,
-    "eta_min": 0.0
+    "type": "step_lr",
+    "base_lr": 0.001,
+    "step_size": 1000,
+    "gamma": 0.1
   },
   "loss": {
     "type": "logsoftmax_cross_entropy"

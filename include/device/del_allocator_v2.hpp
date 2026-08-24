@@ -18,6 +18,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "device/device_allocator.hpp"
 #include "device/dptr.hpp"
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
@@ -30,8 +31,9 @@ inline size_t align_up(size_t size, size_t alignment) {
 
 struct Slab {
 public:
-  Slab(void *ptr, size_t size)
-      : ptr(ptr),
+  Slab(dptr slab_dptr, size_t size)
+      : slab_dptr(slab_dptr),
+        ptr(slab_dptr.get()),
         size(size),
         left_offset(0),
         right_offset(size),
@@ -46,6 +48,7 @@ public:
 
   Slab &operator=(Slab &&other) noexcept = default;
 
+  dptr slab_dptr;
   void *ptr;
   size_t size;
   size_t left_offset;
@@ -97,9 +100,6 @@ public:
 
   ~DELAllocatorV2() {
     std::lock_guard<std::mutex> lock(mutex_);
-    for (auto &slab : slabs_) {
-      device_.deallocate_aligned_memory(slab.ptr);
-    }
     slabs_.clear();
     free_by_size_.clear();
   }
@@ -212,7 +212,6 @@ public:
       if (slab.active_allocations > 0) {
         throw std::runtime_error("DELAllocatorV2: Cannot clear with active allocations");
       }
-      device_.deallocate_aligned_memory(slab.ptr);
     }
     slabs_.clear();
     free_by_size_.clear();
@@ -227,7 +226,6 @@ public:
         for (const auto &[block_offset, block_size] : it->free_by_offset) {
           remove_from_free_map(block_size, {&*it, block_offset, block_size});
         }
-        device_.deallocate_aligned_memory(it->ptr);
         reserved_ -= it->size;
         it = slabs_.erase(it);
       } else {
@@ -401,7 +399,6 @@ private:
         for (const auto &[block_offset, block_size] : it->free_by_offset) {
           remove_from_free_map(block_size, {&*it, block_offset, block_size});
         }
-        device_.deallocate_aligned_memory(it->ptr);
         reserved_ -= it->size;
         it = slabs_.erase(it);
       } else {
@@ -418,7 +415,6 @@ private:
     for (auto it = slabs_.begin(); it != slabs_.end();) {
       if (it->active_allocations == 0) {
         assert(it->free_by_offset.empty() && "Empty slab should have no free blocks");
-        device_.deallocate_aligned_memory(it->ptr);
         freed_bytes += it->size;
         reserved_ -= it->size;
         it = slabs_.erase(it);
@@ -428,11 +424,12 @@ private:
     }
     slab_size = std::max(slab_size, freed_bytes);
     slab_size = align_up(slab_size, DEFAULT_ALIGNMENT);
-    void *slab_ptr = device_.allocate_aligned_memory(slab_size, DEFAULT_ALIGNMENT);
-    if (!slab_ptr) {
+    
+    dptr new_dptr = tunx::DeviceAllocator::instance(device_, stream_).allocate(slab_size);
+    if (!new_dptr.get()) {
       throw std::runtime_error("DELAllocatorV2: Failed to allocate slab");
     }
-    Slab &slab = slabs_.emplace_back(slab_ptr, slab_size);
+    Slab &slab = slabs_.emplace_back(new_dptr, slab_size);
     reserved_ += slab_size;
     // do not add to free_by_size_, let bump allocation use left/right offsets.
     return slab;

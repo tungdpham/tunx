@@ -63,11 +63,11 @@ void Graph::compile(IAllocator &allocator, GraphOpts opts) {
 
   engine_ = opts.engine ? opts.engine : get_default_engine(allocator.device());
   param_allocator_ = &allocator;
-  workspace_allocator_ = DELAllocatorV2::create(allocator.device(), s);
+  workspace_allocator_ = DELAllocatorV2::instance(device, s).get();
   engine_handle_ = engine_->create_handle(s);
 
   InitOptions layer_opts{
-      .ws_allocator = workspace_allocator_.get(),
+      .ws_allocator = workspace_allocator_,
       .engine = engine_,
       .handle = engine_handle_,
       .seed = opts.seed,
@@ -167,7 +167,8 @@ void Graph::sort() {
     ready.pop_back();
     sorted.push_back(e);
 
-    for (auto consumer_it = e->consumers().rbegin(); consumer_it != e->consumers().rend(); ++consumer_it) {
+    for (auto consumer_it = e->consumers().rbegin(); consumer_it != e->consumers().rend();
+         ++consumer_it) {
       const auto &consumer = *consumer_it;
       auto it = node_to_dependent_edges.find(consumer);
       if (it != node_to_dependent_edges.end()) {
@@ -209,19 +210,30 @@ void Graph::sort() {
   nodes_ = std::move(sorted_nodes);
 }
 
-void Graph::save_dot(const std::string &filename) const {
+void Graph::save_dot(const std::string &filename, const std::map<Edge, EdgeProfile> *edge_profiles, const std::map<Node, size_t> *node_profiles) const {
   std::ofstream output(filename);
   if (!output) throw std::runtime_error("Failed to open DOT file: " + filename);
 
   output << "digraph Graph {\n  rankdir=LR;\n";
   for (const Node &node : nodes_) {
-    output << "  \"node_" << node->uid() << "\" [shape=ellipse, label=\"" << node->uid()
-           << "\"];\n";
+    output << "  \"node_" << node->uid() << "\" [shape=ellipse, label=\"" << node->uid();
+    if (node_profiles && node_profiles->count(node)) {
+      output << "\\nsize: " << node_profiles->at(node);
+    }
+    output << "\"];\n";
   }
   for (size_t index = 0; index < edges_.size(); ++index) {
     const Edge &edge = edges_[index];
     output << "  \"edge_" << index << "\" [shape=box, label=\"" << index << ": "
-           << edge->layer()->name() << "\"];\n";
+           << edge->layer()->name();
+    if (edge_profiles && edge_profiles->count(edge)) {
+      const auto& prof = edge_profiles->at(edge);
+      output << "\\na: " << prof.total_mem;
+      output << "\\nb: " << prof.net_mem;
+      output << "\\nworkspace: " << prof.workspace_mem;
+      output << "\\nresidual: " << prof.total_mem - prof.workspace_mem - prof.output_mem;
+    }
+    output << "\"];\n";
     for (const Node &producer : edge->producers()) {
       output << "  \"node_" << producer->uid() << "\" -> \"edge_" << index << "\";\n";
     }

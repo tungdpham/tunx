@@ -35,12 +35,74 @@ import torchvision.transforms as T
 from dotenv import load_dotenv
 
 load_dotenv()
-torch.set_float32_matmul_precision('high')
+
+# ======================== Memory Tracker ========================
+class MemoryTracker:
+    def __init__(self, model, optimizer, csv_path):
+        self.model = model
+        self.optimizer = optimizer
+        self.csv_file = open(csv_path, "w", newline="")
+        self.writer = csv.writer(self.csv_file)
+        self.writer.writerow(["plan_name","allocator_type","pass","layer_name","allocated_b","reserved_b","peak_b","cached_b","fragmented_b","host_pinned_b","gradients_b","optimizer_b","parameters_b","parameters_grad_b","activations_b","workspaces_b"])
+        
+        self.hooks = []
+        for name, module in model.named_modules():
+            if len(list(module.children())) == 0 and name != "":
+                self.hooks.append(module.register_forward_hook(self.make_hook(name, "forward")))
+                self.hooks.append(module.register_full_backward_hook(self.make_bwd_hook(name, "backward")))
+
+    def make_hook(self, name, pass_type):
+        def hook(module, inputs, outputs):
+            self.record(name, pass_type)
+        return hook
+
+    def make_bwd_hook(self, name, pass_type):
+        def hook(module, grad_input, grad_output):
+            self.record(name, pass_type)
+        return hook
+
+    def record(self, name, pass_type):
+        if not torch.cuda.is_available(): return
+        
+        allocated_b = torch.cuda.memory_allocated()
+        reserved_b = torch.cuda.memory_reserved()
+        peak_b = torch.cuda.max_memory_allocated()
+        cached_b = reserved_b - allocated_b
+        fragmented_b = 0
+        host_pinned_b = 0
+        
+        parameters_b = sum(p.nelement() * p.element_size() for p in self.model.parameters())
+        gradients_b = sum(p.grad.nelement() * p.grad.element_size() for p in self.model.parameters() if p.grad is not None)
+        
+        optimizer_b = 0
+        for state in self.optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    optimizer_b += v.nelement() * v.element_size()
+                    
+        parameters_grad_b = gradients_b
+        activations_b = allocated_b - parameters_b - gradients_b - optimizer_b
+        workspaces_b = 0
+        
+        self.writer.writerow([
+            "PyTorch", "caching", pass_type, name,
+            allocated_b, reserved_b, peak_b, cached_b,
+            fragmented_b, host_pinned_b, gradients_b, optimizer_b,
+            parameters_b, parameters_grad_b, activations_b, workspaces_b
+        ])
+        self.csv_file.flush()
+
+    def close(self):
+        for h in self.hooks:
+            h.remove()
+        self.csv_file.close()
 
 # ======================== Datasets ========================
 
+
 class CIFAR10Bin(Dataset):
     """CIFAR-10 binary format loader."""
+
     def __init__(self, root, train=True, transform=None):
         self.transform = transform
         self.data = []
@@ -80,6 +142,7 @@ class CIFAR10Bin(Dataset):
 
 class CIFAR100Bin(Dataset):
     """CIFAR-100 binary format loader."""
+
     def __init__(self, root, train=True, transform=None):
         self.transform = transform
 
@@ -110,6 +173,7 @@ class CIFAR100Bin(Dataset):
 
 class TinyImageNetDataset(Dataset):
     """Tiny ImageNet dataset loader."""
+
     def __init__(self, root: str, train: bool = True, transform=None):
         self.transform = transform
         root = Path(root)
@@ -128,7 +192,8 @@ class TinyImageNetDataset(Dataset):
                 if not cls_dir.exists():
                     continue
                 for img_path in cls_dir.glob("*.JPEG"):
-                    self.samples.append((str(img_path), self.class_to_idx[cls]))
+                    self.samples.append(
+                        (str(img_path), self.class_to_idx[cls]))
         else:
             # Validation set
             val_dir = root / "val"
@@ -140,7 +205,8 @@ class TinyImageNetDataset(Dataset):
                     cls = parts[1]
                     img_path = val_dir / "images" / img_name
                     if cls in self.class_to_idx and img_path.exists():
-                        self.samples.append((str(img_path), self.class_to_idx[cls]))
+                        self.samples.append(
+                            (str(img_path), self.class_to_idx[cls]))
 
     def __len__(self):
         return len(self.samples)
@@ -155,6 +221,7 @@ class TinyImageNetDataset(Dataset):
 
 class ImageNet100Dataset(Dataset):
     """ImageNet-100 dataset loader."""
+
     def __init__(self, root: str, train: bool = True, transform=None):
         self.transform = transform
         root = Path(root)
@@ -168,7 +235,7 @@ class ImageNet100Dataset(Dataset):
             d = root / train_subdir
             if d.exists():
                 all_classes.update(x.name for x in d.iterdir() if x.is_dir())
-        
+
         classes = sorted(all_classes)
         self.class_to_idx = {cls: idx for idx, cls in enumerate(classes)}
 
@@ -183,7 +250,8 @@ class ImageNet100Dataset(Dataset):
                         continue
                     for ext in ["*.JPEG", "*.jpg", "*.png"]:
                         for p in img_dir.glob(ext):
-                            self.samples.append((str(p), self.class_to_idx[cls]))
+                            self.samples.append(
+                                (str(p), self.class_to_idx[cls]))
         else:
             data_dir = root / "val.X"
             for cls in classes:
@@ -207,6 +275,7 @@ class ImageNet100Dataset(Dataset):
 
 class OpenWebTextDataset(Dataset):
     """OpenWebText tokenized dataset for GPT-2."""
+
     def __init__(self, path: str, seq_len: int = 1024):
         if not os.path.isfile(path):
             raise FileNotFoundError(f"Data file not found: {path}")
@@ -220,7 +289,7 @@ class OpenWebTextDataset(Dataset):
 
     def __getitem__(self, idx):
         start = idx * self.seq_len
-        chunk = self.data[start : start + self.seq_len + 1].astype(np.int64)
+        chunk = self.data[start: start + self.seq_len + 1].astype(np.int64)
         chunk = torch.from_numpy(chunk)
         x = chunk[:-1]  # [SEQ_LEN]
         y = chunk[1:]   # [SEQ_LEN]
@@ -252,23 +321,27 @@ class BasicResidualBlock(nn.Module):
 class ResNet9CIFAR10(nn.Module):
     def __init__(self, num_classes: int = 10):
         super().__init__()
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=3,
+                               stride=1, padding=1, bias=True)
         self.bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
-        self.conv2 = nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3,
+                               stride=1, padding=1, bias=True)
         self.bn2 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
         self.res1 = BasicResidualBlock(128)
         self.res2 = BasicResidualBlock(128)
 
-        self.conv3 = nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv3 = nn.Conv2d(128, 256, kernel_size=3,
+                               stride=1, padding=1, bias=True)
         self.bn3 = nn.BatchNorm2d(256, eps=1e-5, momentum=0.1)
         self.maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
         self.res3 = BasicResidualBlock(256)
         self.res4 = BasicResidualBlock(256)
 
-        self.conv4 = nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1, bias=True)
+        self.conv4 = nn.Conv2d(256, 512, kernel_size=3,
+                               stride=1, padding=1, bias=True)
         self.bn4 = nn.BatchNorm2d(512, eps=1e-5, momentum=0.1)
         self.maxpool3 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
@@ -301,6 +374,7 @@ class ResNet9CIFAR10(nn.Module):
 
 class WideResidualBlock(nn.Module):
     """Pre-activation wide residual block."""
+
     def __init__(self, in_channels: int, out_channels: int,
                  stride: int = 1, dropout_rate: float = 0.0):
         super().__init__()
@@ -330,6 +404,7 @@ class WideResidualBlock(nn.Module):
 
 class WRN16_8CIFAR100(nn.Module):
     """WRN-16-8 for CIFAR-100."""
+
     def __init__(self, num_classes: int = 100):
         super().__init__()
         width_factor = 8
@@ -341,16 +416,22 @@ class WRN16_8CIFAR100(nn.Module):
         self.conv1 = nn.Conv2d(3, 16, 3, stride=1, padding=1, bias=True)
 
         # Group 1: 16 -> 128, stride 1
-        self.group1_block1 = WideResidualBlock(16, c1, stride=1, dropout_rate=dropout_rate)
-        self.group1_block2 = WideResidualBlock(c1, c1, stride=1, dropout_rate=dropout_rate)
+        self.group1_block1 = WideResidualBlock(
+            16, c1, stride=1, dropout_rate=dropout_rate)
+        self.group1_block2 = WideResidualBlock(
+            c1, c1, stride=1, dropout_rate=dropout_rate)
 
         # Group 2: 128 -> 256, stride 2 (32x32 -> 16x16)
-        self.group2_block1 = WideResidualBlock(c1, c2, stride=2, dropout_rate=dropout_rate)
-        self.group2_block2 = WideResidualBlock(c2, c2, stride=1, dropout_rate=dropout_rate)
+        self.group2_block1 = WideResidualBlock(
+            c1, c2, stride=2, dropout_rate=dropout_rate)
+        self.group2_block2 = WideResidualBlock(
+            c2, c2, stride=1, dropout_rate=dropout_rate)
 
         # Group 3: 256 -> 512, stride 2 (16x16 -> 8x8)
-        self.group3_block1 = WideResidualBlock(c2, c3, stride=2, dropout_rate=dropout_rate)
-        self.group3_block2 = WideResidualBlock(c3, c3, stride=1, dropout_rate=dropout_rate)
+        self.group3_block1 = WideResidualBlock(
+            c2, c3, stride=2, dropout_rate=dropout_rate)
+        self.group3_block2 = WideResidualBlock(
+            c3, c3, stride=1, dropout_rate=dropout_rate)
 
         # Final BN+ReLU before pooling
         self.bn_final = nn.BatchNorm2d(c3, eps=1e-5, momentum=0.1)
@@ -379,6 +460,7 @@ class WRN16_8CIFAR100(nn.Module):
 
 class BottleneckBlock(nn.Module):
     """Bottleneck residual block for ResNet-50."""
+
     def __init__(self, in_channels: int, mid_channels: int,
                  out_channels: int, stride: int = 1):
         super().__init__()
@@ -395,7 +477,8 @@ class BottleneckBlock(nn.Module):
         self.shortcut = None
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, 1, stride=stride, bias=False),
+                nn.Conv2d(in_channels, out_channels, 1,
+                          stride=stride, bias=False),
                 nn.BatchNorm2d(out_channels, eps=1e-5, momentum=0.1)
             )
 
@@ -413,6 +496,7 @@ class BottleneckBlock(nn.Module):
 
 class ResNet50TinyImageNet(nn.Module):
     """ResNet-50 for Tiny ImageNet (64x64 inputs, 200 classes)."""
+
     def __init__(self, num_classes: int = 200):
         super().__init__()
 
@@ -469,6 +553,7 @@ class ResNet50TinyImageNet(nn.Module):
 
 class ResNet50ImageNet100(nn.Module):
     """ResNet-50 for ImageNet-100 (224x224 inputs, 100 classes)."""
+
     def __init__(self, num_classes: int = 100):
         super().__init__()
 
@@ -525,6 +610,7 @@ class ResNet50ImageNet100(nn.Module):
 
 class CausalSelfAttention(nn.Module):
     """Multi-head causal self-attention."""
+
     def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.1):
         super().__init__()
         assert embed_dim % num_heads == 0
@@ -545,7 +631,7 @@ class CausalSelfAttention(nn.Module):
             return t.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
 
         q, k, v = reshape(q), reshape(k), reshape(v)
-        
+
         with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.MATH):
             out = F.scaled_dot_product_attention(
                 q, k, v,
@@ -562,6 +648,7 @@ class CausalSelfAttention(nn.Module):
 
 class GPTBlock(nn.Module):
     """One GPT-2 transformer block."""
+
     def __init__(self, embed_dim: int, num_heads: int, ffn_dim: int,
                  dropout: float = 0.1):
         super().__init__()
@@ -581,6 +668,7 @@ class GPTBlock(nn.Module):
 
 class GPT2Small(nn.Module):
     """GPT-2 small for causal language modelling."""
+
     def __init__(self,
                  vocab_size: int = 50257,
                  seq_len: int = 1024,
@@ -636,13 +724,395 @@ class GPT2Small(nn.Module):
         return logits
 
 
+# --- Memory Efficient Pooling ---
+class MemoryEfficientMaxPool2d(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, kernel_size, stride, padding=0, dilation=1, ceil_mode=False):
+        out, indices = torch.ops.aten.max_pool2d_with_indices(
+            x, kernel_size, stride, padding, dilation, ceil_mode
+        )
+        ctx.save_for_backward(indices)
+        ctx.input_size = x.size()
+        ctx.kernel_size = [kernel_size, kernel_size] if isinstance(kernel_size, int) else kernel_size
+        ctx.stride = [stride, stride] if isinstance(stride, int) else stride
+        ctx.padding = [padding, padding] if isinstance(padding, int) else padding
+        ctx.dilation = [dilation, dilation] if isinstance(dilation, int) else dilation
+        ctx.ceil_mode = ceil_mode
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        indices, = ctx.saved_tensors
+        dummy_input = torch.empty(ctx.input_size, device=grad_output.device, dtype=grad_output.dtype)
+        grad_input = torch.ops.aten.max_pool2d_with_indices_backward(
+            grad_output, dummy_input, ctx.kernel_size, ctx.stride, ctx.padding, ctx.dilation, ctx.ceil_mode, indices
+        )
+        return grad_input, None, None, None, None, None
+
+class MemoryEfficientAvgPool2d(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, kernel_size, stride, padding=0, ceil_mode=False, count_include_pad=True, divisor_override=None):
+        out = torch.nn.functional.avg_pool2d(
+            x, kernel_size, stride, padding, ceil_mode, count_include_pad, divisor_override
+        )
+        ctx.input_size = x.size()
+        ctx.kernel_size = [kernel_size, kernel_size] if isinstance(kernel_size, int) else kernel_size
+        ctx.stride = [stride, stride] if isinstance(stride, int) else stride
+        ctx.padding = [padding, padding] if isinstance(padding, int) else padding
+        ctx.ceil_mode = ceil_mode
+        ctx.count_include_pad = count_include_pad
+        ctx.divisor_override = divisor_override
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        dummy_input = torch.empty(ctx.input_size, device=grad_output.device, dtype=grad_output.dtype)
+        grad_input = torch.ops.aten.avg_pool2d_backward(
+            grad_output, dummy_input, ctx.kernel_size, ctx.stride, ctx.padding, ctx.ceil_mode, ctx.count_include_pad, ctx.divisor_override
+        )
+        return grad_input, None, None, None, None, None, None
+
+class MemMaxPool2d(nn.MaxPool2d):
+    def forward(self, x):
+        return MemoryEfficientMaxPool2d.apply(
+            x, self.kernel_size, self.stride, self.padding, self.dilation, self.ceil_mode
+        )
+
+class MemAvgPool2d(nn.AvgPool2d):
+    def forward(self, x):
+        return MemoryEfficientAvgPool2d.apply(
+            x, self.kernel_size, self.stride, self.padding, self.ceil_mode, self.count_include_pad, self.divisor_override
+        )
+
+# --- Tunx v1 ---
+
+class TunxV1(nn.Module):
+    def __init__(self, num_classes: int = 100):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(16, eps=1e-5, momentum=0.1)
+        self.pool1 = MemMaxPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.b1_up1 = nn.ConvTranspose2d(16, 32, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b1_bn1 = nn.BatchNorm2d(32, eps=1e-5, momentum=0.1)
+        self.b1_up2 = nn.ConvTranspose2d(32, 64, kernel_size=4, stride=4, padding=0, bias=False)
+        self.b1_bn2 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b1_down = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b1_pool = MemMaxPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.b2_trans = nn.ConvTranspose2d(16, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_up2 = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn2 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_conv = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_bn3 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_bn4 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_pool = MemMaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.b3_up1 = nn.ConvTranspose2d(16, 32, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b3_up2 = nn.ConvTranspose2d(32, 128, kernel_size=4, stride=4, padding=0, bias=False)
+        self.b3_pool = MemAvgPool2d(kernel_size=4, stride=4, padding=0)
+        self.b3_down1 = nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b3_bn2 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(64 * 56 * 56, num_classes, bias=True)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # conv1 -> bn1 -> pool1
+        x = self.conv1(x)
+        x = F.relu(self.bn1(x), inplace=True)
+        x = self.pool1(x)
+        
+        b1 = self.b1_up1(x)
+        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = self.b1_up2(b1)
+        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = self.b1_down(b1)
+        b1 = self.b1_pool(b1)
+        
+        # b2 branch
+        b2 = self.b2_trans(x)
+        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = self.b2_up2(b2)
+        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = self.b2_conv(b2)
+        b2 = F.relu(self.b2_bn3(b2), inplace=True)
+        b2 = self.b2_conv2(b2)
+        b2 = F.relu(self.b2_bn4(b2), inplace=True)
+        b2 = -b2
+        b2 = self.b2_pool(b2)
+        
+        b3 = self.b3_up1(x)
+        b3 = self.b3_up2(b3)
+        b3 = self.b3_pool(b3)
+        b3 = self.b3_down1(b3)
+        b3 = F.relu(self.b3_bn2(b3), inplace=True)
+        
+        # merge
+        y = b1 + b2 + b3
+        y = F.relu(y, inplace=True)
+        y = self.flatten(y)
+        return self.fc(y)
+
+
+# --- Tunx v2 ---
+
+class TunxV2Block(nn.Module):
+    def __init__(self, in_channels: int):
+        super().__init__()
+        self.up1 = nn.ConvTranspose2d(in_channels, 256, kernel_size=2, stride=2, padding=0, bias=False)
+        self.pool1 = MemMaxPool2d(kernel_size=3, stride=1, padding=1)
+        
+        self.up2 = nn.ConvTranspose2d(in_channels, 256, kernel_size=4, stride=4, padding=0, bias=False)
+        self.left_pool = MemMaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.right_pool = MemAvgPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.conv = nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1, bias=False)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b1 = self.up1(x)
+        b1 = self.pool1(b1)
+        
+        b2 = self.up2(x)
+        b2_left = self.left_pool(-b2)
+        b2_right = self.right_pool(b2)
+        
+        c = b1 + b2_left + b2_right
+        return self.conv(c)
+
+class TunxV2(nn.Module):
+    def __init__(self, num_classes: int = 100):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(16, eps=1e-5, momentum=0.1)
+        self.pool1 = MemMaxPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.b1_up1 = nn.ConvTranspose2d(16, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b1_bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b1_up2 = nn.ConvTranspose2d(64, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b1_bn2 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
+        self.b1_down = nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b1_pool = MemMaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.b2_trans = nn.ConvTranspose2d(16, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn1 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
+        self.b2_up2 = nn.ConvTranspose2d(128, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn2 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
+        self.b2_conv = nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_conv2 = nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_pool = MemMaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.b3_conv = nn.Conv2d(16, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b3_up1 = nn.ConvTranspose2d(64, 128, kernel_size=5, stride=1, padding=2, bias=False)
+        self.b3_block = TunxV2Block(128)
+        
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(128 * 56 * 56, num_classes, bias=True)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv1(x)
+        x = F.relu(self.bn1(x), inplace=True)
+        x = self.pool1(x)
+        
+        b1 = self.b1_up1(x)
+        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = self.b1_up2(b1)
+        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = self.b1_down(b1)
+        b1 = self.b1_pool(b1)
+        
+        b2 = self.b2_trans(x)
+        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = self.b2_up2(b2)
+        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = self.b2_conv(b2)
+        b2 = self.b2_conv2(b2)
+        b2 = -b2
+        b2 = self.b2_pool(b2)
+        
+        b3 = self.b3_conv(x)
+        b3 = self.b3_up1(b3)
+        b3 = self.b3_block(b3)
+        
+        y = b1 + b2 + b3
+        y = F.relu(y, inplace=True)
+        y = self.flatten(y)
+        return self.fc(y)
+
+
+# --- Tunx v3 ---
+
+class TunxV3Block(nn.Module):
+    def __init__(self, in_channels: int):
+        super().__init__()
+        self.up1 = nn.ConvTranspose2d(in_channels, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.pool1 = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.up2 = nn.ConvTranspose2d(in_channels, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.left_pool = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        self.right_pool = nn.AvgPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.conv = nn.Conv2d(128 * 3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b1 = self.up1(x)
+        b1 = self.pool1(b1)
+        
+        b2 = self.up2(x)
+        b2_left = self.left_pool(-b2)
+        b2_right = self.right_pool(b2)
+        
+        c = torch.cat([b1, b2_left, b2_right], dim=1)
+        return self.conv(c)
+
+class TunxV3(nn.Module):
+    def __init__(self, num_classes: int = 100):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(16, eps=1e-5, momentum=0.1)
+        self.pool1 = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.b1_up1 = nn.ConvTranspose2d(16, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b1_bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b1_up2 = nn.ConvTranspose2d(64, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b1_bn2 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
+        self.b1_down = nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b1_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.b2_trans = nn.ConvTranspose2d(16, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_up2 = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn2 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_conv = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.b3_conv = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b3_up1 = nn.ConvTranspose2d(32, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b3_up2 = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b3_block = TunxV3Block(64)
+        
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(64 * 56 * 56, num_classes, bias=True)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv1(x)
+        x = F.relu(self.bn1(x), inplace=True)
+        x = self.pool1(x)
+        
+        b1 = self.b1_up1(x)
+        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = self.b1_up2(b1)
+        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = self.b1_down(b1)
+        b1 = self.b1_pool(b1)
+        
+        b2 = self.b2_trans(x)
+        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = self.b2_up2(b2)
+        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = self.b2_conv(b2)
+        b2 = self.b2_conv2(b2)
+        b2 = -b2
+        b2 = self.b2_pool(b2)
+        
+        b3 = self.b3_conv(x)
+        b3 = self.b3_up1(b3)
+        b3 = self.b3_up2(b3)
+        b3 = self.b3_block(b3)
+        
+        y = b1 + b2 + b3
+        y = F.relu(y, inplace=True)
+        y = self.flatten(y)
+        return self.fc(y)
+
+
+# --- Tunx v4 ---
+
+class RecursiveWideForkJoin(nn.Module):
+    def __init__(self, in_channels: int, depth: int):
+        super().__init__()
+        self.depth = depth
+        
+        kOutputChannels = 64
+        kLocalChannels = 64 + depth * 256
+        kJoinChannels = 832 - depth * 256
+        
+        if depth == 0:
+            self.expand = nn.ConvTranspose2d(in_channels, kJoinChannels, kernel_size=2, stride=2, padding=0, bias=False)
+            self.left_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+            self.right_pool = nn.AvgPool2d(kernel_size=2, stride=2, padding=0)
+            self.mid_conv = nn.Conv2d(kJoinChannels, kJoinChannels, kernel_size=3, stride=2, padding=1, bias=False)
+            self.compress = nn.Conv2d(kJoinChannels, kOutputChannels, kernel_size=1, stride=1, padding=0, bias=False)
+        else:
+            self.local_expand = nn.ConvTranspose2d(in_channels, kLocalChannels, kernel_size=2, stride=2, padding=0, bias=False)
+            self.local_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+            self.local_widen = nn.Conv2d(kLocalChannels, kJoinChannels, kernel_size=1, stride=1, padding=0, bias=False)
+            
+            self.nested_seed = nn.Conv2d(in_channels, kOutputChannels, kernel_size=1, stride=1, padding=0, bias=False)
+            self.nested_rfj = RecursiveWideForkJoin(kOutputChannels, depth - 1)
+            self.nested_widen = nn.Conv2d(kOutputChannels, kJoinChannels, kernel_size=1, stride=1, padding=0, bias=False)
+            
+            self.compress = nn.Conv2d(kJoinChannels, kOutputChannels, kernel_size=1, stride=1, padding=0, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.depth == 0:
+            expanded = self.expand(x)
+            left = self.left_pool(-expanded)
+            right = self.right_pool(expanded)
+            mid = self.mid_conv(expanded)
+            joined = left + right + mid
+            return self.compress(joined)
+        else:
+            local_ = self.local_expand(x)
+            local_ = self.local_pool(local_)
+            local_ = self.local_widen(local_)
+            
+            nested = self.nested_seed(x)
+            nested = self.nested_rfj(nested)
+            nested = self.nested_widen(nested)
+            
+            joined = local_ + nested
+            return self.compress(joined)
+
+class TunxV4(nn.Module):
+    def __init__(self, num_classes: int = 100):
+        super().__init__()
+        self.stem_conv = nn.Conv2d(3, 32, kernel_size=7, stride=2, padding=3, bias=False)
+        self.stem_bn = nn.BatchNorm2d(32, eps=1e-5, momentum=0.1)
+        self.stem_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.stem_project = nn.Conv2d(32, 64, kernel_size=1, stride=1, padding=0, bias=False)
+        
+        self.rfj_d3 = RecursiveWideForkJoin(64, 3)
+        
+        self.out_pool = nn.AvgPool2d(kernel_size=4, stride=4, padding=0)
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(64 * 14 * 14, num_classes, bias=True)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.stem_conv(x)
+        x = F.relu(self.stem_bn(x), inplace=True)
+        x = self.stem_pool(x)
+        x = self.stem_project(x)
+        
+        x = self.rfj_d3(x)
+        
+        x = F.relu(x, inplace=True)
+        x = self.out_pool(x)
+        x = self.flatten(x)
+        return self.fc(x)
+
+
 # ======================== Model Registry ========================
 
 # Normalization constants
 CIFAR10_MEAN = torch.tensor([0.49139968, 0.48215827, 0.44653124]).view(3, 1, 1)
 CIFAR10_STD = torch.tensor([0.24703233, 0.24348505, 0.26158768]).view(3, 1, 1)
 
-CIFAR100_MEAN = torch.tensor([0.50707516, 0.48654887, 0.44091784]).view(3, 1, 1)
+CIFAR100_MEAN = torch.tensor(
+    [0.50707516, 0.48654887, 0.44091784]).view(3, 1, 1)
 CIFAR100_STD = torch.tensor([0.26733429, 0.25643846, 0.27615047]).view(3, 1, 1)
 
 TINY_MEAN = [0.4802, 0.4481, 0.3975]
@@ -651,8 +1121,10 @@ TINY_STD = [0.2770, 0.2691, 0.2821]
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
+
 def _cifar10_transform(img):
     return (img - CIFAR10_MEAN) / CIFAR10_STD
+
 
 def _cifar100_transform(img):
     return (img - CIFAR100_MEAN) / CIFAR100_STD
@@ -661,7 +1133,7 @@ def _cifar100_transform(img):
 def get_model_config(model_name: str) -> Dict[str, Any]:
     """
     Returns configuration dictionary for the specified model.
-    
+
     Each config contains:
         - model_cls: Model class constructor
         - train_dataset: Training dataset factory
@@ -675,17 +1147,19 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
         - scheduler_type: 'step' or 'cosine'
         - is_language_model: bool flag for GPT-2 models
     """
-    
+
     configs = {
         "resnet9_cifar10": {
             "model_cls": lambda: ResNet9CIFAR10(num_classes=10),
             "train_dataset": lambda: CIFAR10Bin(
-                root=os.getenv("CIFAR10_BIN_ROOT", "data/cifar-10-batches-bin"),
+                root=os.getenv("CIFAR10_BIN_ROOT",
+                               "data/cifar-10-batches-bin"),
                 train=True,
                 transform=_cifar10_transform
             ),
             "test_dataset": lambda: CIFAR10Bin(
-                root=os.getenv("CIFAR10_BIN_ROOT", "data/cifar-10-batches-bin"),
+                root=os.getenv("CIFAR10_BIN_ROOT",
+                               "data/cifar-10-batches-bin"),
                 train=False,
                 transform=_cifar10_transform
             ),
@@ -698,7 +1172,7 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
             "scheduler_type": "step",
             "is_language_model": False,
         },
-        
+
         "wrn16_8_cifar100": {
             "model_cls": lambda: WRN16_8CIFAR100(num_classes=100),
             "train_dataset": lambda: CIFAR100Bin(
@@ -720,7 +1194,7 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
             "scheduler_type": "step",
             "is_language_model": False,
         },
-        
+
         "resnet50_tiny_imagenet": {
             "model_cls": lambda: ResNet50TinyImageNet(num_classes=200),
             "train_dataset": lambda: TinyImageNetDataset(
@@ -748,7 +1222,7 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
             "scheduler_type": "step",
             "is_language_model": False,
         },
-        
+
         "resnet50_imagenet100": {
             "model_cls": lambda: ResNet50ImageNet100(num_classes=100),
             "train_dataset": lambda: ImageNet100Dataset(
@@ -780,7 +1254,135 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
             "scheduler_type": "step",
             "is_language_model": False,
         },
-        
+
+        "tunx_v1": {
+            "model_cls": lambda: TunxV1(num_classes=100),
+            "train_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=True,
+                transform=T.Compose([
+                    T.RandomResizedCrop(224),
+                    T.RandomHorizontalFlip(),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "test_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=False,
+                transform=T.Compose([
+                    T.Resize(256),
+                    T.CenterCrop(224),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "criterion": nn.CrossEntropyLoss(),
+            "epochs": int(os.getenv("EPOCHS", "90")),
+            "batch_size": int(os.getenv("BATCH_SIZE", "64")),
+            "lr": float(os.getenv("LR_INITIAL", "0.001")),
+            "num_workers": 4,
+            "optimizer_type": "adam",
+            "scheduler_type": "step",
+            "is_language_model": False,
+        },
+
+        "tunx_v2": {
+            "model_cls": lambda: TunxV2(num_classes=100),
+            "train_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=True,
+                transform=T.Compose([
+                    T.RandomResizedCrop(224),
+                    T.RandomHorizontalFlip(),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "test_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=False,
+                transform=T.Compose([
+                    T.Resize(256),
+                    T.CenterCrop(224),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "criterion": nn.CrossEntropyLoss(),
+            "epochs": int(os.getenv("EPOCHS", "90")),
+            "batch_size": int(os.getenv("BATCH_SIZE", "64")),
+            "lr": float(os.getenv("LR_INITIAL", "0.001")),
+            "num_workers": 4,
+            "optimizer_type": "adam",
+            "scheduler_type": "step",
+            "is_language_model": False,
+        },
+
+        "tunx_v3": {
+            "model_cls": lambda: TunxV3(num_classes=100),
+            "train_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=True,
+                transform=T.Compose([
+                    T.RandomResizedCrop(224),
+                    T.RandomHorizontalFlip(),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "test_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=False,
+                transform=T.Compose([
+                    T.Resize(256),
+                    T.CenterCrop(224),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "criterion": nn.CrossEntropyLoss(),
+            "epochs": int(os.getenv("EPOCHS", "90")),
+            "batch_size": int(os.getenv("BATCH_SIZE", "64")),
+            "lr": float(os.getenv("LR_INITIAL", "0.001")),
+            "num_workers": 4,
+            "optimizer_type": "adam",
+            "scheduler_type": "step",
+            "is_language_model": False,
+        },
+
+        "tunx_v4": {
+            "model_cls": lambda: TunxV4(num_classes=100),
+            "train_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=True,
+                transform=T.Compose([
+                    T.RandomResizedCrop(224),
+                    T.RandomHorizontalFlip(),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "test_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=False,
+                transform=T.Compose([
+                    T.Resize(256),
+                    T.CenterCrop(224),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "criterion": nn.CrossEntropyLoss(),
+            "epochs": int(os.getenv("EPOCHS", "90")),
+            "batch_size": int(os.getenv("BATCH_SIZE", "64")),
+            "lr": float(os.getenv("LR_INITIAL", "0.001")),
+            "num_workers": 4,
+            "optimizer_type": "adam",
+            "scheduler_type": "step",
+            "is_language_model": False,
+        },
+
         "gpt2_small": {
             "model_cls": lambda: GPT2Small(
                 vocab_size=50257,
@@ -792,11 +1394,13 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
                 dropout=0.1
             ),
             "train_dataset": lambda: OpenWebTextDataset(
-                path=os.getenv("OPENWEBTEXT_PATH", "data/open-web-text/train.bin"),
+                path=os.getenv("OPENWEBTEXT_PATH",
+                               "data/open-web-text/train.bin"),
                 seq_len=1024
             ),
             "test_dataset": lambda: OpenWebTextDataset(
-                path=os.getenv("OPENWEBTEXT_VAL_PATH", "data/open-web-text/train.bin"),
+                path=os.getenv("OPENWEBTEXT_VAL_PATH",
+                               "data/open-web-text/train.bin"),
                 seq_len=1024
             ),
             "criterion": nn.CrossEntropyLoss(),
@@ -809,10 +1413,11 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
             "is_language_model": True,
         },
     }
-    
+
     if model_name not in configs:
-        raise ValueError(f"Unknown model: {model_name}. Available: {list(configs.keys())}")
-    
+        raise ValueError(
+            f"Unknown model: {model_name}. Available: {list(configs.keys())}")
+
     return configs[model_name]
 
 
@@ -828,16 +1433,17 @@ class WarmupCosineAnnealing(optim.lr_scheduler._LRScheduler):
         self.current_step = 0
         super().__init__(optimizer, last_epoch)
         if self.warmup_steps > 0:
-            initial_lr = self.start_lr + (self.base_lr - self.start_lr) / float(self.warmup_steps)
+            initial_lr = self.start_lr + \
+                (self.base_lr - self.start_lr) / float(self.warmup_steps)
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = initial_lr
-                
+
     def get_lr(self):
         pass
 
     def step(self, epoch=None):
         self.current_step += 1
-        
+
         if self.current_step < self.warmup_steps:
             progress = float(self.current_step + 1) / float(self.warmup_steps)
             new_lr = self.start_lr + progress * (self.base_lr - self.start_lr)
@@ -846,10 +1452,62 @@ class WarmupCosineAnnealing(optim.lr_scheduler._LRScheduler):
             current_decay_step = self.current_step - self.warmup_steps
             progress = float(current_decay_step) / float(max(1, decay_steps))
             progress = min(progress, 1.0)
-            new_lr = self.eta_min + (self.base_lr - self.eta_min) * (1.0 + math.cos(math.pi * progress)) / 2.0
-            
+            new_lr = self.eta_min + \
+                (self.base_lr - self.eta_min) * \
+                (1.0 + math.cos(math.pi * progress)) / 2.0
+
         for param_group in self.optimizer.param_groups:
             param_group['lr'] = new_lr
+
+
+def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
+    print("\n>>> Starting Benchmark Mode (50 warmup steps + 2000 measured steps)...")
+    model.train()
+    
+    inputs, targets = next(iter(train_loader))
+    inputs = inputs.to(device)
+    targets = targets.to(device)
+    if inputs.is_floating_point():
+        inputs = inputs.to(cfg.get("io_dtype", torch.float32))
+
+    is_lm = cfg.get("is_language_model", False)
+    compute_dtype = cfg.get("compute_dtype", torch.float32)
+
+    def step():
+        optimizer.zero_grad()
+        with torch.autocast(device_type=device.type, dtype=compute_dtype, enabled=(compute_dtype != torch.float32)):
+            outputs = model(inputs)
+            if is_lm:
+                B, T, V = outputs.shape
+                loss = criterion(outputs.view(B * T, V), targets.view(B * T))
+            else:
+                loss = criterion(outputs, targets)
+        loss.backward()
+        optimizer.step()
+
+    print("Running 50 warmup steps...")
+    for _ in range(50):
+        step()
+
+    torch.cuda.synchronize()
+    print("Warmup complete. Running 2000 measured steps...")
+    start_time = time.time()
+    
+    for _ in range(2000):
+        step()
+        
+    torch.cuda.synchronize()
+    elapsed = time.time() - start_time
+    
+    batch_size = inputs.shape[0]
+    if is_lm:
+        seq_len = inputs.shape[1]
+        throughput = (2000 * batch_size * seq_len) / elapsed
+        print(f"Throughput: {throughput:.2f} tokens/s")
+    else:
+        throughput = (2000 * batch_size) / elapsed
+        print(f"Throughput: {throughput:.2f} samples/s")
+    print(f"Elapsed time for 2000 steps: {elapsed:.3f} s")
 
 
 def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, batch_writer):
@@ -858,22 +1516,37 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
     running_loss = 0.0
     running_correct = 0
     running_total = 0
-    
-    is_lm = cfg["is_language_model"]
-    
+
+    is_lm = cfg.get("is_language_model", False)
+
+    progress_interval = cfg.get("progress_print_interval", 100)
+    tracker = None
+
     for batch_idx, (inputs, targets) in enumerate(train_loader):
+        if batch_idx == 0:
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            csv_path = os.path.join("logs", f"pytorch_metrics_{ts}.csv")
+            os.makedirs("logs", exist_ok=True)
+            tracker = MemoryTracker(model, optimizer, csv_path)
+
         step_start = time.time()
         inputs, targets = inputs.to(device), targets.to(device)
-        
+
         if inputs.is_floating_point():
             inputs = inputs.to(cfg.get("io_dtype", torch.float32))
-            
+
+        # --- Memory Profiling for Batch 10 ---
+        if batch_idx == 10 and torch.cuda.is_available() and hasattr(torch.cuda.memory, "_record_memory_history"):
+            torch.cuda.memory._record_memory_history(max_entries=100000)
+
         optimizer.zero_grad()
-        
+
+        should_log_mem = (batch_idx + 1) % progress_interval == 0 and torch.cuda.is_available()
+
         compute_dtype = cfg.get("compute_dtype", torch.float32)
         with torch.autocast(device_type=device.type, dtype=compute_dtype, enabled=(compute_dtype != torch.float32)):
             outputs = model(inputs)
-            
+
             if is_lm:
                 # GPT-2: outputs (B, T, vocab_size), targets (B, T)
                 B, T, V = outputs.shape
@@ -889,33 +1562,78 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
                 correct = predicted.eq(targets).sum().item()
                 total = targets.size(0)
 
-        
+        if should_log_mem:
+            mem_peak_fwd = torch.cuda.max_memory_allocated(device) / (1024 ** 3)
+            mem_after_fwd = torch.cuda.memory_allocated(device) / (1024 ** 3)
+            torch.cuda.reset_peak_memory_stats(device)
+
         loss.backward()
-        optimizer.step()
         
+        if should_log_mem:
+            mem_peak_bwd = torch.cuda.max_memory_allocated(device) / (1024 ** 3)
+            
+        optimizer.step()
+
+        if batch_idx == 0 and tracker is not None:
+            tracker.close()
+            tracker = None
+
+        # --- Memory Profiling for Batch 10 ---
+        if batch_idx == 10 and torch.cuda.is_available() and hasattr(torch.cuda.memory, "_record_memory_history"):
+            torch.cuda.memory._dump_snapshot("memory_snapshot.pickle")
+            torch.cuda.memory._record_memory_history(enabled=False)
+            print("\n[+] Saved PyTorch memory snapshot to memory_snapshot.pickle")
+            print("    View it by uploading to https://pytorch.org/memory_viz")
+
         if cfg.get("scheduler_type") == "warmup_cosine_annealing" and "scheduler_obj" in cfg:
             cfg["scheduler_obj"].step()
-        
+
         step_ms = int((time.time() - step_start) * 1000)
-        
+
         running_loss += loss.item() * total
         running_correct += correct
         running_total += total
-        
+
         batch_loss = loss.item()
         batch_acc = 100.0 * correct / total
         batch_writer.writerow([
             epoch, batch_idx + 1, f"{batch_loss:.6f}",
             f"{batch_acc:.4f}", step_ms
         ])
-        
-        if (batch_idx + 1) % 100 == 0:
+
+        if (batch_idx + 1) % progress_interval == 0:
+            if torch.cuda.is_available():
+                mem_res = torch.cuda.max_memory_reserved(device) / (1024 ** 3)
+                mem_info = f" | Res: {mem_res:.3f} GiB | PeakFwd: {mem_peak_fwd:.3f} GiB | PeakBwd: {mem_peak_bwd:.3f} GiB"
+                
+                mem_weights = sum(p.nelement() * p.element_size() for p in model.parameters()) / (1024**3)
+                mem_grads = sum(p.grad.nelement() * p.grad.element_size() for p in model.parameters() if p.grad is not None) / (1024**3)
+                mem_optim = 0
+                for state in optimizer.state.values():
+                    for k, v in state.items():
+                        if isinstance(v, torch.Tensor):
+                            mem_optim += v.nelement() * v.element_size()
+                mem_optim /= (1024**3)
+                mem_base = mem_weights + mem_grads + mem_optim
+                print(
+                    f"\n--- Memory Breakdown (Batch {batch_idx + 1}) ---"
+                    f"\n  Baseline (Total Alloc before fwd)       : {mem_base:.3f} GiB"
+                    f"\n    -> Model Weights                      : {mem_weights:.3f} GiB"
+                    f"\n    -> Weight Gradients                   : {mem_grads:.3f} GiB"
+                    f"\n    -> Optimizer States                   : {mem_optim:.3f} GiB"
+                    f"\n  Peak Memory During Forward Pass         : {mem_peak_fwd:.3f} GiB"
+                    f"\n  Saved Activations (End of Forward)      : {mem_after_fwd - mem_base:.3f} GiB"
+                    f"\n  Peak Memory During Backward Pass        : {mem_peak_bwd:.3f} GiB"
+                    f"\n----------------------------------------"
+                )
+            else:
+                mem_info = ""
             print(
                 f"[Train Batch {batch_idx + 1}/{len(train_loader)}] "
                 f"Loss: {batch_loss:.4f} | Acc: {batch_acc:.2f}% | "
-                f"Step time: {step_ms}ms"
+                f"Step time: {step_ms}ms{mem_info}"
             )
-    
+
     train_loss = running_loss / running_total
     train_acc = 100.0 * running_correct / running_total
     return train_loss, train_acc
@@ -927,23 +1645,24 @@ def validate(model, test_loader, criterion, device, cfg, epoch, val_writer):
     val_loss_sum = 0.0
     val_correct = 0
     val_total = 0
-    
+
     is_lm = cfg["is_language_model"]
-    
+
     with torch.no_grad():
         for val_step, (inputs, targets) in enumerate(test_loader):
             inputs, targets = inputs.to(device), targets.to(device)
-            
+
             if inputs.is_floating_point():
                 inputs = inputs.to(cfg.get("io_dtype", torch.float32))
-                
+
             compute_dtype = cfg.get("compute_dtype", torch.float32)
             with torch.autocast(device_type=device.type, dtype=compute_dtype, enabled=(compute_dtype != torch.float32)):
                 outputs = model(inputs)
-                
+
                 if is_lm:
                     B, T, V = outputs.shape
-                    loss = criterion(outputs.view(B * T, V), targets.view(B * T))
+                    loss = criterion(outputs.view(B * T, V),
+                                     targets.view(B * T))
                     _, predicted = outputs.view(B * T, V).max(1)
                     correct = predicted.eq(targets.view(B * T)).sum().item()
                     total = B * T
@@ -953,15 +1672,15 @@ def validate(model, test_loader, criterion, device, cfg, epoch, val_writer):
                     correct = predicted.eq(targets).sum().item()
                     total = targets.size(0)
 
-            
             val_loss_sum += loss.item() * total
             val_correct += correct
             val_total += total
-            
+
             step_loss = loss.item()
             step_acc = 100.0 * correct / total
-            val_writer.writerow([epoch, val_step + 1, f"{step_loss:.6f}", f"{step_acc:.4f}"])
-    
+            val_writer.writerow(
+                [epoch, val_step + 1, f"{step_loss:.6f}", f"{step_acc:.4f}"])
+
     val_loss = val_loss_sum / val_total
     val_acc = 100.0 * val_correct / val_total
     return val_loss, val_acc
@@ -982,6 +1701,7 @@ def str_to_dtype(dtype_str: str):
     else:
         return torch.float32
 
+
 def load_jsonc(path):
     with open(path, "r") as f:
         content = f.read()
@@ -989,11 +1709,14 @@ def load_jsonc(path):
     content = re.sub(r'/\*.*?\*/', '', content, flags=re.DOTALL)
     return json.loads(content)
 
+
 def main():
-    parser = argparse.ArgumentParser(description="Unified tunx PyTorch Trainer")
-    parser.add_argument("--config", type=str, required=True, help="Path to JSON config file")
+    parser = argparse.ArgumentParser(
+        description="Unified tunx PyTorch Trainer")
+    parser.add_argument("--config", type=str, required=True,
+                        help="Path to JSON config file")
     args = parser.parse_args()
-    
+
     json_cfg = load_jsonc(args.config)
     model_name_mapped = json_cfg.get("model_name", "")
     # Map from json config model_name to python internal model name
@@ -1007,50 +1730,55 @@ def main():
         internal_model_name = "resnet50_imagenet100"
     elif "gpt2" in model_name_mapped:
         internal_model_name = "gpt2_small"
+    elif model_name_mapped in ["tunx_v1", "tunx_v2", "tunx_v3", "tunx_v4"]:
+        internal_model_name = model_name_mapped
     else:
-        internal_model_name = "resnet9_cifar10" # Default fallback
-        
+        internal_model_name = "resnet9_cifar10"  # Default fallback
+
     cfg = get_model_config(internal_model_name)
-    
+
     # Override with JSON config
     cfg["epochs"] = json_cfg.get("epochs", cfg["epochs"])
     if json_cfg.get("max_steps", -1) > 0:
-        cfg["epochs"] = 1 # We will handle max_steps later or rely on epochs for now
-    
+        cfg["epochs"] = 1  # We will handle max_steps later or rely on epochs for now
+
     cfg["batch_size"] = json_cfg.get("batch_size", cfg["batch_size"])
     cfg["num_workers"] = json_cfg.get("num_threads", cfg["num_workers"])
-    
+    cfg["progress_print_interval"] = json_cfg.get("progress_print_interval", 100);
+
     opt_cfg = json_cfg.get("optimizer", {})
     cfg["optimizer_type"] = opt_cfg.get("type", cfg["optimizer_type"])
     cfg["lr"] = opt_cfg.get("learning_rate", cfg.get("lr", 0.001))
     cfg["weight_decay"] = opt_cfg.get("weight_decay", 0.0)
-    
+
     sched_cfg = json_cfg.get("scheduler", {})
-    cfg["scheduler_type"] = sched_cfg.get("type", cfg.get("scheduler_type", "step_lr"))
+    cfg["scheduler_type"] = sched_cfg.get(
+        "type", cfg.get("scheduler_type", "step_lr"))
     cfg["scheduler_params"] = sched_cfg
-    
+
     device_str = json_cfg.get("device", "cuda:0").lower()
     device = torch.device(device_str if torch.cuda.is_available() else "cpu")
-    
+
     cfg["io_dtype"] = str_to_dtype(json_cfg.get("io_dtype", "FP32"))
     cfg["param_dtype"] = str_to_dtype(json_cfg.get("param_dtype", "FP32"))
     cfg["compute_dtype"] = str_to_dtype(json_cfg.get("compute_dtype", "FP32"))
-    
+    cfg["benchmark_mode"] = json_cfg.get("benchmark_mode", False)
+
     args.model = internal_model_name
-    
+
     print(f">>> Running on device: {device}")
     print(f">>> Model: {args.model} from config {args.config}")
     print(f">>> Epochs: {cfg['epochs']}")
     print(f">>> Batch size: {cfg['batch_size']}")
     print(f">>> Learning rate: {cfg['lr']}")
-    
+
     # Load datasets
     print(">>> Loading datasets...")
     train_set = cfg["train_dataset"]()
     test_set = cfg["test_dataset"]()
     print(f">>> Train samples: {len(train_set)}")
     print(f">>> Val samples: {len(test_set)}")
-    
+
     # Create data loaders
     train_loader = DataLoader(
         train_set,
@@ -1066,7 +1794,7 @@ def main():
         num_workers=cfg["num_workers"],
         pin_memory=True
     )
-    
+
     # Create model
     print(">>> Creating model...")
     model = cfg["model_cls"]().to(device).to(cfg["param_dtype"])
@@ -1078,10 +1806,10 @@ def main():
     #     model = torch.compile(model, mode="reduce-overhead")
     # else:
     #     print(">>> torch.compile is not supported in this PyTorch version.")
-    
+
     # Loss function
     criterion = cfg["criterion"]
-    
+
     # Optimizer
     if cfg["optimizer_type"] == "adamw":
         optimizer = optim.AdamW(
@@ -1100,85 +1828,96 @@ def main():
             weight_decay=3e-4,
             amsgrad=False,
         )
-    
+
     # Scheduler
     sched_type = cfg.get("scheduler_type", "step_lr")
     sched_params = cfg.get("scheduler_params", {})
-    
+
     if sched_type == "warmup_cosine_annealing":
-        warmup_steps = sched_params.get("warmup_steps", int(0.1 * len(train_loader) * cfg["epochs"]))
-        total_steps = sched_params.get("total_steps", sched_params.get("T_max", len(train_loader) * cfg["epochs"]))
+        warmup_steps = sched_params.get("warmup_steps", int(
+            0.1 * len(train_loader) * cfg["epochs"]))
+        total_steps = sched_params.get("total_steps", sched_params.get(
+            "T_max", len(train_loader) * cfg["epochs"]))
         start_lr = sched_params.get("start_lr", 0.0)
         base_lr = sched_params.get("base_lr", cfg["lr"])
         eta_min = sched_params.get("eta_min", 0.0)
-        
+
         scheduler = WarmupCosineAnnealing(
-            optimizer, 
-            warmup_steps=warmup_steps, 
-            total_steps=total_steps, 
-            start_lr=start_lr, 
-            base_lr=base_lr, 
+            optimizer,
+            warmup_steps=warmup_steps,
+            total_steps=total_steps,
+            start_lr=start_lr,
+            base_lr=base_lr,
             eta_min=eta_min
         )
         cfg["scheduler_obj"] = scheduler
     elif sched_type == "step_lr":
         step_size = sched_params.get("step_size", 1000)
         gamma = sched_params.get("gamma", 0.1)
-        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=step_size, gamma=gamma)
+        scheduler = optim.lr_scheduler.StepLR(
+            optimizer, step_size=step_size, gamma=gamma)
     else:
         # Fallback
-        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=1000, gamma=0.1)
-    
+        scheduler = optim.lr_scheduler.StepLR(
+            optimizer, step_size=1000, gamma=0.1)
+
     # Logging setup
     ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = "logs"
     os.makedirs(log_dir, exist_ok=True)
-    
-    batch_csv_path = os.path.join(log_dir, f"{args.model}_batch_{ts}.csv")
-    epoch_csv_path = os.path.join(log_dir, f"{args.model}_epoch_{ts}.csv")
-    val_csv_path = os.path.join(log_dir, f"{args.model}_val_{ts}.csv")
-    
+
+    batch_csv_path = os.path.join(
+        log_dir, f"torch_{args.model}_batch_{ts}.csv")
+    epoch_csv_path = os.path.join(
+        log_dir, f"torch_{args.model}_epoch_{ts}.csv")
+    val_csv_path = os.path.join(log_dir, f"torch_{args.model}_val_{ts}.csv")
+
     batch_csv_file = open(batch_csv_path, "w", newline="")
     epoch_csv_file = open(epoch_csv_path, "w", newline="")
     val_csv_file = open(val_csv_path, "w", newline="")
-    
+
     batch_writer = csv.writer(batch_csv_file)
     epoch_writer = csv.writer(epoch_csv_file)
     val_writer = csv.writer(val_csv_file)
-    
+
     batch_writer.writerow(["epoch", "step", "loss", "accuracy_pct", "time_ms"])
-    epoch_writer.writerow(["epoch", "train_loss", "train_accuracy_pct", "val_loss", "val_accuracy_pct"])
+    epoch_writer.writerow(
+        ["epoch", "train_loss", "train_accuracy_pct", "val_loss", "val_accuracy_pct"])
     val_writer.writerow(["epoch", "step", "loss", "accuracy_pct"])
-    
+
     # Training loop
+    if cfg["benchmark_mode"]:
+        run_benchmark(model, train_loader, criterion, optimizer, device, cfg)
+        return
+
     print(f"\n>>> Starting training for {cfg['epochs']} epochs...")
     for epoch in range(1, cfg["epochs"] + 1):
         print(f"\n===== Epoch {epoch}/{cfg['epochs']} =====")
         epoch_start = time.time()
-        
+
         # Train
         train_loss, train_acc = train_epoch(
             model, train_loader, criterion, optimizer, device, cfg,
             epoch, batch_writer
         )
         batch_csv_file.flush()
-        
+
         # Learning rate schedule step
         if cfg["scheduler_type"] == "warmup_cosine_annealing":
             # Already stepped per batch in train_epoch
             pass
         else:
             scheduler.step()
-        
+
         # Validate
         val_loss, val_acc = validate(
             model, test_loader, criterion, device, cfg,
             epoch, val_writer
         )
         val_csv_file.flush()
-        
+
         epoch_time = time.time() - epoch_start
-        
+
         # Log epoch summary
         epoch_writer.writerow([
             epoch,
@@ -1188,22 +1927,22 @@ def main():
             f"{val_acc:.4f}"
         ])
         epoch_csv_file.flush()
-        
+
         print(
             f"Epoch {epoch}/{cfg['epochs']} completed in {epoch_time:.2f}s\n"
             f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.2f}%\n"
             f"Val   Loss: {val_loss:.4f} | Val   Acc: {val_acc:.2f}%"
         )
-        
+
         if cfg["is_language_model"]:
             perplexity = math.exp(min(val_loss, 20))
             print(f"Val Perplexity: {perplexity:.2f}")
-    
+
     # Cleanup
     batch_csv_file.close()
     epoch_csv_file.close()
     val_csv_file.close()
-    
+
     print(f"\n>>> Logs saved to {log_dir}/{args.model}_*_{ts}.csv")
     print(f">>> Training completed for {args.model}!")
 

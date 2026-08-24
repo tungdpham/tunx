@@ -6,6 +6,9 @@
  */
 #pragma once
 
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+
 #include <asio.hpp>
 #include <device/stream.hpp>
 #include <memory>
@@ -15,16 +18,20 @@
 
 namespace tunx {
 
+struct TCPWorkerConfig {
+  Endpoint endpoint;
+  double compute_power = 1.0;
+  Vec<double> interconnect_speeds;
+};
+
 struct TCPConfig {
   std::string host = "";
   int port = 0;
-  std::string local_worker_host = "";
-  int local_worker_port = 0;
+  int local_worker_position = 0;
   uint32_t num_io_threads = 4;
   uint32_t max_packet_size = 4 * 1024 * 1024;  // 4 MB
   uint32_t skts_per_endpoint = 1;
-  Vec<Endpoint> worker_endpoints = {};
-  Vec<size_t> partition_ratios;
+  Vec<TCPWorkerConfig> workers = {};
 
   void load_from_json(const std::string &config_path) {
     std::ifstream file(config_path);
@@ -36,23 +43,39 @@ struct TCPConfig {
 
     host = j.value("host", host);
     port = j.value("port", port);
-    local_worker_host = j.value("local_worker_host", local_worker_host);
-    local_worker_port = j.value("local_worker_port", local_worker_port);
+    local_worker_position = j.value("local_worker_position", local_worker_position);
     num_io_threads = j.value("num_io_threads", num_io_threads);
     max_packet_size = j.value("max_packet_size", max_packet_size);
     skts_per_endpoint = j.value("skts_per_endpoint", skts_per_endpoint);
-    if (j.contains("worker_endpoints")) {
-      for (const auto &ep_json : j["worker_endpoints"]) {
-        worker_endpoints.push_back(Endpoint::from_json(ep_json));
+    
+    if (j.contains("workers")) {
+      for (const auto &w_json : j["workers"]) {
+        TCPWorkerConfig wc;
+        if (w_json.contains("endpoint")) {
+          wc.endpoint = Endpoint::from_json(w_json["endpoint"]);
+        } else {
+          throw std::runtime_error("Worker config missing 'endpoint'");
+        }
+        wc.compute_power = w_json.value("compute_power", 1.0);
+        if (w_json.contains("interconnect_speeds")) {
+          wc.interconnect_speeds = w_json["interconnect_speeds"].get<Vec<double>>();
+        }
+        workers.push_back(wc);
       }
     } else {
-      std::cerr << "Warning: No worker_endpoints specified in config file." << std::endl;
+      std::cerr << "Warning: No workers specified in config file." << std::endl;
     }
-    if (j.contains("partition_ratios")) {
-      partition_ratios = j["partition_ratios"].get<Vec<size_t>>();
-    } else {
-      throw std::runtime_error("TCP config must contain partition_ratios");
-    }
+  }
+
+  void print_config() {
+    fmt::print("TCP Config:\n");
+    fmt::print("  Host: {}\n", host);
+    fmt::print("  Port: {}\n", port);
+    fmt::print("  Local Worker Position: {}\n", local_worker_position);
+    fmt::print("  Number of IO threads: {}\n", num_io_threads);
+    fmt::print("  Max packet size: {}\n", max_packet_size);
+    fmt::print("  Sockets per endpoint: {}\n", skts_per_endpoint);
+    fmt::print("  Workers: {} configured\n", workers.size());
   }
 };
 

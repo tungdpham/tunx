@@ -74,10 +74,9 @@ public:
   OperationNode* add_op(std::string uuid, size_t workspace_req,
                         const std::vector<ActivationNode*>& inputs,
                         const std::vector<ActivationNode*>& outputs,
-                        const std::vector<ActivationNode*>& cache = {},
-                        size_t residual_mem = 0) {
-    auto [op, inserted] =
-        ops_.insert({uuid, OperationNode(uuid, workspace_req, inputs, outputs, cache, residual_mem)});
+                        const std::vector<ActivationNode*>& cache = {}, size_t residual_mem = 0) {
+    auto [op, inserted] = ops_.insert(
+        {uuid, OperationNode(uuid, workspace_req, inputs, outputs, cache, residual_mem)});
     return inserted ? &op->second : nullptr;
   }
 
@@ -104,7 +103,7 @@ public:
 
 inline std::pair<std::map<std::string, std::set<std::string>>,
                  std::map<std::string, std::set<std::string>>>
-get_dependencies(Graph& graph) {
+get_op_dependencies(Graph& graph) {
   std::map<std::string, std::string> tensor_producer;
   for (auto& [uuid, node] : graph.op_nodes()) {
     for (auto* t : node.outputs()) {
@@ -127,6 +126,22 @@ get_dependencies(Graph& graph) {
   for (auto& [op_id, dep_set] : deps) {
     for (auto& dep : dep_set) {
       dependents[dep].insert(op_id);
+    }
+  }
+  return {deps, dependents};
+}
+
+inline std::pair<std::map<std::string, std::set<std::string>>,
+                 std::map<std::string, std::set<std::string>>>
+get_tensor_dependencies(Graph& graph) {
+  std::map<std::string, std::set<std::string>> deps;
+  std::map<std::string, std::set<std::string>> dependents;
+  for (auto& [uuid, node] : graph.op_nodes()) {
+    for (auto* in : node.inputs()) {
+      for (auto* out : node.outputs()) {
+        deps[out->uuid()].insert(in->uuid());
+        dependents[in->uuid()].insert(out->uuid());
+      }
     }
   }
   return {deps, dependents};
@@ -190,7 +205,7 @@ inline void save_graph_to_dot(Graph& graph, const std::string& filename, bool is
       }
       b = all_outputs + residual - memory_consumes;
     } else {
-      a = all_outputs + workspace;
+      a = all_inputs + workspace;
       long long memory_consumes = residual;
       for (auto* t : op.outputs()) {
         if (in_deg[t->uuid()] == 1) {

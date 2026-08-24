@@ -20,3 +20,6 @@ create_executable(gpt2_inference.cpp LIBS tunx_lib)
 
 # Test executables
 create_executable(graph_api_v2_test.cpp LIBS tunx_lib)
+
+# Partitioner executables
+create_executable(partitioner_example.cpp LIBS tunx_lib)
