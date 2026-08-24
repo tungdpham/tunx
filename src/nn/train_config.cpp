@@ -80,7 +80,7 @@ void TrainingConfig::print_config() const {
             << std::endl;
   std::cout << "  Print LayerImpl Profiling Info: " << (print_layer_profiling ? "Yes" : "No")
             << std::endl;
-  std::cout << "  Print LayerImpl Memory Usage: " << (print_layer_memory_usage ? "Yes" : "No")
+  std::cout << "  Print LayerImpl Memory Usage: " << (print_memory_usage ? "Yes" : "No")
             << std::endl;
   std::cout << "  Number of Microbatches: " << num_microbatches << std::endl;
   std::cout << "  Device ID: "
@@ -122,7 +122,7 @@ void TrainingConfig::load_from_json(const string &config_path) {
     profiler_type = ProfilerType::NONE;
   }
   print_layer_profiling = config.value("print_layer_profiling", print_layer_profiling);
-  print_layer_memory_usage = config.value("print_layer_memory_usage", print_layer_memory_usage);
+  print_memory_usage = config.value("print_memory_usage", print_memory_usage);
   num_microbatches = config.value("num_microbatches", num_microbatches);
   if (config.contains("device")) {
     string device_str = config["device"];

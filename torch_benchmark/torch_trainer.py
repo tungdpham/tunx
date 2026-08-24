@@ -312,9 +312,9 @@ class BasicResidualBlock(nn.Module):
 
     def forward(self, x):
         identity = x
-        out = F.relu(self.bn1(self.conv1(x)), inplace=True)
+        out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
-        out = F.relu(out + identity, inplace=True)
+        out = F.relu(out + identity)
         return out
 
 
@@ -352,16 +352,16 @@ class ResNet9CIFAR10(nn.Module):
         self.fc = nn.Linear(512, num_classes, bias=True)
 
     def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)), inplace=True)
-        x = F.relu(self.bn2(self.conv2(x)), inplace=True)
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
         x = self.maxpool(x)
         x = self.res1(x)
         x = self.res2(x)
-        x = F.relu(self.bn3(self.conv3(x)), inplace=True)
+        x = F.relu(self.bn3(self.conv3(x)))
         x = self.maxpool2(x)
         x = self.res3(x)
         x = self.res4(x)
-        x = F.relu(self.bn4(self.conv4(x)), inplace=True)
+        x = F.relu(self.bn4(self.conv4(x)))
         x = self.maxpool3(x)
         x = self.res5(x)
         x = self.avgpool(x)
@@ -393,9 +393,9 @@ class WideResidualBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         sc = self.shortcut(x) if self.shortcut is not None else x
-        out = F.relu(self.bn1(x), inplace=True)
+        out = F.relu(self.bn1(x))
         out = self.conv1(out)
-        out = F.relu(self.bn2(out), inplace=True)
+        out = F.relu(self.bn2(out))
         if self.dropout is not None:
             out = self.dropout(out)
         out = self.conv2(out)
@@ -449,7 +449,7 @@ class WRN16_8CIFAR100(nn.Module):
         x = self.group2_block2(x)
         x = self.group3_block1(x)
         x = self.group3_block2(x)
-        x = F.relu(self.bn_final(x), inplace=True)
+        x = F.relu(self.bn_final(x))
         x = self.avgpool(x)
         x = self.flatten(x)
         x = self.fc(x)
@@ -484,11 +484,11 @@ class BottleneckBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         sc = self.shortcut(x) if self.shortcut is not None else x
-        out = F.relu(self.bn1(self.conv1(x)), inplace=True)
-        out = F.relu(self.bn2(self.conv2(out)), inplace=True)
-        out = F.relu(self.bn3(self.conv3(out)), inplace=True)
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = F.relu(self.bn2(self.conv2(out)))
+        out = F.relu(self.bn3(self.conv3(out)))
         out = out + sc
-        out = F.relu(out, inplace=True)
+        out = F.relu(out)
         return out
 
 
@@ -537,7 +537,7 @@ class ResNet50TinyImageNet(nn.Module):
         self.fc = nn.Linear(2048, num_classes, bias=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.relu(self.bn1(self.conv1(x)), inplace=True)
+        x = F.relu(self.bn1(self.conv1(x)))
         x = self.maxpool(x)
         x = self.layer1(x)
         x = self.layer2(x)
@@ -594,7 +594,7 @@ class ResNet50ImageNet100(nn.Module):
         self.fc = nn.Linear(2048, num_classes, bias=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.relu(self.bn1(self.conv1(x)), inplace=True)
+        x = F.relu(self.bn1(self.conv1(x)))
         x = self.maxpool(x)
         x = self.layer1(x)
         x = self.layer2(x)
@@ -822,25 +822,25 @@ class TunxV1(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # conv1 -> bn1 -> pool1
         x = self.conv1(x)
-        x = F.relu(self.bn1(x), inplace=True)
+        x = F.relu(self.bn1(x))
         x = self.pool1(x)
         
         b1 = self.b1_up1(x)
-        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = F.relu(self.b1_bn1(b1))
         b1 = self.b1_up2(b1)
-        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = F.relu(self.b1_bn2(b1))
         b1 = self.b1_down(b1)
         b1 = self.b1_pool(b1)
         
         # b2 branch
         b2 = self.b2_trans(x)
-        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = F.relu(self.b2_bn1(b2))
         b2 = self.b2_up2(b2)
-        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = F.relu(self.b2_bn2(b2))
         b2 = self.b2_conv(b2)
-        b2 = F.relu(self.b2_bn3(b2), inplace=True)
+        b2 = F.relu(self.b2_bn3(b2))
         b2 = self.b2_conv2(b2)
-        b2 = F.relu(self.b2_bn4(b2), inplace=True)
+        b2 = F.relu(self.b2_bn4(b2))
         b2 = -b2
         b2 = self.b2_pool(b2)
         
@@ -848,11 +848,11 @@ class TunxV1(nn.Module):
         b3 = self.b3_up2(b3)
         b3 = self.b3_pool(b3)
         b3 = self.b3_down1(b3)
-        b3 = F.relu(self.b3_bn2(b3), inplace=True)
+        b3 = F.relu(self.b3_bn2(b3))
         
         # merge
         y = b1 + b2 + b3
-        y = F.relu(y, inplace=True)
+        y = F.relu(y)
         y = self.flatten(y)
         return self.fc(y)
 
@@ -913,20 +913,20 @@ class TunxV2(nn.Module):
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
-        x = F.relu(self.bn1(x), inplace=True)
+        x = F.relu(self.bn1(x))
         x = self.pool1(x)
         
         b1 = self.b1_up1(x)
-        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = F.relu(self.b1_bn1(b1))
         b1 = self.b1_up2(b1)
-        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = F.relu(self.b1_bn2(b1))
         b1 = self.b1_down(b1)
         b1 = self.b1_pool(b1)
         
         b2 = self.b2_trans(x)
-        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = F.relu(self.b2_bn1(b2))
         b2 = self.b2_up2(b2)
-        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = F.relu(self.b2_bn2(b2))
         b2 = self.b2_conv(b2)
         b2 = self.b2_conv2(b2)
         b2 = -b2
@@ -937,7 +937,7 @@ class TunxV2(nn.Module):
         b3 = self.b3_block(b3)
         
         y = b1 + b2 + b3
-        y = F.relu(y, inplace=True)
+        y = F.relu(y)
         y = self.flatten(y)
         return self.fc(y)
 
@@ -999,20 +999,20 @@ class TunxV3(nn.Module):
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
-        x = F.relu(self.bn1(x), inplace=True)
+        x = F.relu(self.bn1(x))
         x = self.pool1(x)
         
         b1 = self.b1_up1(x)
-        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = F.relu(self.b1_bn1(b1))
         b1 = self.b1_up2(b1)
-        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = F.relu(self.b1_bn2(b1))
         b1 = self.b1_down(b1)
         b1 = self.b1_pool(b1)
         
         b2 = self.b2_trans(x)
-        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = F.relu(self.b2_bn1(b2))
         b2 = self.b2_up2(b2)
-        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = F.relu(self.b2_bn2(b2))
         b2 = self.b2_conv(b2)
         b2 = self.b2_conv2(b2)
         b2 = -b2
@@ -1024,7 +1024,7 @@ class TunxV3(nn.Module):
         b3 = self.b3_block(b3)
         
         y = b1 + b2 + b3
-        y = F.relu(y, inplace=True)
+        y = F.relu(y)
         y = self.flatten(y)
         return self.fc(y)
 
@@ -1093,13 +1093,13 @@ class TunxV4(nn.Module):
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.stem_conv(x)
-        x = F.relu(self.stem_bn(x), inplace=True)
+        x = F.relu(self.stem_bn(x))
         x = self.stem_pool(x)
         x = self.stem_project(x)
         
         x = self.rfj_d3(x)
         
-        x = F.relu(x, inplace=True)
+        x = F.relu(x)
         x = self.out_pool(x)
         x = self.flatten(x)
         return self.fc(x)
@@ -1461,7 +1461,7 @@ class WarmupCosineAnnealing(optim.lr_scheduler._LRScheduler):
 
 
 def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
-    print("\n>>> Starting Benchmark Mode (50 warmup steps + 2000 measured steps)...")
+    print(">>> Starting Benchmark Mode (50 warmup steps + 2000 measured steps)...")
     model.train()
     
     inputs, targets = next(iter(train_loader))
@@ -1472,6 +1472,16 @@ def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
 
     is_lm = cfg.get("is_language_model", False)
     compute_dtype = cfg.get("compute_dtype", torch.float32)
+    
+    if cfg.get("print_memory_usage", False):
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_path = f"logs/torch_{cfg['model_name']}_{ts}_memory_metrics.csv"
+        if cfg.get("log_dir"):
+            csv_path = os.path.join(cfg["log_dir"], csv_path)
+        print(f"Profiling memory usage to {csv_path} for the first 5 warmup steps...")
+        tracker = MemoryTracker(model, optimizer, csv_path)
+    else:
+        tracker = None
 
     def step():
         optimizer.zero_grad()
@@ -1486,18 +1496,47 @@ def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
         optimizer.step()
 
     print("Running 50 warmup steps...")
-    for _ in range(50):
+    for i in range(50):
         step()
+        if tracker is not None and i == 4:
+            tracker.close()
+            tracker = None
 
     torch.cuda.synchronize()
     print("Warmup complete. Running 2000 measured steps...")
     start_time = time.time()
     
-    for _ in range(2000):
-        step()
+    events = [[torch.cuda.Event(enable_timing=True) for _ in range(5)] for _ in range(2000)]
+    
+    for i in range(2000):
+        e_start, e_zero, e_fwd, e_bwd, e_opt = events[i]
+        
+        e_start.record()
+        optimizer.zero_grad()
+        e_zero.record()
+        
+        with torch.autocast(device_type=device.type, dtype=compute_dtype, enabled=(compute_dtype != torch.float32)):
+            outputs = model(inputs)
+            if is_lm:
+                B, T, V = outputs.shape
+                loss = criterion(outputs.view(B * T, V), targets.view(B * T))
+            else:
+                loss = criterion(outputs, targets)
+        e_fwd.record()
+        
+        loss.backward()
+        e_bwd.record()
+        
+        optimizer.step()
+        e_opt.record()
         
     torch.cuda.synchronize()
     elapsed = time.time() - start_time
+    
+    zero_ms = sum(e[0].elapsed_time(e[1]) for e in events)
+    fwd_ms = sum(e[1].elapsed_time(e[2]) for e in events)
+    bwd_ms = sum(e[2].elapsed_time(e[3]) for e in events)
+    opt_ms = sum(e[3].elapsed_time(e[4]) for e in events)
     
     batch_size = inputs.shape[0]
     if is_lm:
@@ -1508,6 +1547,10 @@ def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
         throughput = (2000 * batch_size) / elapsed
         print(f"Throughput: {throughput:.2f} samples/s")
     print(f"Elapsed time for 2000 steps: {elapsed:.3f} s")
+    print(f"Total Forward time: {fwd_ms:.2f} ms")
+    print(f"Total Backward time: {bwd_ms:.2f} ms")
+    print(f"Total Optimizer time: {opt_ms:.2f} ms")
+    print(f"Total Zero Grad time: {zero_ms:.2f} ms")
 
 
 def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, batch_writer):
@@ -1738,6 +1781,7 @@ def main():
     cfg = get_model_config(internal_model_name)
 
     # Override with JSON config
+    cfg['model_name'] = json_cfg.get('model_name', 'resnet9_cifar10')
     cfg["epochs"] = json_cfg.get("epochs", cfg["epochs"])
     if json_cfg.get("max_steps", -1) > 0:
         cfg["epochs"] = 1  # We will handle max_steps later or rely on epochs for now
@@ -1745,6 +1789,7 @@ def main():
     cfg["batch_size"] = json_cfg.get("batch_size", cfg["batch_size"])
     cfg["num_workers"] = json_cfg.get("num_threads", cfg["num_workers"])
     cfg["progress_print_interval"] = json_cfg.get("progress_print_interval", 100);
+    cfg["print_memory_usage"] = json_cfg.get("print_memory_usage", False)
 
     opt_cfg = json_cfg.get("optimizer", {})
     cfg["optimizer_type"] = opt_cfg.get("type", cfg["optimizer_type"])
@@ -1758,6 +1803,8 @@ def main():
 
     device_str = json_cfg.get("device", "cuda:0").lower()
     device = torch.device(device_str if torch.cuda.is_available() else "cpu")
+    if device.type == 'cuda':
+        torch.backends.cudnn.benchmark = True
 
     cfg["io_dtype"] = str_to_dtype(json_cfg.get("io_dtype", "FP32"))
     cfg["param_dtype"] = str_to_dtype(json_cfg.get("param_dtype", "FP32"))
@@ -1801,11 +1848,14 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     print(f">>> Parameters: {total_params:,}")
 
-    # if hasattr(torch, "compile"):
-    #     print(">>> Compiling model with torch.compile...")
-    #     model = torch.compile(model, mode="reduce-overhead")
-    # else:
-    #     print(">>> torch.compile is not supported in this PyTorch version.")
+    if hasattr(torch, "compile"):
+        if not cfg.get("print_memory_usage", False):
+            print(">>> Compiling model with torch.compile...")
+            model = torch.compile(model, mode="reduce-overhead")
+        else:
+            print(">>> Skipping torch.compile to allow accurate memory profiling.")
+    else:
+        print(">>> torch.compile is not supported in this PyTorch version.")
 
     # Loss function
     criterion = cfg["criterion"]
@@ -1867,10 +1917,10 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
 
     batch_csv_path = os.path.join(
-        log_dir, f"torch_{args.model}_batch_{ts}.csv")
+        log_dir, f"torch_{args.model}_{ts}_batch.csv")
     epoch_csv_path = os.path.join(
-        log_dir, f"torch_{args.model}_epoch_{ts}.csv")
-    val_csv_path = os.path.join(log_dir, f"torch_{args.model}_val_{ts}.csv")
+        log_dir, f"torch_{args.model}_{ts}_epoch.csv")
+    val_csv_path = os.path.join(log_dir, f"torch_{args.model}_{ts}_val.csv")
 
     batch_csv_file = open(batch_csv_path, "w", newline="")
     epoch_csv_file = open(epoch_csv_path, "w", newline="")

@@ -35,6 +35,11 @@
 #include "threading/thread_wrapper.hpp"
 #include "type/type.hpp"
 
+#ifdef TUNX_USE_CUDA
+#include <cuda_runtime.h>
+#include "device/cuda_device.hpp"
+#endif
+
 using namespace std;
 
 namespace tunx {
@@ -613,7 +618,25 @@ static void run_benchmark(Graph &graph, unique_ptr<Dataset> &train_dataset,
   Tensor device_labels = to_device(batch_labels, model_device);
   GraphExecutor executor(graph);
   
-  auto step = [&]() {
+#ifdef TUNX_USE_CUDA
+  cudaStream_t cu_stream = *(model_device.default_stream().as<cuda_stream>());
+  std::vector<cudaEvent_t> events(2000 * 5);
+  for (int i = 0; i < 2000 * 5; ++i) {
+      cudaEventCreate(&events[i]);
+  }
+#endif
+  
+  auto step = [&](int i) {
+#ifdef TUNX_USE_CUDA
+    if (i >= 0) cudaEventRecord(events[i * 5 + 0], cu_stream);
+#endif
+
+    optimizer->zero_grads();
+
+#ifdef TUNX_USE_CUDA
+    if (i >= 0) cudaEventRecord(events[i * 5 + 1], cu_stream);
+#endif
+
     TensorBundle inputs{{"input", device_input}};
     TensorBundle outputs = executor.forward(inputs);
     Tensor predictions = outputs.get("output");
@@ -628,16 +651,27 @@ static void run_benchmark(Graph &graph, unique_ptr<Dataset> &train_dataset,
       loss_gradient *= (1.0f / static_cast<float>(config.gradient_accumulation_steps));
     }
     
+#ifdef TUNX_USE_CUDA
+    if (i >= 0) cudaEventRecord(events[i * 5 + 2], cu_stream);
+#endif
+
     TensorBundle output_grads{{"output", loss_gradient}};
     executor.backward(output_grads);
     
+#ifdef TUNX_USE_CUDA
+    if (i >= 0) cudaEventRecord(events[i * 5 + 3], cu_stream);
+#endif
+
     optimizer->update();
-    optimizer->zero_grads();
+    
+#ifdef TUNX_USE_CUDA
+    if (i >= 0) cudaEventRecord(events[i * 5 + 4], cu_stream);
+#endif
   };
   
   cout << "Running 50 warmup steps..." << endl;
   for (int i = 0; i < 50; ++i) {
-    step();
+    step(-1);
   }
   
   model_device.default_stream().sync();
@@ -645,13 +679,24 @@ static void run_benchmark(Graph &graph, unique_ptr<Dataset> &train_dataset,
   
   auto start_time = chrono::high_resolution_clock::now();
   for (int i = 0; i < 2000; ++i) {
-    step();
+    step(i);
   }
   model_device.default_stream().sync();
   
   auto end_time = chrono::high_resolution_clock::now();
   double elapsed_sec = chrono::duration_cast<chrono::microseconds>(end_time - start_time).count() / 1000000.0;
   
+#ifdef TUNX_USE_CUDA
+  float fwd_ms = 0, bwd_ms = 0, opt_ms = 0, zero_ms = 0;
+  for (int i = 0; i < 2000; ++i) {
+      float ms;
+      cudaEventElapsedTime(&ms, events[i * 5 + 0], events[i * 5 + 1]); zero_ms += ms;
+      cudaEventElapsedTime(&ms, events[i * 5 + 1], events[i * 5 + 2]); fwd_ms += ms;
+      cudaEventElapsedTime(&ms, events[i * 5 + 2], events[i * 5 + 3]); bwd_ms += ms;
+      cudaEventElapsedTime(&ms, events[i * 5 + 3], events[i * 5 + 4]); opt_ms += ms;
+  }
+#endif
+
   bool is_lm = (config.dataset_name == "openwebtext");
   if (is_lm) {
     double throughput = (2000.0 * config.batch_size * 1024) / elapsed_sec;
@@ -661,6 +706,17 @@ static void run_benchmark(Graph &graph, unique_ptr<Dataset> &train_dataset,
     cout << "Throughput: " << fixed << setprecision(2) << throughput << " samples/s" << endl;
   }
   cout << "Elapsed time for 2000 steps: " << fixed << setprecision(3) << elapsed_sec << " s" << endl;
+
+#ifdef TUNX_USE_CUDA
+  cout << "Total Forward time: " << fixed << setprecision(2) << fwd_ms << " ms" << endl;
+  cout << "Total Backward time: " << fixed << setprecision(2) << bwd_ms << " ms" << endl;
+  cout << "Total Optimizer time: " << fixed << setprecision(2) << opt_ms << " ms" << endl;
+  cout << "Total Zero Grad time: " << fixed << setprecision(2) << zero_ms << " ms" << endl;
+  
+  for (int i = 0; i < 2000 * 5; ++i) {
+      cudaEventDestroy(events[i]);
+  }
+#endif
 }
 
 void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Dataset> &val_dataset,
