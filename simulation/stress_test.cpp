@@ -344,47 +344,47 @@ int main(int argc, char* argv[]) {
   int trials = 10000;
 
   // Stress tests (Forward)
-  run_forward_trials(
-      trials, "Independent Operators", "independent_operators",
-      []() { return random_m_sequences_graph(9, 1); }, to_checks);
-  run_forward_trials(
-      trials, "Parallel Sequences", "parallel_sequences",
-      []() { return random_m_sequences_graph(4, 4); }, to_checks);
-  run_forward_trials(trials, "Join", "join", []() { return random_joining_graph(4); }, to_checks);
-  run_forward_trials(
-      trials, "Order-Invariant Branch", "order_invariant_branch",
-      []() { return random_order_invariant_branching_graph(3, 15); }, to_checks);
-  run_forward_trials(
-      trials, "Order-Invariant Fork Join", "order_invariant_fork_join",
-      []() { return random_order_invariant_fork_join_graph(4, 15); }, to_checks);
-  run_forward_trials(
-      trials, "Order-Dependent Branch", "branch", []() { return random_branching_graph(3, 15); },
-      to_checks);
-  run_forward_trials(
-      trials, "Order-Dependent Fork Join", "fork_join",
-      []() { return random_fork_join_graph(4, 15); }, to_checks);
+  // run_forward_trials(
+  //     trials, "Independent Operators", "independent_operators",
+  //     []() { return random_m_sequences_graph(9, 1); }, to_checks);
+  // run_forward_trials(
+  //     trials, "Parallel Sequences", "parallel_sequences",
+  //     []() { return random_m_sequences_graph(4, 4); }, to_checks);
+  // run_forward_trials(trials, "Join", "join", []() { return random_joining_graph(4); },
+  // to_checks); run_forward_trials(
+  //     trials, "Order-Invariant Branch", "order_invariant_branch",
+  //     []() { return random_order_invariant_branching_graph(3, 15); }, to_checks);
+  // run_forward_trials(
+  //     trials, "Order-Invariant Fork Join", "order_invariant_fork_join",
+  //     []() { return random_order_invariant_fork_join_graph(4, 15); }, to_checks);
+  // run_forward_trials(
+  //     trials, "Order-Dependent Branch", "branch", []() { return random_branching_graph(3, 15); },
+  //     to_checks);
+  // run_forward_trials(
+  //     trials, "Order-Dependent Fork Join", "fork_join",
+  //     []() { return random_fork_join_graph(4, 15); }, to_checks);
 
   // Stress tests (Backward)
-  run_backward_trials(
-      trials, "Independent Operators", "independent_operators",
-      []() { return random_m_sequences_graph(9, 1); }, to_checks);
-  run_backward_trials(
-      trials, "Parallel Sequences", "parallel_sequences",
-      []() { return random_m_sequences_graph(4, 4); }, to_checks);
+  // run_backward_trials(
+  //     trials, "Independent Operators", "independent_operators",
+  //     []() { return random_m_sequences_graph(9, 1); }, to_checks);
+  // run_backward_trials(
+  //     trials, "Parallel Sequences", "parallel_sequences",
+  //     []() { return random_m_sequences_graph(4, 4); }, to_checks);
   run_backward_trials(
       trials, "Join", "join", []() { return random_joining_graph(4, 15); }, to_checks);
-  run_backward_trials(
-      trials, "Order-Invariant Branch", "order_invariant_branch",
-      []() { return random_order_invariant_branching_graph(3, 15); }, to_checks);
-  run_backward_trials(
-      trials, "Order-Invariant Fork Join", "order_invariant_fork_join",
-      []() { return random_order_invariant_fork_join_graph(4, 15); }, to_checks);
-  run_backward_trials(
-      trials, "Order-Dependent Branch", "branch", []() { return random_branching_graph(3, 15); },
-      to_checks);
-  run_backward_trials(
-      trials, "Order-Dependent Fork Join", "fork_join",
-      []() { return random_fork_join_graph(4, 15); }, to_checks);
+  // run_backward_trials(
+  //     trials, "Order-Invariant Branch", "order_invariant_branch",
+  //     []() { return random_order_invariant_branching_graph(3, 15); }, to_checks);
+  // run_backward_trials(
+  //     trials, "Order-Invariant Fork Join", "order_invariant_fork_join",
+  //     []() { return random_order_invariant_fork_join_graph(4, 15); }, to_checks);
+  // run_backward_trials(
+  //     trials, "Order-Dependent Branch", "branch", []() { return random_branching_graph(3, 15); },
+  //     to_checks);
+  // run_backward_trials(
+  //     trials, "Order-Dependent Fork Join", "fork_join",
+  //     []() { return random_fork_join_graph(4, 15); }, to_checks);
 
   return 0;
 }

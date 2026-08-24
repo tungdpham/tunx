@@ -159,14 +159,33 @@ private:
 
   std::map<std::string, int> ancestor_distances(const std::string& macro_id) const {
     std::map<std::string, int> distances;
-    std::queue<std::string> pending;
-    pending.push(macro_id);
     distances[macro_id] = 0;
-    while (!pending.empty()) {
-      const std::string current = pending.front();
-      pending.pop();
-      for (const auto& parent : macro_deps_.at(current)) {
-        if (distances.insert({parent, distances.at(current) + 1}).second) pending.push(parent);
+    
+    std::map<std::string, int> in_deg;
+    std::queue<std::string> q;
+    q.push(macro_id);
+    std::set<std::string> visited = {macro_id};
+    
+    while (!q.empty()) {
+      std::string u = q.front();
+      q.pop();
+      for (const auto& parent : macro_deps_.at(u)) {
+        in_deg[parent]++;
+        if (visited.insert(parent).second) {
+          q.push(parent);
+        }
+      }
+    }
+    
+    q.push(macro_id);
+    while (!q.empty()) {
+      std::string u = q.front();
+      q.pop();
+      for (const auto& parent : macro_deps_.at(u)) {
+        distances[parent] = std::max(distances[parent], distances[u] + 1);
+        if (--in_deg[parent] == 0) {
+          q.push(parent);
+        }
       }
     }
     return distances;
