@@ -16,6 +16,7 @@
 #include <mutex>
 #include <stdexcept>
 
+#include "device/device_allocator.hpp"
 #include "device/dptr.hpp"
 #include "device/iallocator.hpp"
 #ifndef NDEBUG
@@ -32,6 +33,8 @@ public:
   IbvAllocator(Device &device, ibv_pd *pd, size_t slab_size)
       : device_(device),
         pd_(pd),
+        slab_ptr_(nullptr),
+        slab_dptr_(nullptr),
         slab_size_(slab_size),
         using_host_memory_(true) {
     if (!pd_) {
@@ -43,14 +46,16 @@ public:
 
     int access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ;
 
-    if (posix_memalign(&slab_ptr_, DEFAULT_ALIGNMENT, slab_size_) != 0) {
-      throw std::runtime_error("Failed to allocate host pinned memory");
+    slab_dptr_ = tunx::DeviceAllocator::instance(device_, nullptr).allocate(slab_size_);
+    slab_ptr_ = slab_dptr_.get();
+    if (!slab_ptr_) {
+      throw std::runtime_error("Failed to allocate memory from DeviceAllocator");
     }
 
     slab_mr_ = ibv_reg_mr(pd_, slab_ptr_, slab_size_, access_flags);
     if (!slab_mr_) {
       int err = errno;
-      free(slab_ptr_);
+      slab_dptr_ = dptr(nullptr);
       slab_ptr_ = nullptr;
       throw std::runtime_error(
           "Failed to register host memory with InfiniBand: " + std::string(std::strerror(err)) +
@@ -75,11 +80,7 @@ public:
     }
 
     if (slab_ptr_) {
-      if (using_host_memory_) {
-        free(slab_ptr_);
-      } else {
-        device_.deallocate_aligned_memory(slab_ptr_);
-      }
+      slab_dptr_ = dptr(nullptr);
       slab_ptr_ = nullptr;
     }
 
@@ -226,6 +227,7 @@ private:
   ibv_pd *pd_;
   ibv_mr *slab_mr_;
   void *slab_ptr_;
+  dptr slab_dptr_;
   size_t slab_size_;
   bool using_host_memory_;
   mutable std::mutex mutex_;

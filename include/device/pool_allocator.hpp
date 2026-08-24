@@ -10,6 +10,7 @@
 #include <map>
 #include <mutex>
 
+#include "device/device_allocator.hpp"
 #include "device/dptr.hpp"
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
@@ -55,7 +56,9 @@ public:
       ptr = it->second;
       free_blocks_.erase(it);
     } else {
-      ptr = device_.allocate_aligned_memory(size, DEFAULT_ALIGNMENT);
+      dptr alloc = tunx::DeviceAllocator::instance(device_, stream_).allocate(size);
+      ptr = alloc.get();
+      backend_allocs_.emplace(ptr, alloc);
     }
     set_allocated(allocated_ + size);
 
@@ -67,7 +70,7 @@ public:
   void clear() override {
     std::lock_guard<std::mutex> lock(mutex_);
     for (auto &pair : free_blocks_) {
-      device_.deallocate_aligned_memory(pair.second);
+      backend_allocs_.erase(pair.second);
     }
     free_blocks_.clear();
   }
@@ -78,7 +81,9 @@ public:
     if (it != free_blocks_.end()) {
       return;
     }
-    void *ptr = device_.allocate_aligned_memory(size, DEFAULT_ALIGNMENT);
+    dptr alloc = tunx::DeviceAllocator::instance(device_, stream_).allocate(size);
+    void *ptr = alloc.get();
+    backend_allocs_.emplace(ptr, alloc);
     free_blocks_.emplace(size, ptr);
   }
 
@@ -146,6 +151,7 @@ public:
   Device &device() const override { return device_; }
 
 private:
+  std::map<void *, dptr> backend_allocs_;
   std::multimap<size_t, void *> free_blocks_;
   Device &device_;
   stream stream_;
