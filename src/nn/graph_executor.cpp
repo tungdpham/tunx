@@ -363,7 +363,7 @@ ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,
     edge_stat.allocated_mem = allocator->allocated();
     edge_stat.reserved_mem = allocator->reserved();
     edge_stat.peak_mem = peak_usage;
-    edge_stat.fragmented_mem = allocator->reserved() - peak_usage;
+    edge_stat.fragmented_mem = allocator->reserved() - (allocator->allocated() + allocator->unused());
     edge_stat.cached_mem = allocator->unused();
     edge_stat.activations_mem = allocator->allocated();
     edge_stat.gradients_mem = 0;
@@ -534,7 +534,7 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
     edge_stat.allocated_mem = allocator->allocated();
     edge_stat.reserved_mem = allocator->reserved();
     edge_stat.peak_mem = peak_usage;
-    edge_stat.fragmented_mem = allocator->reserved() - peak_usage;
+    edge_stat.fragmented_mem = allocator->reserved() - (allocator->allocated() + allocator->unused());
     edge_stat.cached_mem = allocator->unused();
     edge_stat.activations_mem = last_activations_mem;
     edge_stat.gradients_mem = param_gradients_mem + last_gradients_mem;

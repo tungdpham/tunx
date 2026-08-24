@@ -90,10 +90,10 @@ public:
   size_t reserved() const override {
     std::lock_guard<std::mutex> lock(mutex_);
     size_t total = 0;
-    for (const auto &pair : free_blocks_) {
-      total += pair.first;
+    for (const auto &pair : backend_allocs_) {
+      total += pair.second.capacity();
     }
-    return total + allocated_;
+    return total;
   }
 
   size_t allocated() const override {
@@ -173,7 +173,12 @@ private:
   void reclaim(void *ptr, size_t size) {
     std::lock_guard<std::mutex> lock(mutex_);
     set_allocated(allocated_ - size);
-    free_blocks_.emplace(size, ptr);
+    auto it = backend_allocs_.find(ptr);
+    if (it != backend_allocs_.end()) {
+      free_blocks_.emplace(it->second.capacity(), ptr);
+    } else {
+      free_blocks_.emplace(size, ptr);
+    }
   }
 };
 

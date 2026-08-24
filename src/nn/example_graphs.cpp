@@ -258,9 +258,9 @@ Graph create_tunx_v1_graph(IAllocator &allocator, GraphOpts opts) {
   b2 = convtranspose2d(b2, b2_shape, 64, 2, 2, 0, false, "b2_up2");        // -> {112, 112, 64}
   b2 = batchnorm(b2, b2_shape, true, "b2_bn2");                            // -> {112, 112, 64}
   b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv");                // -> {112, 112, 64}
-  b2 = batchnorm(b2, b2_shape, true, "b2_bn2");                            // -> {112, 112, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn3");                            // -> {112, 112, 64}
   b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv2");               // -> {112, 112, 64}
-  b2 = batchnorm(b2, b2_shape, true, "b2_bn2");                            // -> {112, 112, 64}
+  b2 = batchnorm(b2, b2_shape, true, "b2_bn4");                            // -> {112, 112, 64}
   b2 = b2 * -1;                                                            // -> {112, 112, 64}
   b2 = maxpool2d(b2, b2_shape, 2, 2, 0, "b2_pool");                        // -> {56, 56, 64}
 

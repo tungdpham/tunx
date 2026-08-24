@@ -699,6 +699,7 @@ class TunxV1(nn.Module):
         self.fc = nn.Linear(64 * 56 * 56, num_classes, bias=True)
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # conv1 -> bn1 -> pool1
         x = self.conv1(x)
         x = F.relu(self.bn1(x), inplace=True)
         x = self.pool1(x)
@@ -710,6 +711,7 @@ class TunxV1(nn.Module):
         b1 = self.b1_down(b1)
         b1 = self.b1_pool(b1)
         
+        # b2 branch
         b2 = self.b2_trans(x)
         b2 = F.relu(self.b2_bn1(b2), inplace=True)
         b2 = self.b2_up2(b2)
@@ -727,6 +729,7 @@ class TunxV1(nn.Module):
         b3 = self.b3_down1(b3)
         b3 = F.relu(self.b3_bn2(b3), inplace=True)
         
+        # merge
         y = b1 + b2 + b3
         y = F.relu(y, inplace=True)
         y = self.flatten(y)
@@ -1345,6 +1348,8 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
 
     is_lm = cfg["is_language_model"]
 
+    progress_interval = cfg.get("progress_print_interval", 100)
+
     for batch_idx, (inputs, targets) in enumerate(train_loader):
         step_start = time.time()
         inputs, targets = inputs.to(device), targets.to(device)
@@ -1353,6 +1358,8 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
             inputs = inputs.to(cfg.get("io_dtype", torch.float32))
 
         optimizer.zero_grad()
+
+        should_log_mem = (batch_idx + 1) % progress_interval == 0 and torch.cuda.is_available()
 
         compute_dtype = cfg.get("compute_dtype", torch.float32)
         with torch.autocast(device_type=device.type, dtype=compute_dtype, enabled=(compute_dtype != torch.float32)):
@@ -1373,7 +1380,16 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
                 correct = predicted.eq(targets).sum().item()
                 total = targets.size(0)
 
+        if should_log_mem:
+            mem_peak_fwd = torch.cuda.max_memory_allocated(device) / (1024 ** 3)
+            mem_after_fwd = torch.cuda.memory_allocated(device) / (1024 ** 3)
+            torch.cuda.reset_peak_memory_stats(device)
+
         loss.backward()
+        
+        if should_log_mem:
+            mem_peak_bwd = torch.cuda.max_memory_allocated(device) / (1024 ** 3)
+            
         optimizer.step()
 
         if cfg.get("scheduler_type") == "warmup_cosine_annealing" and "scheduler_obj" in cfg:
@@ -1392,11 +1408,31 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
             f"{batch_acc:.4f}", step_ms
         ])
 
-        if (batch_idx + 1) % 100 == 0:
+        if (batch_idx + 1) % progress_interval == 0:
             if torch.cuda.is_available():
                 mem_res = torch.cuda.max_memory_reserved(device) / (1024 ** 3)
-                mem_alloc = torch.cuda.max_memory_allocated(device) / (1024 ** 3)
-                mem_info = f" | Res: {mem_res:.3f} GiB | Alloc: {mem_alloc:.3f} GiB"
+                mem_info = f" | Res: {mem_res:.3f} GiB | PeakFwd: {mem_peak_fwd:.3f} GiB | PeakBwd: {mem_peak_bwd:.3f} GiB"
+                
+                mem_weights = sum(p.nelement() * p.element_size() for p in model.parameters()) / (1024**3)
+                mem_grads = sum(p.grad.nelement() * p.grad.element_size() for p in model.parameters() if p.grad is not None) / (1024**3)
+                mem_optim = 0
+                for state in optimizer.state.values():
+                    for k, v in state.items():
+                        if isinstance(v, torch.Tensor):
+                            mem_optim += v.nelement() * v.element_size()
+                mem_optim /= (1024**3)
+                mem_base = mem_weights + mem_grads + mem_optim
+                print(
+                    f"\n--- Memory Breakdown (Batch {batch_idx + 1}) ---"
+                    f"\n  Baseline (Total Alloc before fwd)       : {mem_base:.3f} GiB"
+                    f"\n    -> Model Weights                      : {mem_weights:.3f} GiB"
+                    f"\n    -> Weight Gradients                   : {mem_grads:.3f} GiB"
+                    f"\n    -> Optimizer States                   : {mem_optim:.3f} GiB"
+                    f"\n  Peak Memory During Forward Pass         : {mem_peak_fwd:.3f} GiB"
+                    f"\n  Saved Activations (End of Forward)      : {mem_after_fwd - mem_base:.3f} GiB"
+                    f"\n  Peak Memory During Backward Pass        : {mem_peak_bwd:.3f} GiB"
+                    f"\n----------------------------------------"
+                )
             else:
                 mem_info = ""
             print(
@@ -1515,6 +1551,7 @@ def main():
 
     cfg["batch_size"] = json_cfg.get("batch_size", cfg["batch_size"])
     cfg["num_workers"] = json_cfg.get("num_threads", cfg["num_workers"])
+    cfg["progress_print_interval"] = json_cfg.get("progress_print_interval", 100);
 
     opt_cfg = json_cfg.get("optimizer", {})
     cfg["optimizer_type"] = opt_cfg.get("type", cfg["optimizer_type"])

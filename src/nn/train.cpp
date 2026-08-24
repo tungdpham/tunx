@@ -646,9 +646,11 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
   }
 
   std::vector<std::string> mem_headers = {
-      "plan_name", "allocator_type", "pass",          "layer_name",   "allocated_b",   "reserved_b",
-      "peak_b",         "cached_b",      "fragmented_b", "host_pinned_b", "gradients_b",
-      "optimizer_b",    "parameters_b",  "parameters_grad_b", "activations_b", "workspaces_b"};
+      "plan_name",    "allocator_type",    "pass",          "layer_name",
+      "allocated_b",  "reserved_b",        "peak_b",        "cached_b",
+      "fragmented_b", "host_pinned_b",     "gradients_b",   "optimizer_b",
+      "parameters_b", "parameters_grad_b", "activations_b", "workspaces_b",
+  };
 
   std::string mem_csv_path = "tunx_" + artifact_name + "_" + timestamp + "_memory_metrics.csv";
   if (!config.log_dir.empty()) mem_csv_path = config.log_dir + "/" + mem_csv_path;
@@ -678,19 +680,19 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
 
     auto &pool_allocator = PoolAllocator::instance(graph.device(), graph.handle().get_stream());
     auto profile_memory = [&](const std::string &plan_name, SolverOptions opts) {
-        auto &plan = executor.build_plans(inputs, opts);
-        auto &packed_allocator = *plan.packed_allocator;
-        log_memory_metrics(graph, optimizer, executor, inputs, pool_allocator, memory_metrics_logger,
-                           "reactive", plan_name, opts);
-        log_memory_metrics(graph, optimizer, executor, inputs, packed_allocator, memory_metrics_logger,
-                           "packed", plan_name, opts);
+      auto &plan = executor.build_plans(inputs, opts);
+      auto &packed_allocator = *plan.packed_allocator;
+      log_memory_metrics(graph, optimizer, executor, inputs, pool_allocator, memory_metrics_logger,
+                         "reactive", plan_name, opts);
+      log_memory_metrics(graph, optimizer, executor, inputs, packed_allocator,
+                         memory_metrics_logger, "packed", plan_name, opts);
     };
 
     profile_memory("Naive", {true, false, false, false});
-    profile_memory("Ranked", {false, false, false, false});
-    profile_memory("Linear", {false, true, false, false});
-    profile_memory("Branch", {false, true, true, false});
-    profile_memory("Join", {false, true, false, true});
+    // profile_memory("Ranked", {false, false, false, false});
+    // profile_memory("Linear", {false, true, false, false});
+    // profile_memory("Branch", {false, true, true, false});
+    // profile_memory("Join", {false, true, false, true});
     profile_memory("Full Solver", {false, true, true, true});
 
     if (optimizer) {
