@@ -35,7 +35,6 @@ import torchvision.transforms as T
 from dotenv import load_dotenv
 
 load_dotenv()
-torch.set_float32_matmul_precision('high')
 
 # ======================== Datasets ========================
 
@@ -664,6 +663,324 @@ class GPT2Small(nn.Module):
         return logits
 
 
+# --- Tunx v1 ---
+
+class TunxV1(nn.Module):
+    def __init__(self, num_classes: int = 100):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(16, eps=1e-5, momentum=0.1)
+        self.pool1 = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.b1_up1 = nn.ConvTranspose2d(16, 32, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b1_bn1 = nn.BatchNorm2d(32, eps=1e-5, momentum=0.1)
+        self.b1_up2 = nn.ConvTranspose2d(32, 64, kernel_size=4, stride=4, padding=0, bias=False)
+        self.b1_bn2 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b1_down = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b1_pool = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.b2_trans = nn.ConvTranspose2d(16, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_up2 = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn2 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_conv = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_bn3 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_bn4 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.b3_up1 = nn.ConvTranspose2d(16, 32, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b3_up2 = nn.ConvTranspose2d(32, 128, kernel_size=4, stride=4, padding=0, bias=False)
+        self.b3_pool = nn.AvgPool2d(kernel_size=4, stride=4, padding=0)
+        self.b3_down1 = nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b3_bn2 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(64 * 56 * 56, num_classes, bias=True)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv1(x)
+        x = F.relu(self.bn1(x), inplace=True)
+        x = self.pool1(x)
+        
+        b1 = self.b1_up1(x)
+        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = self.b1_up2(b1)
+        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = self.b1_down(b1)
+        b1 = self.b1_pool(b1)
+        
+        b2 = self.b2_trans(x)
+        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = self.b2_up2(b2)
+        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = self.b2_conv(b2)
+        b2 = F.relu(self.b2_bn3(b2), inplace=True)
+        b2 = self.b2_conv2(b2)
+        b2 = F.relu(self.b2_bn4(b2), inplace=True)
+        b2 = -b2
+        b2 = self.b2_pool(b2)
+        
+        b3 = self.b3_up1(x)
+        b3 = self.b3_up2(b3)
+        b3 = self.b3_pool(b3)
+        b3 = self.b3_down1(b3)
+        b3 = F.relu(self.b3_bn2(b3), inplace=True)
+        
+        y = b1 + b2 + b3
+        y = F.relu(y, inplace=True)
+        y = self.flatten(y)
+        return self.fc(y)
+
+
+# --- Tunx v2 ---
+
+class TunxV2Block(nn.Module):
+    def __init__(self, in_channels: int):
+        super().__init__()
+        self.up1 = nn.ConvTranspose2d(in_channels, 256, kernel_size=2, stride=2, padding=0, bias=False)
+        self.pool1 = nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
+        
+        self.up2 = nn.ConvTranspose2d(in_channels, 256, kernel_size=4, stride=4, padding=0, bias=False)
+        self.left_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.right_pool = nn.AvgPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.conv = nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1, bias=False)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b1 = self.up1(x)
+        b1 = self.pool1(b1)
+        
+        b2 = self.up2(x)
+        b2_left = self.left_pool(-b2)
+        b2_right = self.right_pool(b2)
+        
+        c = b1 + b2_left + b2_right
+        return self.conv(c)
+
+class TunxV2(nn.Module):
+    def __init__(self, num_classes: int = 100):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(16, eps=1e-5, momentum=0.1)
+        self.pool1 = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.b1_up1 = nn.ConvTranspose2d(16, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b1_bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b1_up2 = nn.ConvTranspose2d(64, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b1_bn2 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
+        self.b1_down = nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b1_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.b2_trans = nn.ConvTranspose2d(16, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn1 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
+        self.b2_up2 = nn.ConvTranspose2d(128, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn2 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
+        self.b2_conv = nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_conv2 = nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.b3_conv = nn.Conv2d(16, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b3_up1 = nn.ConvTranspose2d(64, 128, kernel_size=5, stride=1, padding=2, bias=False)
+        self.b3_block = TunxV2Block(128)
+        
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(128 * 56 * 56, num_classes, bias=True)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv1(x)
+        x = F.relu(self.bn1(x), inplace=True)
+        x = self.pool1(x)
+        
+        b1 = self.b1_up1(x)
+        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = self.b1_up2(b1)
+        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = self.b1_down(b1)
+        b1 = self.b1_pool(b1)
+        
+        b2 = self.b2_trans(x)
+        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = self.b2_up2(b2)
+        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = self.b2_conv(b2)
+        b2 = self.b2_conv2(b2)
+        b2 = -b2
+        b2 = self.b2_pool(b2)
+        
+        b3 = self.b3_conv(x)
+        b3 = self.b3_up1(b3)
+        b3 = self.b3_block(b3)
+        
+        y = b1 + b2 + b3
+        y = F.relu(y, inplace=True)
+        y = self.flatten(y)
+        return self.fc(y)
+
+
+# --- Tunx v3 ---
+
+class TunxV3Block(nn.Module):
+    def __init__(self, in_channels: int):
+        super().__init__()
+        self.up1 = nn.ConvTranspose2d(in_channels, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.pool1 = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.up2 = nn.ConvTranspose2d(in_channels, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.left_pool = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        self.right_pool = nn.AvgPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.conv = nn.Conv2d(128 * 3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b1 = self.up1(x)
+        b1 = self.pool1(b1)
+        
+        b2 = self.up2(x)
+        b2_left = self.left_pool(-b2)
+        b2_right = self.right_pool(b2)
+        
+        c = torch.cat([b1, b2_left, b2_right], dim=1)
+        return self.conv(c)
+
+class TunxV3(nn.Module):
+    def __init__(self, num_classes: int = 100):
+        super().__init__()
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=7, stride=2, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(16, eps=1e-5, momentum=0.1)
+        self.pool1 = nn.MaxPool2d(kernel_size=4, stride=4, padding=0)
+        
+        self.b1_up1 = nn.ConvTranspose2d(16, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b1_bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b1_up2 = nn.ConvTranspose2d(64, 128, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b1_bn2 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
+        self.b1_down = nn.Conv2d(128, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b1_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.b2_trans = nn.ConvTranspose2d(16, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_up2 = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b2_bn2 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.b2_conv = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_conv2 = nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b2_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        
+        self.b3_conv = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1, bias=False)
+        self.b3_up1 = nn.ConvTranspose2d(32, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b3_up2 = nn.ConvTranspose2d(64, 64, kernel_size=2, stride=2, padding=0, bias=False)
+        self.b3_block = TunxV3Block(64)
+        
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(64 * 56 * 56, num_classes, bias=True)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv1(x)
+        x = F.relu(self.bn1(x), inplace=True)
+        x = self.pool1(x)
+        
+        b1 = self.b1_up1(x)
+        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = self.b1_up2(b1)
+        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = self.b1_down(b1)
+        b1 = self.b1_pool(b1)
+        
+        b2 = self.b2_trans(x)
+        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = self.b2_up2(b2)
+        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = self.b2_conv(b2)
+        b2 = self.b2_conv2(b2)
+        b2 = -b2
+        b2 = self.b2_pool(b2)
+        
+        b3 = self.b3_conv(x)
+        b3 = self.b3_up1(b3)
+        b3 = self.b3_up2(b3)
+        b3 = self.b3_block(b3)
+        
+        y = b1 + b2 + b3
+        y = F.relu(y, inplace=True)
+        y = self.flatten(y)
+        return self.fc(y)
+
+
+# --- Tunx v4 ---
+
+class RecursiveWideForkJoin(nn.Module):
+    def __init__(self, in_channels: int, depth: int):
+        super().__init__()
+        self.depth = depth
+        
+        kOutputChannels = 64
+        kLocalChannels = 64 + depth * 256
+        kJoinChannels = 832 - depth * 256
+        
+        if depth == 0:
+            self.expand = nn.ConvTranspose2d(in_channels, kJoinChannels, kernel_size=2, stride=2, padding=0, bias=False)
+            self.left_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+            self.right_pool = nn.AvgPool2d(kernel_size=2, stride=2, padding=0)
+            self.mid_conv = nn.Conv2d(kJoinChannels, kJoinChannels, kernel_size=3, stride=2, padding=1, bias=False)
+            self.compress = nn.Conv2d(kJoinChannels, kOutputChannels, kernel_size=1, stride=1, padding=0, bias=False)
+        else:
+            self.local_expand = nn.ConvTranspose2d(in_channels, kLocalChannels, kernel_size=2, stride=2, padding=0, bias=False)
+            self.local_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+            self.local_widen = nn.Conv2d(kLocalChannels, kJoinChannels, kernel_size=1, stride=1, padding=0, bias=False)
+            
+            self.nested_seed = nn.Conv2d(in_channels, kOutputChannels, kernel_size=1, stride=1, padding=0, bias=False)
+            self.nested_rfj = RecursiveWideForkJoin(kOutputChannels, depth - 1)
+            self.nested_widen = nn.Conv2d(kOutputChannels, kJoinChannels, kernel_size=1, stride=1, padding=0, bias=False)
+            
+            self.compress = nn.Conv2d(kJoinChannels, kOutputChannels, kernel_size=1, stride=1, padding=0, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.depth == 0:
+            expanded = self.expand(x)
+            left = self.left_pool(-expanded)
+            right = self.right_pool(expanded)
+            mid = self.mid_conv(expanded)
+            joined = left + right + mid
+            return self.compress(joined)
+        else:
+            local_ = self.local_expand(x)
+            local_ = self.local_pool(local_)
+            local_ = self.local_widen(local_)
+            
+            nested = self.nested_seed(x)
+            nested = self.nested_rfj(nested)
+            nested = self.nested_widen(nested)
+            
+            joined = local_ + nested
+            return self.compress(joined)
+
+class TunxV4(nn.Module):
+    def __init__(self, num_classes: int = 100):
+        super().__init__()
+        self.stem_conv = nn.Conv2d(3, 32, kernel_size=7, stride=2, padding=3, bias=False)
+        self.stem_bn = nn.BatchNorm2d(32, eps=1e-5, momentum=0.1)
+        self.stem_pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.stem_project = nn.Conv2d(32, 64, kernel_size=1, stride=1, padding=0, bias=False)
+        
+        self.rfj_d3 = RecursiveWideForkJoin(64, 3)
+        
+        self.out_pool = nn.AvgPool2d(kernel_size=4, stride=4, padding=0)
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(64 * 14 * 14, num_classes, bias=True)
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.stem_conv(x)
+        x = F.relu(self.stem_bn(x), inplace=True)
+        x = self.stem_pool(x)
+        x = self.stem_project(x)
+        
+        x = self.rfj_d3(x)
+        
+        x = F.relu(x, inplace=True)
+        x = self.out_pool(x)
+        x = self.flatten(x)
+        return self.fc(x)
+
+
 # ======================== Model Registry ========================
 
 # Normalization constants
@@ -784,6 +1101,134 @@ def get_model_config(model_name: str) -> Dict[str, Any]:
 
         "resnet50_imagenet100": {
             "model_cls": lambda: ResNet50ImageNet100(num_classes=100),
+            "train_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=True,
+                transform=T.Compose([
+                    T.RandomResizedCrop(224),
+                    T.RandomHorizontalFlip(),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "test_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=False,
+                transform=T.Compose([
+                    T.Resize(256),
+                    T.CenterCrop(224),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "criterion": nn.CrossEntropyLoss(),
+            "epochs": int(os.getenv("EPOCHS", "90")),
+            "batch_size": int(os.getenv("BATCH_SIZE", "64")),
+            "lr": float(os.getenv("LR_INITIAL", "0.001")),
+            "num_workers": 4,
+            "optimizer_type": "adam",
+            "scheduler_type": "step",
+            "is_language_model": False,
+        },
+
+        "tunx_v1": {
+            "model_cls": lambda: TunxV1(num_classes=100),
+            "train_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=True,
+                transform=T.Compose([
+                    T.RandomResizedCrop(224),
+                    T.RandomHorizontalFlip(),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "test_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=False,
+                transform=T.Compose([
+                    T.Resize(256),
+                    T.CenterCrop(224),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "criterion": nn.CrossEntropyLoss(),
+            "epochs": int(os.getenv("EPOCHS", "90")),
+            "batch_size": int(os.getenv("BATCH_SIZE", "64")),
+            "lr": float(os.getenv("LR_INITIAL", "0.001")),
+            "num_workers": 4,
+            "optimizer_type": "adam",
+            "scheduler_type": "step",
+            "is_language_model": False,
+        },
+
+        "tunx_v2": {
+            "model_cls": lambda: TunxV2(num_classes=100),
+            "train_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=True,
+                transform=T.Compose([
+                    T.RandomResizedCrop(224),
+                    T.RandomHorizontalFlip(),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "test_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=False,
+                transform=T.Compose([
+                    T.Resize(256),
+                    T.CenterCrop(224),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "criterion": nn.CrossEntropyLoss(),
+            "epochs": int(os.getenv("EPOCHS", "90")),
+            "batch_size": int(os.getenv("BATCH_SIZE", "64")),
+            "lr": float(os.getenv("LR_INITIAL", "0.001")),
+            "num_workers": 4,
+            "optimizer_type": "adam",
+            "scheduler_type": "step",
+            "is_language_model": False,
+        },
+
+        "tunx_v3": {
+            "model_cls": lambda: TunxV3(num_classes=100),
+            "train_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=True,
+                transform=T.Compose([
+                    T.RandomResizedCrop(224),
+                    T.RandomHorizontalFlip(),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "test_dataset": lambda: ImageNet100Dataset(
+                root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
+                train=False,
+                transform=T.Compose([
+                    T.Resize(256),
+                    T.CenterCrop(224),
+                    T.ToTensor(),
+                    T.Normalize(IMAGENET_MEAN, IMAGENET_STD),
+                ])
+            ),
+            "criterion": nn.CrossEntropyLoss(),
+            "epochs": int(os.getenv("EPOCHS", "90")),
+            "batch_size": int(os.getenv("BATCH_SIZE", "64")),
+            "lr": float(os.getenv("LR_INITIAL", "0.001")),
+            "num_workers": 4,
+            "optimizer_type": "adam",
+            "scheduler_type": "step",
+            "is_language_model": False,
+        },
+
+        "tunx_v4": {
+            "model_cls": lambda: TunxV4(num_classes=100),
             "train_dataset": lambda: ImageNet100Dataset(
                 root=os.getenv("IMAGENET100_ROOT", "data/imagenet-100"),
                 train=True,
@@ -948,10 +1393,16 @@ def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, b
         ])
 
         if (batch_idx + 1) % 100 == 0:
+            if torch.cuda.is_available():
+                mem_res = torch.cuda.max_memory_reserved(device) / (1024 ** 3)
+                mem_alloc = torch.cuda.max_memory_allocated(device) / (1024 ** 3)
+                mem_info = f" | Res: {mem_res:.3f} GiB | Alloc: {mem_alloc:.3f} GiB"
+            else:
+                mem_info = ""
             print(
                 f"[Train Batch {batch_idx + 1}/{len(train_loader)}] "
                 f"Loss: {batch_loss:.4f} | Acc: {batch_acc:.2f}% | "
-                f"Step time: {step_ms}ms"
+                f"Step time: {step_ms}ms{mem_info}"
             )
 
     train_loss = running_loss / running_total
@@ -1050,6 +1501,8 @@ def main():
         internal_model_name = "resnet50_imagenet100"
     elif "gpt2" in model_name_mapped:
         internal_model_name = "gpt2_small"
+    elif model_name_mapped in ["tunx_v1", "tunx_v2", "tunx_v3", "tunx_v4"]:
+        internal_model_name = model_name_mapped
     else:
         internal_model_name = "resnet9_cifar10"  # Default fallback
 
