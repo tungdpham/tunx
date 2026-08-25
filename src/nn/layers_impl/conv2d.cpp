@@ -36,8 +36,6 @@ void Conv2DOp::init(OpContext &ctx, const Config &config) {
   if (config.use_bias) {
     Param bias = ctx.make_param({out_channels});
     fill_normal(bias.data(), 0, stddev, seed);
-  } else {
-    ctx.make_param({0});
   }
 }
 

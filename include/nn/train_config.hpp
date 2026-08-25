@@ -60,6 +60,7 @@ struct TrainingConfig {
   bool async_pipeline = true;
   bool augmentation = true;
   bool benchmark_mode = false;
+  bool bootstrap_offload = true;
 
   LogMode log_mode;
 

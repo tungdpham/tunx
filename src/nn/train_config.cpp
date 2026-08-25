@@ -66,6 +66,7 @@ static void parse_loss_json(const nlohmann::json &j, LossConfig &cfg) {
 void TrainingConfig::print_config() const {
   std::cout << "Training Configuration:" << std::endl;
   std::cout << "  Benchmark Mode: " << (benchmark_mode ? "On" : "Off") << std::endl;
+  std::cout << "  Bootstrap Offload: " << (bootstrap_offload ? "On" : "Off") << std::endl;
   std::cout << "  Epochs: " << epochs << std::endl;
   std::cout << "  Batch Size: " << batch_size << std::endl;
   std::cout << "  Max Steps: " << max_steps << std::endl;
@@ -145,6 +146,7 @@ void TrainingConfig::load_from_json(const string &config_path) {
   async_pipeline = config.value("async_pipeline", async_pipeline);
   augmentation = config.value("augmentation", augmentation);
   benchmark_mode = config.value("benchmark_mode", benchmark_mode);
+  bootstrap_offload = config.value("bootstrap_offload", bootstrap_offload);
 
   // Parse LogMode settings from JSON
   if (config.contains("log_mode")) {

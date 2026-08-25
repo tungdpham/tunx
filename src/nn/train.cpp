@@ -97,7 +97,7 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
   fmt::print("\n{:=^80}\n", " Execution Plan Stats ");
 
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
-    auto &built_plan = executor.build_plans(inputs, opts);
+    auto &built_plan = executor.build_plans(inputs, opts, config.bootstrap_offload);
     auto &macro_plan = built_plan.forward_plan;
     auto macro_stats = executor.profile_forward_plan(inputs, macro_plan);
 
@@ -142,7 +142,7 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
   fmt::print("\n{:=^80}\n", " Backward Execution Plan Stats ");
 
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
-    auto &built_plan = executor.build_plans(inputs, opts);
+    auto &built_plan = executor.build_plans(inputs, opts, config.bootstrap_offload);
     auto &macro_plan = built_plan.backward_plan;
     auto macro_stats = executor.profile_backward_plan(inputs, built_plan.forward_plan, macro_plan);
 
@@ -186,7 +186,8 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
 static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimizer,
                                GraphExecutor &executor, TensorBundle &inputs, IAllocator &alloc,
                                std::unique_ptr<CsvLogger> &logger, std::string allocator_name,
-                               std::string plan_name, SolverOptions options) {
+                               std::string plan_name, SolverOptions options,
+                               bool bootstrap_offload) {
   auto *previous_alloc = graph.workspace_allocator();
   graph.set_workspace_allocator(alloc);
 
@@ -206,7 +207,7 @@ static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimi
     }
   }
 
-  auto &built_plan = executor.build_plans(inputs, options);
+  auto &built_plan = executor.build_plans(inputs, options, bootstrap_offload);
 
   ExecutionPlanStats forward_stats = executor.profile_forward_plan(inputs, built_plan.forward_plan);
   ExecutionPlanStats backward_stats =
@@ -812,7 +813,8 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
     GraphExecutor executor(graph);
     executor.set_log_stream(&debug_file);
 
-    auto &built_plan = executor.build_plans(inputs);
+    auto &built_plan = executor.build_plans(inputs, SolverOptions{false, true, true, true},
+                                            config.bootstrap_offload);
     graph.save_dot("current_graph.dot", &built_plan.forward_edge_profiles,
                    &built_plan.node_profiles);
     log_edge_profiles(built_plan.forward_edge_profiles, forward_profiles_logger);
@@ -823,12 +825,13 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
 
     auto &pool_allocator = PoolAllocator::instance(graph.device(), graph.handle().get_stream());
     auto profile_memory = [&](const std::string &plan_name, SolverOptions opts) {
-      auto &plan = executor.build_plans(inputs, opts);
+      auto &plan = executor.build_plans(inputs, opts, config.bootstrap_offload);
       auto &packed_allocator = *plan.packed_allocator;
       log_memory_metrics(graph, optimizer, executor, inputs, pool_allocator, memory_metrics_logger,
-                         "reactive", plan_name, opts);
+                         "reactive", plan_name, opts, config.bootstrap_offload);
       log_memory_metrics(graph, optimizer, executor, inputs, packed_allocator,
-                         memory_metrics_logger, "packed", plan_name, opts);
+                         memory_metrics_logger, "packed", plan_name, opts,
+                         config.bootstrap_offload);
     };
 
     if (config.print_ablation) {

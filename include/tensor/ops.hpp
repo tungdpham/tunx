@@ -10,6 +10,7 @@
 #include "device/stream.hpp"
 #include "device/task.hpp"
 #include "kernel/cpu/kernels.hpp"
+#include "kernel/kernel.hpp"
 #include "type/type.hpp"
 #ifdef TUNX_USE_CUDA
 #include "cuda/ops.hpp"
@@ -591,54 +592,14 @@ inline void greater(const Tensor &a, const Tensor &b, Tensor &c, stream stream =
 }
 
 inline void copy(const Tensor &a, Tensor &c, stream stream = nullptr) {
+  if (a.size() == 0 || c.size() == 0) return;
   if (a.data_as<void>() == nullptr || c.data_as<void>() == nullptr) {
     throw std::runtime_error("copy: Null pointer exception in copy operation");
   }
 
-  DType_t dtype = a.dtype();
-  size_t size = a.size();
-  auto &a_device = a.device();
-  auto &c_device = c.device();
-
-  if (a_device == c_device) {
-    auto device_type = a_device.device_type();
-    if (device_type == DeviceType::CPU) {
-      return create_cpu_task(a_device, stream, kernel::cpu::copy, dtype, a.data_as<void>(),
-                             c.data_as<void>(), size);
-    }
-#ifdef TUNX_USE_CUDA
-    else if (device_type == DeviceType::CUDA) {
-      return create_cuda_task(a_device, stream, kernel::cuda::copy, dtype, a.data_as<void>(),
-                              c.data_as<void>(), size);
-    }
-#endif
-    else {
-      throw std::runtime_error("Unsupported device type");
-    }
-  }
-
-  auto a_device_type = a_device.device_type();
-  auto c_device_type = c_device.device_type();
-
-  if (a_device_type == DeviceType::CPU && c_device_type == DeviceType::CUDA) {
-    // host to device copy
-#ifdef TUNX_USE_CUDA
-    return create_cuda_task(c_device, stream, kernel::cuda::h2d_copy, dtype, a.data_as<void>(),
-                            c.data_as<void>(), size);
-#else
-    throw std::runtime_error("copy: CUDA not enabled for CPU to CUDA copy");
-#endif
-  } else if (a_device_type == DeviceType::CUDA && c_device_type == DeviceType::CPU) {
-    // device to host copy
-#ifdef TUNX_USE_CUDA
-    return create_cuda_task(a_device, stream, kernel::cuda::d2h_copy, dtype, a.data_as<void>(),
-                            c.data_as<void>(), size);
-#else
-    throw std::runtime_error("copy: CUDA not enabled for CUDA to CPU copy");
-#endif
-  } else {
-    throw std::runtime_error("copy: Unsupported device type combination");
-  }
+  size_t dtype_size = get_dtype_size(a.dtype());
+  size_t num_elements = a.size();
+  kernel::copy(a.data_ptr(), c.data_ptr(), num_elements * dtype_size, stream);
 }
 
 inline void bswap(const Tensor &a, Tensor &c, stream stream = nullptr) {
@@ -944,13 +905,15 @@ inline void save(const Tensor &input, std::ostream &out) {
   out.write(reinterpret_cast<const char *>(input.shape().data()),
             input.shape().size() * sizeof(size_t));
 
-  if (input.device_type() == DeviceType::CPU) {
-    out.write(reinterpret_cast<const char *>(input.data_as<uchar>()),
-              input.size() * get_dtype_size(dtype));
-  } else {
-    auto host_tensor = to_host(input);
-    out.write(reinterpret_cast<const char *>(host_tensor.data_as<uchar>()),
-              input.size() * get_dtype_size(dtype));
+  if (input.size() > 0) {
+    if (input.device_type() == DeviceType::CPU) {
+      out.write(reinterpret_cast<const char *>(input.data_as<uchar>()),
+                input.size() * get_dtype_size(dtype));
+    } else {
+      auto host_tensor = to_host(input);
+      out.write(reinterpret_cast<const char *>(host_tensor.data_as<uchar>()),
+                input.size() * get_dtype_size(dtype));
+    }
   }
 }
 
@@ -969,13 +932,16 @@ inline void load(Tensor &input, std::istream &in) {
 
   input = Tensor(shape, dtype, input.allocator());
 
-  if (input.device_type() == DeviceType::CPU) {
-    in.read(reinterpret_cast<char *>(input.data_as<uchar>()), input.size() * get_dtype_size(dtype));
-  } else {
-    Tensor host_tensor(shape, dtype, DeviceAllocator::instance(getHost()));
-    in.read(reinterpret_cast<char *>(host_tensor.data_as<uchar>()),
-            input.size() * get_dtype_size(dtype));
-    copy(host_tensor, input);
+  if (input.size() > 0) {
+    if (input.device_type() == DeviceType::CPU) {
+      in.read(reinterpret_cast<char *>(input.data_as<uchar>()),
+              input.size() * get_dtype_size(dtype));
+    } else {
+      Tensor host_tensor(shape, dtype, DeviceAllocator::instance(getHost()));
+      in.read(reinterpret_cast<char *>(host_tensor.data_as<uchar>()),
+              input.size() * get_dtype_size(dtype));
+      copy(host_tensor, input);
+    }
   }
 }
 

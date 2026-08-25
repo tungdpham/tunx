@@ -184,8 +184,11 @@ protected:
       return res;
     } else if constexpr (std::is_same_v<BaseType, Param>) {
       constexpr size_t idx = count_type_before<Param, typename TraitsType::args_tuple, I>();
-      if (idx >= this->params_.size())
-        throw std::runtime_error("Not enough params registered in layer.");
+      if (idx >= this->params_.size()) {
+        static Param empty_param;
+        Param& empty_ref = empty_param;
+        return empty_ref;
+      }
       return this->params_[idx];
     } else if constexpr (std::is_same_v<BaseType, Config>) {
       return config_;

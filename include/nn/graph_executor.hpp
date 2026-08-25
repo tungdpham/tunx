@@ -4,6 +4,7 @@
 #include <ostream>
 #include <tuple>
 
+#include "device/offload_allocator.hpp"
 #include "nn/edge.hpp"
 #include "nn/edge_profile.hpp"
 #include "nn/execution_plan.hpp"
@@ -11,7 +12,6 @@
 #include "nn/macro_solver.hpp"
 #include "nn/memory_packer.hpp"
 #include "nn/tensor_bundle.hpp"
-#include "device/offload_allocator.hpp"
 
 namespace tunx {
 
@@ -34,7 +34,8 @@ public:
   TensorBundle forward(TensorBundle &input_map);
   TensorBundle backward(TensorBundle &output_grad_map);
 
-  const BuiltPlan &build_plans(TensorBundle &input_map, SolverOptions options = {});
+  const BuiltPlan &build_plans(TensorBundle &input_map, SolverOptions options = {},
+                               bool bootstrap_offload = false);
 
   ExecutionPlanStats profile_forward_plan(TensorBundle &input_map, const ExecutionPlan &plan);
   ExecutionPlanStats profile_backward_plan(TensorBundle &input_map,
@@ -60,16 +61,22 @@ public:
 private:
   struct PlanKey {
     std::map<Node, Vec<size_t>> input_shapes;
+    std::map<Node, DType_t> input_dtypes;
     bool enable_naive;
     bool enable_linear;
     bool enable_branching;
     bool enable_joining;
+    bool is_training;
+    int device;
     bool operator<(const PlanKey &other) const {
       if (enable_naive != other.enable_naive) return enable_naive < other.enable_naive;
       if (enable_linear != other.enable_linear) return enable_linear < other.enable_linear;
       if (enable_branching != other.enable_branching)
         return enable_branching < other.enable_branching;
       if (enable_joining != other.enable_joining) return enable_joining < other.enable_joining;
+      if (is_training != other.is_training) return is_training < other.is_training;
+      if (device != other.device) return device < other.device;
+      if (input_dtypes != other.input_dtypes) return input_dtypes < other.input_dtypes;
       return input_shapes < other.input_shapes;
     }
   };

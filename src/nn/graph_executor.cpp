@@ -87,20 +87,32 @@ void GraphExecutor::cleanup_released(std::map<Node, Entry> &entries) {
   }
 }
 
-const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptions options) {
+const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptions options,
+                                            bool bootstrap_offload) {
   std::map<std::string, Node> uid_to_node;
   for (const auto &node : graph_.nodes()) {
     uid_to_node[node->uid()] = node;
   }
+  bool is_training = false;
+  for (const auto &edge : graph_.edges()) {
+    if (edge->layer() && edge->layer()->is_training()) {
+      is_training = true;
+      break;
+    }
+  }
+
   PlanKey key;
   key.enable_naive = options.enable_naive;
   key.enable_linear = options.enable_linear;
   key.enable_branching = options.enable_branching;
   key.enable_joining = options.enable_joining;
+  key.is_training = is_training;
+  key.device = graph_.device().get_id();
 
   for (const auto &[uid, tensor] : input_map) {
     auto node = uid_to_node[uid];
     key.input_shapes[node] = tensor.shape();
+    key.input_dtypes[node] = tensor.dtype();
   }
   if (built_plans_.count(key)) {
     return built_plans_.at(key);
@@ -126,18 +138,28 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
     set_data(node, device_tensor, data_ref_counts_[node]);
   }
 
-  bool should_offload = getHost().get_total_memory() > graph_.device().get_total_memory();
+  bool should_offload = is_training && bootstrap_offload;
 
+  auto s = graph_.handle().get_stream();
   for (const Edge &edge : forward_plan.order) {
     forward_edge(edge);
 
     if (should_offload) {
-      residuals_[edge].apply_tensors([this](Tensor &tensor) {
+      std::unordered_map<void *, Tensor> offloaded_aliases;
+      residuals_[edge].apply_tensors([&](Tensor &tensor) {
         if (!tensor) return;
         if (tensor.device() != getHost()) {
+          void *source = tensor.data_as<void>();
+          auto found = offloaded_aliases.find(source);
+          if (found != offloaded_aliases.end()) {
+            tensor = found->second;
+            return;
+          }
           Tensor offloaded(tensor.shape(), tensor.dtype(), *host_allocator_);
-          copy(tensor, offloaded, graph_.handle().get_stream());
-          tensor = offloaded;
+          copy(tensor, offloaded, s);
+          s.sync();
+          offloaded_aliases.emplace(source, offloaded);
+          tensor = std::move(offloaded);
         }
       });
     }
@@ -162,18 +184,13 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
 
   output_map.clear();
 
+  graph_.workspace_allocator()->evict_unused();
+
   PlanKey backward_key;
   for (const auto &[uid, tensor] : output_grad_map) {
     auto node = uid_to_node[uid];
     backward_key.input_shapes[node] = tensor.shape();
-  }
-
-  bool is_training = false;
-  for (const auto &edge : graph_.edges()) {
-    if (edge->layer() && edge->layer()->is_training()) {
-      is_training = true;
-      break;
-    }
+    backward_key.input_dtypes[node] = tensor.dtype();
   }
 
   std::map<Edge, EdgeProfile> backward_edge_profiles;
@@ -198,6 +215,9 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
                  std::move(backward_edge_profiles),
                  std::move(node_profiles),
                  nullptr};
+
+  clear_residuals();
+  host_allocator_->evict_unused();
 
   pack_memory(plan, input_map, output_grad_map);
 
@@ -539,6 +559,8 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
 
   output_map.clear();
 
+  graph_.workspace_allocator()->evict_unused();
+
   for (const auto &[uid, tensor] : output_grad_map) {
     auto it = uid_to_node.find(uid);
     if (it == uid_to_node.end()) {
@@ -679,10 +701,43 @@ EdgeProfile GraphExecutor::profile_edge_forward(const Edge &edge) {
   size_t peak_usage = usage_before;
   const size_t hook_id = allocator->add_allocation_hook(
       [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
+  auto stream = graph_.handle().get_stream();
+  std::vector<Tensor> param_snapshots;
+  std::vector<Tensor> grad_snapshots;
+  for (const auto &param : edge->layer()->params()) {
+    if (param.size() > 0) {
+      Tensor snapshot(param.shape(), param.dtype(), *graph_.workspace_allocator());
+      copy(param.data(), snapshot, stream);
+      param_snapshots.push_back(snapshot);
+    } else {
+      param_snapshots.push_back(Tensor());
+    }
+    if (param.size() > 0 && param.grad()) {
+      Tensor grad_snapshot(param.shape(), param.dtype(), *graph_.workspace_allocator());
+      copy(param.grad(), grad_snapshot, stream);
+      grad_snapshots.push_back(grad_snapshot);
+    } else {
+      grad_snapshots.push_back(Tensor());
+    }
+  }
+
+  stream.sync();
   auto start = std::chrono::high_resolution_clock::now();
   forward_edge(edge);
+  stream.sync();
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double, std::milli> elapsed = end - start;
+
+  auto params = edge->layer()->params();
+  for (size_t i = 0; i < params.size(); ++i) {
+    if (params[i].size() > 0) {
+      copy(param_snapshots[i], params[i].data(), stream);
+      if (params[i].grad()) {
+        copy(grad_snapshots[i], params[i].grad(), stream);
+      }
+    }
+  }
+  stream.sync();
   const size_t usage_after = allocator->allocated();
   allocator->remove_allocation_hook(hook_id);
   for (const Node &consumer : edge->consumers()) {
@@ -759,12 +814,45 @@ EdgeProfile GraphExecutor::profile_edge_backward(const Edge &edge) {
   size_t peak_usage = usage_before;
   const size_t hook_id = allocator->add_allocation_hook(
       [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
+  auto stream = graph_.handle().get_stream();
+  std::vector<Tensor> param_snapshots;
+  std::vector<Tensor> grad_snapshots;
+  for (const auto &param : edge->layer()->params()) {
+    if (param.size() > 0) {
+      Tensor snapshot(param.shape(), param.dtype(), *graph_.workspace_allocator());
+      copy(param.data(), snapshot, stream);
+      param_snapshots.push_back(snapshot);
+    } else {
+      param_snapshots.push_back(Tensor());
+    }
+    if (param.size() > 0 && param.grad()) {
+      Tensor grad_snapshot(param.shape(), param.dtype(), *graph_.workspace_allocator());
+      copy(param.grad(), grad_snapshot, stream);
+      grad_snapshots.push_back(grad_snapshot);
+    } else {
+      grad_snapshots.push_back(Tensor());
+    }
+  }
+
+  stream.sync();
   auto start = std::chrono::high_resolution_clock::now();
   backward_edge(edge);
   size_t usage_after = allocator->allocated();
   allocator->remove_allocation_hook(hook_id);
+  stream.sync();
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double, std::milli> elapsed = end - start;
+
+  auto params = edge->layer()->params();
+  for (size_t i = 0; i < params.size(); ++i) {
+    if (params[i].size() > 0) {
+      copy(param_snapshots[i], params[i].data(), stream);
+      if (params[i].grad()) {
+        copy(grad_snapshots[i], params[i].grad(), stream);
+      }
+    }
+  }
+  stream.sync();
 
   for (const auto &producer : edge->producers()) {
     grad_inputs[producer] = grad(producer);
