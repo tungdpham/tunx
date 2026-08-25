@@ -26,7 +26,8 @@
 namespace tunx {
 
 GraphExecutor::GraphExecutor(Graph &graph)
-    : graph_(graph) {
+    : graph_(graph),
+      host_allocator_(std::make_unique<OffloadAllocator>(&DeviceAllocator::instance(getHost()))) {
   for (const auto &edge : graph_.edges()) {
     for (const auto &producer : edge->producers()) {
       ++data_ref_counts_[producer];
@@ -114,18 +115,33 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
   }
 
   output_map.clear();
-  
+
   for (const auto &[uid, tensor] : input_map) {
     auto node = uid_to_node[uid];
     Tensor device_tensor = tensor;
     if (tensor.device() != graph_.device()) {
-      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+      copy(tensor, device_tensor, graph_.handle().get_stream());
     }
     set_data(node, device_tensor, data_ref_counts_[node]);
   }
 
+  bool should_offload = getHost().get_total_memory() > graph_.device().get_total_memory();
+
   for (const Edge &edge : forward_plan.order) {
     forward_edge(edge);
+
+    if (should_offload) {
+      residuals_[edge].apply_tensors([this](Tensor &tensor) {
+        if (!tensor) return;
+        if (tensor.device() != getHost()) {
+          Tensor offloaded(tensor.shape(), tensor.dtype(), *host_allocator_);
+          copy(tensor, offloaded, graph_.handle().get_stream());
+          tensor = offloaded;
+        }
+      });
+    }
+
     for (const Node &consumer : edge->consumers()) {
       if (graph_.is_output(consumer)) {
         output_map.set(consumer->uid(), data(consumer));
@@ -163,7 +179,7 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
   std::map<Edge, EdgeProfile> backward_edge_profiles;
   ExecutionPlan backward_plan;
   if (is_training) {
-    auto profile_res = profile_edges_backward(output_grad_map);
+    auto profile_res = profile_edges_backward(output_grad_map, should_offload);
     backward_edge_profiles = std::move(profile_res.second);
     profile_res.first.clear();
     graph_.workspace_allocator()->evict_unused();
@@ -223,7 +239,8 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
     }
     Tensor device_tensor = tensor;
     if (tensor.device() != graph_.device()) {
-      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+      copy(tensor, device_tensor, graph_.handle().get_stream());
     }
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
   }
@@ -268,7 +285,8 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
     }
     Tensor device_tensor = tensor;
     if (tensor.device() != graph_.device()) {
-      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+      copy(tensor, device_tensor, graph_.handle().get_stream());
     }
     set_grad(it->second, device_tensor, grad_ref_counts_[it->second]);
   }
@@ -315,7 +333,8 @@ GraphExecutor::profile_edges_forward(TensorBundle &input_map, bool discard_resid
     }
     Tensor device_tensor = tensor;
     if (tensor.device() != graph_.device()) {
-      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+      copy(tensor, device_tensor, graph_.handle().get_stream());
     }
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
     node_profiles[it->second] = device_tensor.num_bytes();
@@ -354,7 +373,8 @@ ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,
     }
     Tensor device_tensor = tensor;
     if (tensor.device() != graph_.device()) {
-      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+      copy(tensor, device_tensor, graph_.handle().get_stream());
     }
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
   }
@@ -388,11 +408,12 @@ ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,
     edge_stat.allocated_mem = allocator->allocated();
     edge_stat.reserved_mem = allocator->reserved();
     edge_stat.peak_mem = peak_usage;
-    edge_stat.fragmented_mem = allocator->reserved() - (allocator->allocated() + allocator->unused());
+    edge_stat.fragmented_mem =
+        allocator->reserved() - (allocator->allocated() + allocator->unused());
     edge_stat.cached_mem = allocator->unused();
-    edge_stat.activations_mem = allocator->allocated();
+    edge_stat.activations_mem = allocator->allocated() + host_allocator_->allocated();
     edge_stat.gradients_mem = 0;
-    edge_stat.host_mem = DeviceAllocator::instance(getHost()).allocated();
+    edge_stat.host_mem = host_allocator_->allocated();
     edge_stat.workspaces_mem = std::max(last_workspace_mem, profile.workspace_mem);
     stats.edge_stats.push_back(edge_stat);
 
@@ -411,7 +432,7 @@ ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,
   stats.peak_mem = stats.edge_stats.size() > 0 ? stats.edge_stats.back().peak_mem : 0;
 
   // free memory for residuals since this is just profiling
-  residuals_.clear();
+  clear_residuals();
   output_map.clear();
   cleanup_released(data_);
   allocator->evict_unused();
@@ -420,7 +441,7 @@ ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,
 }
 
 std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edges_backward(
-    TensorBundle &output_grad_map) {
+    TensorBundle &output_grad_map, bool prefetch_residuals) {
   std::map<Edge, EdgeProfile> edge_profiles;
   std::map<std::string, Node> uid_to_node;
   for (const auto &node : graph_.nodes()) {
@@ -433,7 +454,8 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
     }
     Tensor device_tensor = tensor;
     if (tensor.device() != graph_.device()) {
-      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+      copy(tensor, device_tensor, graph_.handle().get_stream());
     }
     set_grad(it->second, device_tensor, grad_ref_counts_[it->second]);
   }
@@ -443,6 +465,18 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
 
   for (auto it = graph_.edges().rbegin(); it != graph_.edges().rend(); ++it) {
     const Edge &edge = *it;
+
+    if (prefetch_residuals) {
+      residuals_[edge].apply_tensors([this](Tensor &tensor) {
+        if (!tensor) return;
+        if (tensor.device() != graph_.device()) {
+          Tensor device_tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+          copy(tensor, device_tensor, graph_.handle().get_stream());
+          tensor = device_tensor;
+        }
+      });
+    }
+
     EdgeProfile profile = profile_edge_backward(edge);
     edge_profiles[edge] = profile;
 
@@ -474,7 +508,8 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
     }
     Tensor device_tensor = tensor;
     if (tensor.device() != graph_.device()) {
-      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+      copy(tensor, device_tensor, graph_.handle().get_stream());
     }
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
   }
@@ -511,7 +546,8 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
     }
     Tensor device_tensor = tensor;
     if (tensor.device() != graph_.device()) {
-      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+      copy(tensor, device_tensor, graph_.handle().get_stream());
     }
     set_grad(it->second, device_tensor, grad_ref_counts_[it->second]);
   }
@@ -546,6 +582,7 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
     if (packed_alloc) {
       packed_alloc->set_current_edge(edge->uid() + "_bw");
     }
+
     EdgeProfile profile = profile_edge_backward(edge);
 
     last_gradients_mem += profile.output_mem - profile.input_mem;
@@ -559,11 +596,12 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
     edge_stat.allocated_mem = allocator->allocated();
     edge_stat.reserved_mem = allocator->reserved();
     edge_stat.peak_mem = peak_usage;
-    edge_stat.fragmented_mem = allocator->reserved() - (allocator->allocated() + allocator->unused());
+    edge_stat.fragmented_mem =
+        allocator->reserved() - (allocator->allocated() + allocator->unused());
     edge_stat.cached_mem = allocator->unused();
-    edge_stat.activations_mem = last_activations_mem;
+    edge_stat.activations_mem = last_activations_mem + host_allocator_->allocated();
     edge_stat.gradients_mem = param_gradients_mem + last_gradients_mem;
-    edge_stat.host_mem = DeviceAllocator::instance(getHost()).allocated();
+    edge_stat.host_mem = host_allocator_->allocated();
     edge_stat.workspaces_mem = std::max(last_workspace_mem, profile.workspace_mem);
     stats.edge_stats.push_back(edge_stat);
 
@@ -767,7 +805,8 @@ void GraphExecutor::pack_memory(BuiltPlan &plan, TensorBundle &input_map,
     auto it = uid_to_node.find(uid);
     Tensor device_tensor = tensor;
     if (tensor.device() != graph_.device()) {
-      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+      copy(tensor, device_tensor, graph_.handle().get_stream());
     }
     set_data(it->second, device_tensor, data_ref_counts_[it->second]);
   }
@@ -795,7 +834,8 @@ void GraphExecutor::pack_memory(BuiltPlan &plan, TensorBundle &input_map,
     auto it = uid_to_node.find(uid);
     Tensor device_tensor = tensor;
     if (tensor.device() != graph_.device() && tensor) {
-      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+      copy(tensor, device_tensor, graph_.handle().get_stream());
     }
     set_grad(it->second, device_tensor, grad_ref_counts_[it->second]);
   }
@@ -824,7 +864,7 @@ void GraphExecutor::pack_memory(BuiltPlan &plan, TensorBundle &input_map,
   cleanup_released(grads_);
   data_.clear();
   grads_.clear();
-  residuals_.clear();
+  clear_residuals();
 
   tracker.step();
 

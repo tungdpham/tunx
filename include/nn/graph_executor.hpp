@@ -8,10 +8,10 @@
 #include "nn/edge_profile.hpp"
 #include "nn/execution_plan.hpp"
 #include "nn/graph.hpp"
-#include "nn/layer.hpp"
 #include "nn/macro_solver.hpp"
 #include "nn/memory_packer.hpp"
 #include "nn/tensor_bundle.hpp"
+#include "device/offload_allocator.hpp"
 
 namespace tunx {
 
@@ -49,7 +49,7 @@ public:
   std::tuple<TensorBundle, std::map<Edge, EdgeProfile>, std::map<Node, size_t>>
   profile_edges_forward(TensorBundle &input_map, bool discard_residuals = false);
   std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edges_backward(
-      TensorBundle &output_grad_map);
+      TensorBundle &output_grad_map, bool prefetch_residuals = false);
 
   std::map<Edge, Residuals> &residuals() { return residuals_; }
   const std::map<Edge, Residuals> &residuals() const { return residuals_; }
@@ -81,6 +81,7 @@ private:
 
   Graph &graph_;
   std::ostream *os_ = nullptr;
+  std::unique_ptr<OffloadAllocator> host_allocator_;
   BuiltPlan active_built_plan_;
   std::map<PlanKey, BuiltPlan> built_plans_;
   std::map<Node, Entry> data_;

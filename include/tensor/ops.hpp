@@ -591,44 +591,32 @@ inline void greater(const Tensor &a, const Tensor &b, Tensor &c, stream stream =
 }
 
 inline void copy(const Tensor &a, Tensor &c, stream stream = nullptr) {
-  DType_t dtype = a.dtype();
-  size_t size = a.size();
-  if (a.device() != c.device()) {
-    throw std::runtime_error("copy: All device pointers must be on the same device");
-  }
-
   if (a.data_as<void>() == nullptr || c.data_as<void>() == nullptr) {
     throw std::runtime_error("copy: Null pointer exception in copy operation");
   }
 
-  auto &device = a.device();
-  auto device_type = device.device_type();
-
-  if (device_type == DeviceType::CPU) {
-    return create_cpu_task(device, stream, kernel::cpu::copy, dtype, a.data_as<void>(),
-                           c.data_as<void>(), size);
-  }
-#ifdef TUNX_USE_CUDA
-  else if (device_type == DeviceType::CUDA) {
-    return create_cuda_task(device, stream, kernel::cuda::copy, dtype, a.data_as<void>(),
-                            c.data_as<void>(), size);
-  }
-#endif
-  else {
-    throw std::runtime_error("Unsupported device type");
-  }
-}
-
-// Special copy for copying cross devices (resort to same device/host copy if applicable)
-inline void cd_copy(const Tensor &a, Tensor &c, stream stream = nullptr) {
   DType_t dtype = a.dtype();
   size_t size = a.size();
   auto &a_device = a.device();
   auto &c_device = c.device();
+
   if (a_device == c_device) {
-    // same device copy
-    return copy(a, c, stream);
+    auto device_type = a_device.device_type();
+    if (device_type == DeviceType::CPU) {
+      return create_cpu_task(a_device, stream, kernel::cpu::copy, dtype, a.data_as<void>(),
+                             c.data_as<void>(), size);
+    }
+#ifdef TUNX_USE_CUDA
+    else if (device_type == DeviceType::CUDA) {
+      return create_cuda_task(a_device, stream, kernel::cuda::copy, dtype, a.data_as<void>(),
+                              c.data_as<void>(), size);
+    }
+#endif
+    else {
+      throw std::runtime_error("Unsupported device type");
+    }
   }
+
   auto a_device_type = a_device.device_type();
   auto c_device_type = c_device.device_type();
 
@@ -638,7 +626,7 @@ inline void cd_copy(const Tensor &a, Tensor &c, stream stream = nullptr) {
     return create_cuda_task(c_device, stream, kernel::cuda::h2d_copy, dtype, a.data_as<void>(),
                             c.data_as<void>(), size);
 #else
-    throw std::runtime_error("cd_copy: CUDA not enabled for CPU to CUDA copy");
+    throw std::runtime_error("copy: CUDA not enabled for CPU to CUDA copy");
 #endif
   } else if (a_device_type == DeviceType::CUDA && c_device_type == DeviceType::CPU) {
     // device to host copy
@@ -646,12 +634,10 @@ inline void cd_copy(const Tensor &a, Tensor &c, stream stream = nullptr) {
     return create_cuda_task(a_device, stream, kernel::cuda::d2h_copy, dtype, a.data_as<void>(),
                             c.data_as<void>(), size);
 #else
-    throw std::runtime_error("cd_copy: CUDA not enabled for CUDA to CPU copy");
+    throw std::runtime_error("copy: CUDA not enabled for CUDA to CPU copy");
 #endif
   } else {
-    (void)dtype;
-    (void)size;
-    throw std::runtime_error("cd_copy: Unsupported device type combination");
+    throw std::runtime_error("copy: Unsupported device type combination");
   }
 }
 
@@ -931,7 +917,7 @@ inline void cast(const Tensor &a, Tensor &b, stream stream = nullptr) {
 
 inline Tensor to_device(const Tensor &input, Device &device, stream s = nullptr) {
   Tensor result(input.shape(), input.dtype(), device);
-  cd_copy(input, result, s);
+  copy(input, result, s);
   return result;
 }
 
@@ -989,7 +975,7 @@ inline void load(Tensor &input, std::istream &in) {
     Tensor host_tensor(shape, dtype, DeviceAllocator::instance(getHost()));
     in.read(reinterpret_cast<char *>(host_tensor.data_as<uchar>()),
             input.size() * get_dtype_size(dtype));
-    cd_copy(host_tensor, input);
+    copy(host_tensor, input);
   }
 }
 

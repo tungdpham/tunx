@@ -57,8 +57,7 @@ Tensor ConcatOp::forward(OpContext &ctx, const Vec<Tensor> &inputs, const Config
     for (size_t i = 0; i < inputs.size(); ++i) {
       sizes.push_back(inputs[i].shape()[final_axis]);
     }
-    Tensor shape_tensor(sizes, dptr(nullptr), DType_t::SIZE_T);
-    ctx.residuals["input_axis_sizes"] = shape_tensor;
+    ctx.residuals["input_axis_sizes"] = sizes;
   }
 
   Vec<size_t> out_shape = output_shapes(input_shapes, config)[0];
@@ -105,8 +104,7 @@ Tensor ConcatOp::forward(OpContext &ctx, const Vec<Tensor> &inputs, const Config
 }
 
 Vec<Tensor> ConcatOp::backward(OpContext &ctx, const Tensor &grad_output, const Config &config) {
-  const Tensor &shape_tensor = ctx.residuals["input_axis_sizes"];
-  const auto &sizes = shape_tensor.shape();
+  const Vec<size_t> &sizes = ctx.residuals["input_axis_sizes"];
   size_t num_inputs = sizes.size();
 
   int rank = static_cast<int>(grad_output.shape().size());
