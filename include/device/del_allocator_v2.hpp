@@ -76,7 +76,8 @@ private:
   DELAllocatorV2(Device &device, stream s)
       : device_(device),
         stream_(s),
-        side_(0) {}  // Added tracking counter
+        side_(0),
+        backend_allocator_(&tunx::DeviceAllocator::instance(device, s)) {}
 
 public:
   static std::shared_ptr<DELAllocatorV2> create(Device &device, stream s) {
@@ -106,6 +107,11 @@ public:
 
   DELAllocatorV2(const DELAllocatorV2 &) = delete;
   DELAllocatorV2 &operator=(const DELAllocatorV2 &) = delete;
+
+  void set_backend_allocator(IAllocator *allocator) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    backend_allocator_ = allocator;
+  }
 
   dptr allocate(size_t size) override {
     if (size == 0) {
@@ -307,6 +313,7 @@ private:
   size_t allocated_ = 0;
 
   std::vector<std::function<void(size_t)>> allocation_hooks_;
+  IAllocator *backend_allocator_;
 
   void set_allocated(size_t new_total) {
     allocated_ = new_total;
@@ -374,7 +381,7 @@ private:
     }
 
     if (slab->active_allocations == 0) {
-      // merge_slabs(); // temporarily disable this feature
+      // merge_slabs();  // temporarily disable this feature
     }
   }
 
@@ -424,8 +431,8 @@ private:
     }
     slab_size = std::max(slab_size, freed_bytes);
     slab_size = align_up(slab_size, DEFAULT_ALIGNMENT);
-    
-    dptr new_dptr = tunx::DeviceAllocator::instance(device_, stream_).allocate(slab_size);
+
+    dptr new_dptr = backend_allocator_->allocate(slab_size);
     if (!new_dptr.get()) {
       throw std::runtime_error("DELAllocatorV2: Failed to allocate slab");
     }

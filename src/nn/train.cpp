@@ -831,12 +831,12 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
                          memory_metrics_logger, "packed", plan_name, opts);
     };
 
-    if (!config.benchmark_mode) {
+    if (config.print_ablation) {
       profile_memory("Naive", {true, false, false, false});
-      // profile_memory("Ranked", {false, false, false, false});
-      // profile_memory("Linear", {false, true, false, false});
-      // profile_memory("Branch", {false, true, true, false});
-      // profile_memory("Join", {false, true, false, true});
+      profile_memory("Ranked", {false, false, false, false});
+      profile_memory("Linear", {false, true, false, false});
+      profile_memory("Branch", {false, true, true, false});
+      profile_memory("Join", {false, true, false, true});
       profile_memory("Full Solver", {false, true, true, true});
     }
 
