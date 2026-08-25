@@ -26,7 +26,7 @@ struct BuiltPlan {
 
 class GraphExecutor {
 public:
-  explicit GraphExecutor(Graph &graph);
+  explicit GraphExecutor(Graph &graph, bool bootstrap_offload = true);
 
   Graph &graph() { return graph_; }
   const Graph &graph() const { return graph_; }
@@ -34,8 +34,7 @@ public:
   TensorBundle forward(TensorBundle &input_map);
   TensorBundle backward(TensorBundle &output_grad_map);
 
-  const BuiltPlan &build_plans(TensorBundle &input_map, SolverOptions options = {},
-                               bool bootstrap_offload = false);
+  const BuiltPlan &build_plans(TensorBundle &input_map, SolverOptions options = {});
 
   ExecutionPlanStats profile_forward_plan(TensorBundle &input_map, const ExecutionPlan &plan);
   ExecutionPlanStats profile_backward_plan(TensorBundle &input_map,
@@ -87,6 +86,7 @@ private:
   };
 
   Graph &graph_;
+  bool bootstrap_offload_ = true;
   std::ostream *os_ = nullptr;
   std::unique_ptr<OffloadAllocator> host_allocator_;
   BuiltPlan active_built_plan_;

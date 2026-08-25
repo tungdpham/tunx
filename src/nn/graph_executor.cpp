@@ -25,8 +25,9 @@
 
 namespace tunx {
 
-GraphExecutor::GraphExecutor(Graph &graph)
+GraphExecutor::GraphExecutor(Graph &graph, bool bootstrap_offload)
     : graph_(graph),
+      bootstrap_offload_(bootstrap_offload),
       host_allocator_(std::make_unique<OffloadAllocator>(&DeviceAllocator::instance(getHost()))) {
   for (const auto &edge : graph_.edges()) {
     for (const auto &producer : edge->producers()) {
@@ -87,8 +88,7 @@ void GraphExecutor::cleanup_released(std::map<Node, Entry> &entries) {
   }
 }
 
-const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptions options,
-                                            bool bootstrap_offload) {
+const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptions options) {
   std::map<std::string, Node> uid_to_node;
   for (const auto &node : graph_.nodes()) {
     uid_to_node[node->uid()] = node;
@@ -138,7 +138,7 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
     set_data(node, device_tensor, data_ref_counts_[node]);
   }
 
-  bool should_offload = is_training && bootstrap_offload;
+  bool should_offload = is_training && bootstrap_offload_;
 
   auto s = graph_.handle().get_stream();
   for (const Edge &edge : forward_plan.order) {

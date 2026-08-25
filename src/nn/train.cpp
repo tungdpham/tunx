@@ -97,7 +97,7 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
   fmt::print("\n{:=^80}\n", " Execution Plan Stats ");
 
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
-    auto &built_plan = executor.build_plans(inputs, opts, config.bootstrap_offload);
+    auto &built_plan = executor.build_plans(inputs, opts);
     auto &macro_plan = built_plan.forward_plan;
     auto *prev_allocator = executor.graph().workspace_allocator();
     executor.graph().set_workspace_allocator(*built_plan.packed_allocator);
@@ -148,7 +148,7 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
   fmt::print("\n{:=^80}\n", " Backward Execution Plan Stats ");
 
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
-    auto &built_plan = executor.build_plans(inputs, opts, config.bootstrap_offload);
+    auto &built_plan = executor.build_plans(inputs, opts);
     auto &macro_plan = built_plan.backward_plan;
     auto prev_allocator = executor.graph().workspace_allocator();
     executor.graph().set_workspace_allocator(*built_plan.packed_allocator);
@@ -198,8 +198,7 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
 static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimizer,
                                GraphExecutor &executor, TensorBundle &inputs, IAllocator &alloc,
                                std::unique_ptr<CsvLogger> &logger, std::string allocator_name,
-                               std::string plan_name, SolverOptions options,
-                               bool bootstrap_offload) {
+                               std::string plan_name, SolverOptions options) {
   auto *previous_alloc = graph.workspace_allocator();
   graph.set_workspace_allocator(alloc);
 
@@ -219,7 +218,7 @@ static void log_memory_metrics(Graph &graph, const unique_ptr<Optimizer> &optimi
     }
   }
 
-  auto &built_plan = executor.build_plans(inputs, options, bootstrap_offload);
+  auto &built_plan = executor.build_plans(inputs, options);
 
   ExecutionPlanStats forward_stats = executor.profile_forward_plan(inputs, built_plan.forward_plan);
   ExecutionPlanStats backward_stats =
@@ -317,7 +316,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     return train_dataset->get_batch(config.batch_size, data, labels);
   };
 
-  GraphExecutor executor(graph);
+  GraphExecutor executor(graph, config.bootstrap_offload);
 
   cout << "Training batches: " << train_dataset->size() << endl;
   while (get_next(batch_data, batch_labels) &&
@@ -524,7 +523,7 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
     return train_dataset->get_batch(config.batch_size, data, labels);
   };
 
-  GraphExecutor executor(graph);
+  GraphExecutor executor(graph, config.bootstrap_offload);
   thread_wrapper.execute([&]() -> void {
     for (int steps = 0; steps < config.max_steps; ++steps) {
       if (!get_next(batch_data, batch_labels)) {
@@ -639,7 +638,7 @@ static void run_benchmark(Graph &graph, unique_ptr<Dataset> &train_dataset,
 
   Tensor device_input = to_device(batch_data, model_device);
   Tensor device_labels = to_device(batch_labels, model_device);
-  GraphExecutor executor(graph);
+  GraphExecutor executor(graph, config.bootstrap_offload);
 
 #ifdef TUNX_USE_CUDA
   cudaStream_t cu_stream = *(model_device.default_stream().as<cuda_stream>());
@@ -822,11 +821,10 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
     TensorBundle inputs{{"input", device_input}};
     std::ofstream debug_file("debug_macro_logs.txt");
 
-    GraphExecutor executor(graph);
+    GraphExecutor executor(graph, config.bootstrap_offload);
     executor.set_log_stream(&debug_file);
 
-    auto &built_plan = executor.build_plans(inputs, SolverOptions{false, true, true, true},
-                                            config.bootstrap_offload);
+    auto &built_plan = executor.build_plans(inputs, SolverOptions{false, true, true, true});
     graph.save_dot("current_graph.dot", &built_plan.forward_edge_profiles,
                    &built_plan.node_profiles);
     log_edge_profiles(built_plan.forward_edge_profiles, forward_profiles_logger);
@@ -837,13 +835,12 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
 
     auto &pool_allocator = PoolAllocator::instance(graph.device(), graph.handle().get_stream());
     auto profile_memory = [&](const std::string &plan_name, SolverOptions opts) {
-      auto &plan = executor.build_plans(inputs, opts, config.bootstrap_offload);
+      auto &plan = executor.build_plans(inputs, opts);
       auto &packed_allocator = *plan.packed_allocator;
       log_memory_metrics(graph, optimizer, executor, inputs, pool_allocator, memory_metrics_logger,
-                         "reactive", plan_name, opts, config.bootstrap_offload);
+                         "reactive", plan_name, opts);
       log_memory_metrics(graph, optimizer, executor, inputs, packed_allocator,
-                         memory_metrics_logger, "packed", plan_name, opts,
-                         config.bootstrap_offload);
+                         memory_metrics_logger, "packed", plan_name, opts);
     };
 
     if (config.print_ablation) {
@@ -854,6 +851,8 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
       profile_memory("Join", {false, true, false, true});
       profile_memory("Full Solver", {false, true, true, true});
     }
+
+    graph.workspace_allocator()->evict_unused();
 
     if (optimizer) {
       optimizer->zero_grads();
