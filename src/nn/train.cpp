@@ -99,7 +99,13 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
     auto &built_plan = executor.build_plans(inputs, opts, config.bootstrap_offload);
     auto &macro_plan = built_plan.forward_plan;
+    auto *prev_allocator = executor.graph().workspace_allocator();
+    executor.graph().set_workspace_allocator(*built_plan.packed_allocator);
     auto macro_stats = executor.profile_forward_plan(inputs, macro_plan);
+    executor.graph().set_workspace_allocator(*prev_allocator);
+    for (auto &edge : executor.graph().edges()) {
+      edge->layer()->set_workspace_allocator(prev_allocator);
+    }
 
     fmt::print("{} Order Peak Memory: {} bytes\n", name, macro_stats.peak_mem);
     fmt::print("{} Path: ", name);
@@ -144,7 +150,13 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
     auto &built_plan = executor.build_plans(inputs, opts, config.bootstrap_offload);
     auto &macro_plan = built_plan.backward_plan;
+    auto prev_allocator = executor.graph().workspace_allocator();
+    executor.graph().set_workspace_allocator(*built_plan.packed_allocator);
     auto macro_stats = executor.profile_backward_plan(inputs, built_plan.forward_plan, macro_plan);
+    executor.graph().set_workspace_allocator(*prev_allocator);
+    for (auto &edge : executor.graph().edges()) {
+      edge->layer()->set_workspace_allocator(prev_allocator);
+    }
 
     fmt::print("{} Order Peak Memory: {} bytes\n", name, macro_stats.peak_mem);
     fmt::print("{} Path: ", name);

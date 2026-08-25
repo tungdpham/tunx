@@ -25,36 +25,6 @@ struct TensorAllocation {
   int end_step;
 };
 
-class TrackingAllocator : public IAllocator {
-public:
-  TrackingAllocator(IAllocator* backend_alloc);
-
-  void set_current_edge(const std::string& uid);
-  void step();
-
-  dptr allocate(size_t size) override;
-  void clear() override;
-  void ensure(size_t size) override;
-  size_t reserved() const override;
-  size_t allocated() const override;
-  size_t unused() const override;
-  void evict_unused() override;
-  size_t add_allocation_hook(std::function<void(size_t)> hook) override;
-  bool remove_allocation_hook(size_t hook_id) override;
-  Device& device() const override;
-
-  const std::vector<TensorAllocation>& get_allocations() const;
-
-private:
-  IAllocator* backend_alloc_;
-  std::string current_edge_uid_;
-  int current_alloc_index_ = 0;
-  int current_step_ = 0;
-
-  std::vector<TensorAllocation> allocations_;
-  std::map<std::string, size_t> active_allocs_;  // iid -> index in allocations_
-};
-
 class MemoryPacker {
 public:
   struct PackResult {

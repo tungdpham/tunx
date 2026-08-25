@@ -535,8 +535,12 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
   }
   TensorBundle output_map;  // placeholder to ensure outputs arent prematurely deallocated
 
-  tunx::PackedAllocator *packed_alloc_fw =
-      dynamic_cast<tunx::PackedAllocator *>(graph_.workspace_allocator());
+  auto *allocator = graph_.workspace_allocator();
+  tunx::PackedAllocator *packed_alloc_fw = dynamic_cast<tunx::PackedAllocator *>(allocator);
+  for (auto &edge : graph_.edges()) {
+    edge->layer()->set_workspace_allocator(allocator);
+  }
+
   for (const Edge &edge : forward_plan.order) {
     if (packed_alloc_fw) {
       packed_alloc_fw->set_current_edge(edge->uid() + "_fw");
@@ -577,7 +581,6 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
 
   TensorBundle grad_input_map;
 
-  auto *allocator = graph_.workspace_allocator();
   size_t peak_usage = 0;
   const size_t hook_id = allocator->add_allocation_hook(
       [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
@@ -592,10 +595,6 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
     if (param.grad()) {
       param_gradients_mem += param.grad().num_bytes();
     }
-  }
-
-  for (auto &edge : graph_.edges()) {
-    if (edge->layer()) edge->layer()->set_workspace_allocator(allocator);
   }
 
   tunx::PackedAllocator *packed_alloc = dynamic_cast<tunx::PackedAllocator *>(allocator);
@@ -689,6 +688,55 @@ void GraphExecutor::backward_edge(const Edge &edge) {
   }
 }
 
+class EdgeProfilingAllocator : public IAllocator {
+public:
+  EdgeProfilingAllocator(IAllocator *backend)
+      : backend_(backend) {}
+
+  void set_current_edge(const std::string &uid) {
+    current_edge_uid_ = uid;
+    current_alloc_index_ = 0;
+  }
+
+  dptr allocate(size_t size) override {
+    if (size == 0) return dptr(nullptr);
+    size_t aligned_size = (size + 255) & ~255;
+    std::string iid = current_edge_uid_ + "_" + std::to_string(current_alloc_index_++);
+    dptr orig = backend_->allocate(aligned_size);
+    void *ptr = orig.get<void>();
+    allocations_.push_back({iid, aligned_size, ptr});
+    return orig;
+  }
+
+  void clear() override { backend_->clear(); }
+  void ensure(size_t size) override { backend_->ensure(size); }
+  size_t reserved() const override { return backend_->reserved(); }
+  size_t allocated() const override { return backend_->allocated(); }
+  size_t unused() const override { return backend_->unused(); }
+  void evict_unused() override { backend_->evict_unused(); }
+  size_t add_allocation_hook(std::function<void(size_t)> hook) override {
+    return backend_->add_allocation_hook(hook);
+  }
+  bool remove_allocation_hook(size_t hook_id) override {
+    return backend_->remove_allocation_hook(hook_id);
+  }
+  Device &device() const override { return backend_->device(); }
+
+  struct AllocRecord {
+    std::string iid;
+    size_t size;
+    void *ptr;
+  };
+
+  const std::vector<AllocRecord> &allocations() const { return allocations_; }
+
+private:
+  IAllocator *backend_;
+  std::string current_edge_uid_;
+  int current_alloc_index_ = 0;
+  std::vector<AllocRecord> allocations_;
+};
+
 EdgeProfile GraphExecutor::profile_edge_forward(const Edge &edge) {
   // keep a copy to check cached inputs
   std::map<Node, Tensor> inputs;
@@ -696,24 +744,29 @@ EdgeProfile GraphExecutor::profile_edge_forward(const Edge &edge) {
   for (const Node &producer : edge->producers()) {
     inputs[producer] = data(producer);
   }
-  auto *allocator = edge->layer()->workspace_allocator();
-  const size_t usage_before = allocator->allocated();
+  auto *backend_allocator = edge->layer()->workspace_allocator();
+  EdgeProfilingAllocator tracker(backend_allocator);
+  tracker.set_current_edge(edge->uid() + "_fw");
+
+  const size_t usage_before = backend_allocator->allocated();
   size_t peak_usage = usage_before;
-  const size_t hook_id = allocator->add_allocation_hook(
+  const size_t hook_id = backend_allocator->add_allocation_hook(
       [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
   auto stream = graph_.handle().get_stream();
   std::vector<Tensor> param_snapshots;
   std::vector<Tensor> grad_snapshots;
   for (const auto &param : edge->layer()->params()) {
     if (param.size() > 0) {
-      Tensor snapshot(param.shape(), param.dtype(), *graph_.workspace_allocator());
+      auto &pool = tunx::PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
+      Tensor snapshot(param.shape(), param.dtype(), pool);
       copy(param.data(), snapshot, stream);
       param_snapshots.push_back(snapshot);
     } else {
       param_snapshots.push_back(Tensor());
     }
     if (param.size() > 0 && param.grad()) {
-      Tensor grad_snapshot(param.shape(), param.dtype(), *graph_.workspace_allocator());
+      auto &pool = tunx::PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
+      Tensor grad_snapshot(param.shape(), param.dtype(), pool);
       copy(param.grad(), grad_snapshot, stream);
       grad_snapshots.push_back(grad_snapshot);
     } else {
@@ -723,7 +776,11 @@ EdgeProfile GraphExecutor::profile_edge_forward(const Edge &edge) {
 
   stream.sync();
   auto start = std::chrono::high_resolution_clock::now();
+
+  edge->layer()->set_workspace_allocator(&tracker);
   forward_edge(edge);
+  edge->layer()->set_workspace_allocator(backend_allocator);
+
   stream.sync();
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double, std::milli> elapsed = end - start;
@@ -738,8 +795,8 @@ EdgeProfile GraphExecutor::profile_edge_forward(const Edge &edge) {
     }
   }
   stream.sync();
-  const size_t usage_after = allocator->allocated();
-  allocator->remove_allocation_hook(hook_id);
+  const size_t usage_after = backend_allocator->allocated();
+  backend_allocator->remove_allocation_hook(hook_id);
   for (const Node &consumer : edge->consumers()) {
     outputs[consumer] = data(consumer);
   }
@@ -759,39 +816,63 @@ EdgeProfile GraphExecutor::profile_edge_forward(const Edge &edge) {
       }
     }
   }
+
   profile.input_mem = 0;
   for (const auto &[node, tensor] : inputs) {
     profile.input_mem += tensor.num_bytes();
-    for (const auto &[name, residual] : residuals.tensors()) {
-      if (tensor.data_as<void>() == residual.data_as<void>()) {
-        profile.cached_nodes.push_back(node->uid());
+  }
+
+  for (const auto &alloc : tracker.allocations()) {
+    bool found = false;
+    for (const auto &[node, tensor] : outputs) {
+      if (tensor.data_as<void>() == alloc.ptr) {
+        profile.forward_buffers.push_back(
+            {alloc.iid, BufferRole::Output, alloc.size, 256, node->uid()});
+        found = true;
         break;
       }
     }
+    if (found) continue;
+
+    for (const auto &[name, residual] : residuals.tensors()) {
+      if (residual.data_as<void>() == alloc.ptr) {
+        profile.forward_buffers.push_back(
+            {alloc.iid, BufferRole::SecondaryResidual, alloc.size, 256, std::nullopt});
+        profile.secondary_mem += alloc.size;
+        found = true;
+        break;
+      }
+    }
+    if (found) continue;
+
+    profile.forward_buffers.push_back(
+        {alloc.iid, BufferRole::Workspace, alloc.size, 256, std::nullopt});
   }
-  profile.secondary_mem = 0;
+
+  // Now, explicitly identify SavedInputAlias and SavedOutputAlias from residuals
   for (const auto &[name, residual] : residuals.tensors()) {
-    bool is_input = false;
+    bool matched = false;
     for (const auto &[node, tensor] : inputs) {
       if (tensor.data_as<void>() == residual.data_as<void>()) {
-        is_input = true;
+        profile.forward_buffers.push_back(
+            {"", BufferRole::SavedInputAlias, residual.num_bytes(), 256, node->uid()});
+        matched = true;
         break;
       }
     }
-    bool is_output = false;
+    if (matched) continue;
+
     for (const auto &[node, tensor] : outputs) {
       if (tensor.data_as<void>() == residual.data_as<void>()) {
-        is_output = true;
+        profile.forward_buffers.push_back(
+            {"", BufferRole::SavedOutputAlias, residual.num_bytes(), 256, node->uid()});
         break;
       }
-    }
-    if (!is_input && !is_output) {
-      profile.secondary_mem += residual.num_bytes();
     }
   }
   inputs.clear();   // free to see real net mem
   outputs.clear();  // free to see real net mem
-  profile.net_mem = allocator->allocated() - usage_before;
+  profile.net_mem = backend_allocator->allocated() - usage_before;
 
   residuals_[edge] = std::move(residuals);
   return profile;
@@ -809,24 +890,29 @@ EdgeProfile GraphExecutor::profile_edge_backward(const Edge &edge) {
     is_first_to_init[producer] = grads_.find(producer) == grads_.end();
   }
 
-  auto *allocator = edge->layer()->workspace_allocator();
-  const size_t usage_before = allocator->allocated();
+  auto *backend_allocator = edge->layer()->workspace_allocator();
+  EdgeProfilingAllocator tracker(backend_allocator);
+  tracker.set_current_edge(edge->uid() + "_bw");
+
+  const size_t usage_before = backend_allocator->allocated();
   size_t peak_usage = usage_before;
-  const size_t hook_id = allocator->add_allocation_hook(
+  const size_t hook_id = backend_allocator->add_allocation_hook(
       [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
   auto stream = graph_.handle().get_stream();
   std::vector<Tensor> param_snapshots;
   std::vector<Tensor> grad_snapshots;
   for (const auto &param : edge->layer()->params()) {
     if (param.size() > 0) {
-      Tensor snapshot(param.shape(), param.dtype(), *graph_.workspace_allocator());
+      auto &pool = tunx::PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
+      Tensor snapshot(param.shape(), param.dtype(), pool);
       copy(param.data(), snapshot, stream);
       param_snapshots.push_back(snapshot);
     } else {
       param_snapshots.push_back(Tensor());
     }
     if (param.size() > 0 && param.grad()) {
-      Tensor grad_snapshot(param.shape(), param.dtype(), *graph_.workspace_allocator());
+      auto &pool = tunx::PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
+      Tensor grad_snapshot(param.shape(), param.dtype(), pool);
       copy(param.grad(), grad_snapshot, stream);
       grad_snapshots.push_back(grad_snapshot);
     } else {
@@ -836,9 +922,13 @@ EdgeProfile GraphExecutor::profile_edge_backward(const Edge &edge) {
 
   stream.sync();
   auto start = std::chrono::high_resolution_clock::now();
+
+  edge->layer()->set_workspace_allocator(&tracker);
   backward_edge(edge);
-  size_t usage_after = allocator->allocated();
-  allocator->remove_allocation_hook(hook_id);
+  edge->layer()->set_workspace_allocator(backend_allocator);
+
+  size_t usage_after = backend_allocator->allocated();
+  backend_allocator->remove_allocation_hook(hook_id);
   stream.sync();
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double, std::milli> elapsed = end - start;
@@ -867,100 +957,175 @@ EdgeProfile GraphExecutor::profile_edge_backward(const Edge &edge) {
     profile.input_mem += grad_output.num_bytes();
   }
   profile.output_mem = 0;
-  // gradients are accumulated so only first one is newly allocated
-  // so we only count the first one's memory as newly allocated
-  for (const auto &[node, grad_input] : grad_inputs) {
-    if (is_first_to_init[node]) {
-      profile.output_mem += grad_input.num_bytes();
+  for (const auto &alloc : tracker.allocations()) {
+    bool found = false;
+    for (const auto &[node, grad_input] : grad_inputs) {
+      if (grad_input.data_as<void>() == alloc.ptr) {
+        if (is_first_to_init[node]) {
+          profile.backward_buffers.push_back(
+              {alloc.iid, BufferRole::GradientOutput, alloc.size, 256, node->uid()});
+        } else {
+          profile.backward_buffers.push_back(
+              {alloc.iid, BufferRole::GradientContribution, alloc.size, 256, node->uid()});
+        }
+        found = true;
+        break;
+      }
     }
+    if (found) continue;
+    profile.backward_buffers.push_back(
+        {alloc.iid, BufferRole::Workspace, alloc.size, 256, std::nullopt});
   }
+
   profile.secondary_mem = 0;  // none since backward
   grad_outputs.clear();       // clear to see real net memory
   grad_inputs.clear();        // clear to see real net memory
   residuals_.erase(edge);
-  profile.net_mem = allocator->allocated() - usage_before;
+  profile.net_mem = backend_allocator->allocated() - usage_before;
   return profile;
 }
 
+class LifetimeTrace {
+public:
+  void allocate(const std::string &id, size_t bytes, size_t alignment, size_t step,
+                int ref_count = 1) {
+    live_[id] = records_.size();
+    records_.push_back({id, bytes, (int)step, -1});
+    ref_counts_[id] = ref_count;
+  }
+
+  void add_ref(const std::string &id) {
+    if (ref_counts_.count(id)) {
+      ref_counts_[id]++;
+    }
+  }
+
+  void release(const std::string &id, size_t step) {
+    if (ref_counts_.count(id)) {
+      if (--ref_counts_[id] == 0) {
+        records_[live_[id]].end_step = step;
+        live_.erase(id);
+        ref_counts_.erase(id);
+      }
+    }
+  }
+
+  const std::vector<TensorAllocation> &records() const { return records_; }
+
+  void release_all(size_t step) {
+    for (auto it = live_.begin(); it != live_.end();) {
+      records_[it->second].end_step = step;
+      ref_counts_.erase(it->first);
+      it = live_.erase(it);
+    }
+  }
+
+private:
+  std::unordered_map<std::string, size_t> live_;
+  std::unordered_map<std::string, int> ref_counts_;
+  std::vector<TensorAllocation> records_;
+};
+
 void GraphExecutor::pack_memory(BuiltPlan &plan, TensorBundle &input_map,
                                 TensorBundle &output_grad_map) {
-  TrackingAllocator tracker(graph_.workspace_allocator());
-
   std::map<std::string, Node> uid_to_node;
   for (const auto &node : graph_.nodes()) uid_to_node[node->uid()] = node;
 
+  LifetimeTrace trace;
+  size_t step = 0;
+
+  std::map<std::string, std::string> node_to_iid;
+  std::map<std::string, std::string> node_to_grad_iid;
+
   for (const auto &[uid, tensor] : input_map) {
     auto it = uid_to_node.find(uid);
-    Tensor device_tensor = tensor;
-    if (tensor.device() != graph_.device()) {
-      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
-      copy(tensor, device_tensor, graph_.handle().get_stream());
+    if (it != uid_to_node.end()) {
+      trace.allocate(uid, tensor.num_bytes(), 256, step, data_ref_counts_[it->second]);
+      node_to_iid[uid] = uid;
     }
-    set_data(it->second, device_tensor, data_ref_counts_[it->second]);
   }
-
-  for (auto &edge : graph_.edges()) {
-    if (edge->layer()) edge->layer()->set_workspace_allocator(&tracker);
-  }
-
-  TensorBundle output_map;
 
   for (const Edge &edge : plan.forward_plan.order) {
-    tracker.set_current_edge(edge->uid() + "_fw");
-    forward_edge(edge);
-    tracker.step();
+    const EdgeProfile &profile = plan.forward_edge_profiles.at(edge);
+    step++;
+
+    for (const auto &buf : profile.forward_buffers) {
+      if (buf.role == BufferRole::Output) {
+        auto node = uid_to_node.at(buf.alias_node_uid.value());
+        node_to_iid[node->uid()] = buf.local_id;
+        trace.allocate(buf.local_id, buf.bytes, buf.alignment, step, data_ref_counts_[node]);
+      } else if (buf.role == BufferRole::SecondaryResidual) {
+        trace.allocate(buf.local_id, buf.bytes, buf.alignment, step, 1);
+      } else if (buf.role == BufferRole::SavedInputAlias ||
+                 buf.role == BufferRole::SavedOutputAlias) {
+        trace.add_ref(node_to_iid[buf.alias_node_uid.value()]);
+      } else if (buf.role == BufferRole::Workspace) {
+        trace.allocate(buf.local_id, buf.bytes, buf.alignment, step, 1);
+        trace.release(buf.local_id, step);
+      }
+    }
+
+    for (const auto &producer : edge->producers()) {
+      trace.release(node_to_iid[producer->uid()], step);
+    }
 
     for (const Node &consumer : edge->consumers()) {
       if (graph_.is_output(consumer)) {
-        output_map.set(consumer->uid(), data(consumer));
-        release_data(consumer);
+        trace.add_ref(node_to_iid[consumer->uid()]);  // Held by output_map
       }
     }
   }
 
   for (const auto &[uid, tensor] : output_grad_map) {
     auto it = uid_to_node.find(uid);
-    Tensor device_tensor = tensor;
-    if (tensor.device() != graph_.device() && tensor) {
-      device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
-      copy(tensor, device_tensor, graph_.handle().get_stream());
+    if (it != uid_to_node.end() && tensor) {
+      trace.allocate(uid + "/grad", tensor.num_bytes(), 256, step, grad_ref_counts_[it->second]);
+      node_to_grad_iid[uid] = uid + "/grad";
     }
-    set_grad(it->second, device_tensor, grad_ref_counts_[it->second]);
   }
-
-  TensorBundle grad_input_map;
 
   if (plan.backward_plan.order.size() > 0) {
     for (const Edge &edge : plan.backward_plan.order) {
-      tracker.set_current_edge(edge->uid() + "_bw");
-      backward_edge(edge);
-      tracker.step();
-      residuals_.erase(edge);
+      const EdgeProfile &profile = plan.backward_edge_profiles.at(edge);
+      step++;
+
+      for (const auto &buf : profile.backward_buffers) {
+        if (buf.role == BufferRole::GradientOutput) {
+          std::string node_uid = buf.alias_node_uid.value();
+          auto node = uid_to_node.at(node_uid);
+          node_to_grad_iid[node_uid] = buf.local_id;
+          trace.allocate(buf.local_id, buf.bytes, buf.alignment, step, grad_ref_counts_[node]);
+        } else if (buf.role == BufferRole::Workspace) {
+          trace.allocate(buf.local_id, buf.bytes, buf.alignment, step, 1);
+          trace.release(buf.local_id, step);
+        }
+      }
+
+      for (const auto &consumer : edge->consumers()) {
+        trace.release(node_to_grad_iid[consumer->uid()], step);
+      }
+
+      const EdgeProfile &fwd_profile = plan.forward_edge_profiles.at(edge);
+      for (const auto &buf : fwd_profile.forward_buffers) {
+        if (buf.role == BufferRole::SecondaryResidual) {
+          trace.release(buf.local_id, step);
+        } else if (buf.role == BufferRole::SavedInputAlias ||
+                   buf.role == BufferRole::SavedOutputAlias) {
+          trace.release(node_to_iid[buf.alias_node_uid.value()], step);
+        }
+      }
 
       for (const auto &producer : edge->producers()) {
         if (graph_.is_input(producer)) {
-          grad_input_map.set(producer->uid(), grad(producer));
-          release_grad(producer);
+          trace.add_ref(node_to_grad_iid[producer->uid()]);  // Held by grad_input_map
         }
       }
     }
   }
 
-  output_map.clear();
-  grad_input_map.clear();
-  cleanup_released(data_);
-  cleanup_released(grads_);
-  data_.clear();
-  grads_.clear();
-  clear_residuals();
+  trace.release_all(step + 1);
 
-  tracker.step();
-
-  for (auto &edge : graph_.edges()) {
-    if (edge->layer()) edge->layer()->set_workspace_allocator(graph_.workspace_allocator());
-  }
-
-  auto pack = MemoryPacker::pack(tracker.get_allocations());
+  auto pack = MemoryPacker::pack(trace.records());
   if (os_) {
     *os_ << "Memory Packer: Peak memory packed size = " << pack.peak_memory << " bytes\n";
   }

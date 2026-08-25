@@ -17,70 +17,6 @@
 
 namespace tunx {
 
-TrackingAllocator::TrackingAllocator(IAllocator* backend_alloc)
-    : backend_alloc_(backend_alloc) {}
-
-void TrackingAllocator::set_current_edge(const std::string& uid) {
-  current_edge_uid_ = uid;
-  current_alloc_index_ = 0;
-}
-
-void TrackingAllocator::step() { current_step_++; }
-
-dptr TrackingAllocator::allocate(size_t size) {
-  if (size == 0) return dptr(nullptr);
-
-  // align size to 256
-  size_t aligned_size = (size + 255) & ~255;
-
-  std::string iid = current_edge_uid_ + "_" + std::to_string(current_alloc_index_++);
-
-  TensorAllocation alloc;
-  alloc.iid = iid;
-  alloc.size = aligned_size;
-  alloc.start_step = ++current_step_;
-  alloc.end_step = -1;  // -1 means not freed yet
-
-  size_t alloc_idx = allocations_.size();
-  allocations_.push_back(alloc);
-  active_allocs_[iid] = alloc_idx;
-
-  dptr orig_ptr = backend_alloc_->allocate(aligned_size);
-  void* ptr = orig_ptr.get<void>();
-  auto storage = std::make_shared<device_storage>(
-      device(), ptr, aligned_size, [this, alloc_idx, orig_ptr]() mutable {
-        this->allocations_[alloc_idx].end_step = ++this->current_step_;
-        orig_ptr = dptr(nullptr);  // release orig_ptr
-      });
-  return dptr(storage, 0, aligned_size);
-}
-
-void TrackingAllocator::clear() { backend_alloc_->clear(); }
-
-void TrackingAllocator::ensure(size_t size) { backend_alloc_->ensure(size); }
-
-size_t TrackingAllocator::reserved() const { return backend_alloc_->reserved(); }
-
-size_t TrackingAllocator::allocated() const { return backend_alloc_->allocated(); }
-
-size_t TrackingAllocator::unused() const { return backend_alloc_->unused(); }
-
-void TrackingAllocator::evict_unused() { backend_alloc_->evict_unused(); }
-
-size_t TrackingAllocator::add_allocation_hook(std::function<void(size_t)> hook) {
-  return backend_alloc_->add_allocation_hook(hook);
-}
-
-bool TrackingAllocator::remove_allocation_hook(size_t hook_id) {
-  return backend_alloc_->remove_allocation_hook(hook_id);
-}
-
-Device& TrackingAllocator::device() const { return backend_alloc_->device(); }
-
-const std::vector<TensorAllocation>& TrackingAllocator::get_allocations() const {
-  return allocations_;
-}
-
 // --- MemoryPacker ---
 
 MemoryPacker::PackResult MemoryPacker::pack(std::vector<TensorAllocation> allocations) {
@@ -212,8 +148,8 @@ void PackedAllocator::ensure(size_t size) {
 
 dptr PackedAllocator::create_dptr(size_t offset, size_t size) {
   void* ptr = base_dptr_.get<char>() + offset;
-  std::shared_ptr<device_storage> storage = std::make_shared<device_storage>(
-      base_dptr_.device(), ptr, size, [this, size]() {
+  std::shared_ptr<device_storage> storage =
+      std::make_shared<device_storage>(base_dptr_.device(), ptr, size, [this, size]() {
         this->current_allocated_ -= size;
         for (auto& hook : this->hooks_) {
           hook.second(this->current_allocated_);
@@ -276,9 +212,7 @@ size_t PackedAllocator::add_allocation_hook(std::function<void(size_t)> hook) {
   return id;
 }
 
-bool PackedAllocator::remove_allocation_hook(size_t hook_id) {
-  return hooks_.erase(hook_id) > 0;
-}
+bool PackedAllocator::remove_allocation_hook(size_t hook_id) { return hooks_.erase(hook_id) > 0; }
 
 Device& PackedAllocator::device() const {
   if (!backend_alloc_) {
