@@ -32,6 +32,7 @@
 #include "nn/metrics_computer.hpp"
 #include "nn/metrics_logger.hpp"
 #include "nn/tensor_bundle.hpp"
+#include "nn/train_config.hpp"
 #include "threading/thread_wrapper.hpp"
 #include "type/type.hpp"
 
@@ -91,7 +92,8 @@ static void log_edge_profiles(const std::map<Edge, EdgeProfile> &profiles,
 }
 
 static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inputs,
-                                     std::unique_ptr<CsvLogger> &csv_logger) {
+                                     std::unique_ptr<CsvLogger> &csv_logger,
+                                     const TrainingConfig &config) {
   fmt::print("\n{:=^80}\n", " Execution Plan Stats ");
 
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
@@ -122,18 +124,21 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
     }
   };
 
-  profile_solver("Naive", {true, false, false, false});
-  profile_solver("Ranked", {false, false, false, false});
-  profile_solver("Linear", {false, true, false, false});
-  profile_solver("Branch", {false, true, true, false});
-  profile_solver("Join", {false, true, false, true});
+  if (config.print_ablation) {
+    profile_solver("Naive", {true, false, false, false});
+    profile_solver("Ranked", {false, false, false, false});
+    profile_solver("Linear", {false, true, false, false});
+    profile_solver("Branch", {false, true, true, false});
+    profile_solver("Join", {false, true, false, true});
+  }
   profile_solver("Full Solver", {false, true, true, true});
 
   fmt::print("{:=^80}\n\n", "");
 }
 
 static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBundle &inputs,
-                                              std::unique_ptr<CsvLogger> &csv_logger) {
+                                              std::unique_ptr<CsvLogger> &csv_logger,
+                                              const TrainingConfig &config) {
   fmt::print("\n{:=^80}\n", " Backward Execution Plan Stats ");
 
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
@@ -164,11 +169,15 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
     }
   };
 
-  profile_solver("Naive", {true, false, false, false});
-  profile_solver("Ranked", {false, false, false, false});
-  profile_solver("Linear", {false, true, false, false});
-  profile_solver("Branch", {false, true, true, false});
-  profile_solver("Join", {false, true, false, true});
+  // WARNING: Ablation can increase peak memory due to less optimized solutions
+  if (config.print_ablation) {
+    profile_solver("Naive", {true, false, false, false});
+    profile_solver("Ranked", {false, false, false, false});
+    profile_solver("Linear", {false, true, false, false});
+    profile_solver("Branch", {false, true, true, false});
+    profile_solver("Join", {false, true, false, true});
+  }
+
   profile_solver("Full Solver", {false, true, true, true});
 
   fmt::print("{:=^80}\n\n", "");
@@ -807,10 +816,10 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
     graph.save_dot("current_graph.dot", &built_plan.forward_edge_profiles,
                    &built_plan.node_profiles);
     log_edge_profiles(built_plan.forward_edge_profiles, forward_profiles_logger);
-    log_execution_plan_stats(executor, inputs, forward_plan_logger);
+    log_execution_plan_stats(executor, inputs, forward_plan_logger, config);
 
     log_edge_profiles(built_plan.backward_edge_profiles, backward_profiles_logger);
-    log_execution_plan_stats_backward(executor, inputs, backward_plan_logger);
+    log_execution_plan_stats_backward(executor, inputs, backward_plan_logger, config);
 
     auto &pool_allocator = PoolAllocator::instance(graph.device(), graph.handle().get_stream());
     auto profile_memory = [&](const std::string &plan_name, SolverOptions opts) {

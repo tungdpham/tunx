@@ -65,6 +65,7 @@ static void parse_loss_json(const nlohmann::json &j, LossConfig &cfg) {
 
 void TrainingConfig::print_config() const {
   std::cout << "Training Configuration:" << std::endl;
+  std::cout << "  Benchmark Mode: " << (benchmark_mode ? "On" : "Off") << std::endl;
   std::cout << "  Epochs: " << epochs << std::endl;
   std::cout << "  Batch Size: " << batch_size << std::endl;
   std::cout << "  Max Steps: " << max_steps << std::endl;
@@ -78,10 +79,9 @@ void TrainingConfig::print_config() const {
                     ? "None"
                     : (profiler_type == ProfilerType::NORMAL ? "Normal" : "Cumulative"))
             << std::endl;
-  std::cout << "  Print LayerImpl Profiling Info: " << (print_layer_profiling ? "Yes" : "No")
-            << std::endl;
-  std::cout << "  Print LayerImpl Memory Usage: " << (print_memory_usage ? "Yes" : "No")
-            << std::endl;
+  std::cout << "  Print Profiling Info: " << (print_layer_profiling ? "Yes" : "No") << std::endl;
+  std::cout << "  Print Memory Usage: " << (print_memory_usage ? "Yes" : "No") << std::endl;
+  std::cout << "  Print Ablation Info: " << (print_ablation ? "Yes" : "No") << std::endl;
   std::cout << "  Number of Microbatches: " << num_microbatches << std::endl;
   std::cout << "  Device ID: "
             << device_type_to_string(device_id.type) + std::to_string(device_id.id) << std::endl;
@@ -123,6 +123,7 @@ void TrainingConfig::load_from_json(const string &config_path) {
   }
   print_layer_profiling = config.value("print_layer_profiling", print_layer_profiling);
   print_memory_usage = config.value("print_memory_usage", print_memory_usage);
+  print_ablation = config.value("print_ablation", print_ablation);
   num_microbatches = config.value("num_microbatches", num_microbatches);
   if (config.contains("device")) {
     string device_str = config["device"];

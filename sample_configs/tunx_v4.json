@@ -1,4 +1,5 @@
 {
+  "benchmark_mode": true,
   "epochs": 1,
   "batch_size": 32,
   "max_steps": -1,
@@ -8,6 +9,7 @@
   "profiler_type": "NONE",
   "print_layer_profiling": true,
   "print_memory_usage": true,
+  "print_ablation": true,
   "device": "CUDA:0",
   "model_name": "tunx_v4",
   "model_path": "",

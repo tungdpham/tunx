@@ -47,7 +47,7 @@ public:
   const ExecutionPlan &active_backward_plan() const { return active_built_plan_.backward_plan; }
 
   std::tuple<TensorBundle, std::map<Edge, EdgeProfile>, std::map<Node, size_t>>
-  profile_edges_forward(TensorBundle &input_map);
+  profile_edges_forward(TensorBundle &input_map, bool discard_residuals = false);
   std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edges_backward(
       TensorBundle &output_grad_map);
 

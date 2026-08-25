@@ -105,13 +105,35 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
     return built_plans_.at(key);
   }
   MacroSolver planner(graph_, os_, options);
-  auto [output_map, forward_edge_profiles, node_profiles] = profile_edges_forward(input_map);
+  auto [output_map, forward_edge_profiles, node_profiles] = profile_edges_forward(input_map, true);
   ExecutionPlan forward_plan;
   if (options.enable_naive) {
     forward_plan.order = graph_.edges();
   } else {
     forward_plan = planner.find_forward_order(forward_edge_profiles);
   }
+
+  output_map.clear();
+  
+  for (const auto &[uid, tensor] : input_map) {
+    auto node = uid_to_node[uid];
+    Tensor device_tensor = tensor;
+    if (tensor.device() != graph_.device()) {
+      device_tensor = to_device(tensor, graph_.device(), graph_.handle().get_stream());
+    }
+    set_data(node, device_tensor, data_ref_counts_[node]);
+  }
+
+  for (const Edge &edge : forward_plan.order) {
+    forward_edge(edge);
+    for (const Node &consumer : edge->consumers()) {
+      if (graph_.is_output(consumer)) {
+        output_map.set(consumer->uid(), data(consumer));
+        release_data(consumer);
+      }
+    }
+  }
+  cleanup_released(data_);
 
   TensorBundle output_grad_map;
   auto &grad_allocator = PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
@@ -279,7 +301,7 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
 }
 
 std::tuple<TensorBundle, std::map<Edge, EdgeProfile>, std::map<Node, size_t>>
-GraphExecutor::profile_edges_forward(TensorBundle &input_map) {
+GraphExecutor::profile_edges_forward(TensorBundle &input_map, bool discard_residuals) {
   std::map<Edge, EdgeProfile> edge_profiles;
   std::map<Node, size_t> node_profiles;
   std::map<std::string, Node> uid_to_node;
@@ -310,6 +332,9 @@ GraphExecutor::profile_edges_forward(TensorBundle &input_map) {
         output_map.set(consumer->uid(), data(consumer));
         release_data(consumer);
       }
+    }
+    if (discard_residuals) {
+      residuals_.erase(edge);
     }
   }
   cleanup_released(data_);

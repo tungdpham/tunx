@@ -44,6 +44,7 @@ struct TrainingConfig {
   ProfilerType profiler_type = ProfilerType::NONE;
   bool print_layer_profiling = false;
   bool print_memory_usage = false;
+  bool print_ablation = false;
   std::string model_name = "cifar10_resnet9";
   std::string model_path = "";
   std::string dataset_name = "";
