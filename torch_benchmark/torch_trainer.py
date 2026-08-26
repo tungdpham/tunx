@@ -1473,15 +1473,9 @@ def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
     is_lm = cfg.get("is_language_model", False)
     compute_dtype = cfg.get("compute_dtype", torch.float32)
     
+    tracker = None
     if cfg.get("print_memory_usage", False):
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        csv_path = f"logs/torch_{cfg['model_name']}_{ts}_memory_metrics.csv"
-        if cfg.get("log_dir"):
-            csv_path = os.path.join(cfg["log_dir"], csv_path)
-        print(f"Profiling memory usage to {csv_path} for the first 5 warmup steps...")
-        tracker = MemoryTracker(model, optimizer, csv_path)
-    else:
-        tracker = None
+        print(">>> Memory profiling is disabled in benchmark mode as it interferes with torch.compile.")
 
     def step():
         optimizer.zero_grad()
@@ -1498,9 +1492,6 @@ def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
     print("Running 50 warmup steps...")
     for i in range(50):
         step()
-        if tracker is not None and i == 4:
-            tracker.close()
-            tracker = None
 
     torch.cuda.synchronize()
     print("Warmup complete. Running 2000 measured steps...")
@@ -1758,6 +1749,10 @@ def main():
         description="Unified tunx PyTorch Trainer")
     parser.add_argument("--config", type=str, required=True,
                         help="Path to JSON config file")
+    parser.add_argument("--compile", action="store_true", default=True,
+                        help="Enable torch.compile (default)")
+    parser.add_argument("--no-compile", action="store_false", dest="compile",
+                        help="Disable torch.compile")
     args = parser.parse_args()
 
     json_cfg = load_jsonc(args.config)
@@ -1849,11 +1844,14 @@ def main():
     print(f">>> Parameters: {total_params:,}")
 
     if hasattr(torch, "compile"):
-        if not cfg.get("print_memory_usage", False):
-            print(">>> Compiling model with torch.compile...")
-            model = torch.compile(model, mode="reduce-overhead")
+        if args.compile:
+            if not cfg.get("print_memory_usage", False) or cfg.get("benchmark_mode", False):
+                print(">>> Compiling model with torch.compile...")
+                model = torch.compile(model, mode="reduce-overhead")
+            else:
+                print(">>> Skipping torch.compile to allow accurate memory profiling.")
         else:
-            print(">>> Skipping torch.compile to allow accurate memory profiling.")
+            print(">>> Skipping torch.compile (disabled by command-line argument).")
     else:
         print(">>> torch.compile is not supported in this PyTorch version.")
 

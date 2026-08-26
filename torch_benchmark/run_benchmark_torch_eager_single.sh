@@ -11,16 +11,16 @@ for run in {1..5}; do
 
         # Launch Python directly so bench_pid is the actual Python process ID.
         python3 -u torch_benchmark/torch_trainer.py \
-            --config "$config" >> "$log" 2>&1 &
+            --config "$config" --no-compile >> "$log" 2>&1 &
         bench_pid=$!
 
         echo "Benchmark process PID: $bench_pid" | tee -a "$log"
 
-        # Record per-process GPU memory every 10 ms.
+        # Record per-process GPU memory every 1 ms.
         nvidia-smi \
             --query-compute-apps=timestamp,pid,used_gpu_memory \
             --format=csv,noheader,nounits \
-            --loop-ms=10 > "$memory_log" 2>/dev/null &
+            --loop-ms=1 > "$memory_log" 2>/dev/null &
         monitor_pid=$!
 
         wait "$bench_pid"

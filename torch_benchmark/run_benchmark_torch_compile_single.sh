@@ -1,29 +1,26 @@
 mkdir -p logs
 
 nohup bash -c '
-cd build || {
-    echo "Failed to enter build directory"
-    exit 1
-}
-
 for run in {1..5}; do
     for version in {1..4}; do
-        config="../configs/tunx_v${version}.json"
-        log="../logs/tunx_v${version}_run${run}.log"
-        memory_log="../logs/tunx_v${version}_run${run}_vram.csv"
+        config="configs/tunx_v${version}.json"
+        log="logs/torch_compile_v${version}_run${run}.log"
+        memory_log="logs/torch_compile_v${version}_run${run}_vram.csv"
 
-        echo "===== TunX V${version}, run ${run}, started $(date) =====" \
-            | tee "$log"
+        echo "===== V${version}, run ${run}, started $(date) =====" | tee "$log"
 
-        bin/trainer -c "$config" >> "$log" 2>&1 &
+        # Launch Python directly so bench_pid is the actual Python process ID.
+        python3 -u torch_benchmark/torch_trainer.py \
+            --config "$config" --compile >> "$log" 2>&1 &
         bench_pid=$!
 
         echo "Benchmark process PID: $bench_pid" | tee -a "$log"
 
+        # Record per-process GPU memory every 1 ms.
         nvidia-smi \
             --query-compute-apps=timestamp,pid,used_gpu_memory \
             --format=csv,noheader,nounits \
-            --loop-ms=1ms > "$memory_log" 2>/dev/null &
+            --loop-ms=1 > "$memory_log" 2>/dev/null &
         monitor_pid=$!
 
         wait "$bench_pid"
@@ -36,7 +33,6 @@ for run in {1..5}; do
         {
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", $2)
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", $3)
-
             if ($2 == target && $3 + 0 > maximum)
                 maximum = $3 + 0
         }
@@ -67,9 +63,10 @@ for run in {1..5}; do
                 | tee -a "$log" >&2
         fi
 
+        # Allow the CUDA context and process allocation to be released.
         sleep 2
     done
 done
-' > logs/tunx_nohup_master.log 2>&1 &
+' > logs/nohup_master.log 2>&1 &
 
-echo "TunX benchmark controller PID: $!"
+echo "Benchmark controller PID: $!"
