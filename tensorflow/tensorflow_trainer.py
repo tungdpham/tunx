@@ -656,31 +656,14 @@ def run_benchmark(
         train_step(images, labels)
 
     print(f"Warmup complete. Running {measure_steps} measured steps...")
-    total_fwd = total_bwd = total_opt = 0.0
     wall_start = time.perf_counter()
 
     for _ in range(measure_steps):
-        # Forward
-        t0 = time.perf_counter()
-        with tf.GradientTape() as tape:
-            logits = model(images, training=True)
-            loss   = loss_fn(labels, logits)
-            if model.losses:
-                loss = loss + tf.add_n(model.losses)
-        t1 = time.perf_counter()
+        loss, preds, grads = train_step(images, labels)
 
-        # Backward
-        grads = tape.gradient(loss, model.trainable_variables)
-        t2 = time.perf_counter()
-
-        # Optimizer
-        optimizer.apply_gradients(zip(grads, model.trainable_variables))
-        t3 = time.perf_counter()
-
-        total_fwd += t1 - t0
-        total_bwd += t2 - t1
-        total_opt += t3 - t2
-
+    # Force GPU sync before stopping timer
+    _ = loss.numpy()
+    
     wall_elapsed = time.perf_counter() - wall_start
     throughput   = (measure_steps * batch_size) / wall_elapsed
 
@@ -690,9 +673,9 @@ def run_benchmark(
     print(f"  Batch size                    : {batch_size}")
     print(f"  Throughput                    : {throughput:.2f} samples/s")
     print(f"  Elapsed time ({measure_steps} steps)      : {wall_elapsed:.3f} s")
-    print(f"  Total Forward time            : {total_fwd * 1000:.2f} ms")
-    print(f"  Total Backward time           : {total_bwd * 1000:.2f} ms")
-    print(f"  Total Optimizer time          : {total_opt * 1000:.2f} ms")
+    print(f"  Total Forward time            : N/A (Fused by XLA)")
+    print(f"  Total Backward time           : N/A (Fused by XLA)")
+    print(f"  Total Optimizer time          : N/A (Fused by XLA)")
     print(f"  Avg step time                 : {wall_elapsed / measure_steps * 1000:.3f} ms")
     print(f"{'=' * 55}\n")
 
