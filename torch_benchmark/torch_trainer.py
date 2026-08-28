@@ -1847,7 +1847,7 @@ def main():
         if args.compile:
             if not cfg.get("print_memory_usage", False) or cfg.get("benchmark_mode", False):
                 print(">>> Compiling model with torch.compile...")
-                model = torch.compile(model, mode="reduce-overhead")
+                model = torch.compile(model, mode="max-autotune-no-cudagraphs")
             else:
                 print(">>> Skipping torch.compile to allow accurate memory profiling.")
         else:
