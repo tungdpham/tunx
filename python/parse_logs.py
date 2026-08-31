@@ -42,19 +42,21 @@ def parse_log(file_path):
         
     if "torch" in filename.lower():
         data["System/backend"] = "PyTorch"
+    elif "tf" in filename.lower() or "tensorflow" in filename.lower():
+        data["System/backend"] = "TensorFlow"
     elif "tunx" in filename.lower():
         data["System/backend"] = "TunX"
 
-    header_match = re.search(r"=====\s*(?:TunX\s*)?V(\d+),\s*run\s*(\d+)", content, re.IGNORECASE)
+    header_match = re.search(r"=====\s*(?:TunX\s*|TF\s*)?V(\d+),\s*run\s*(\d+)", content, re.IGNORECASE)
     if header_match:
         data["Graph version"] = f"V{header_match.group(1)}"
         data["Run number"] = int(header_match.group(2))
 
-    batch_size_match = re.search(r"Batch [sS]ize:\s+(\d+)", content)
+    batch_size_match = re.search(r"Batch [sS]ize\s*:\s+(\d+)", content)
     if batch_size_match:
         data["Batch size"] = int(batch_size_match.group(1))
 
-    benchmark_match = re.search(r"\((\d+)\s+warmup steps \+\s+(\d+)\s+measured steps\)", content)
+    benchmark_match = re.search(r"\((\d+)\s+warmup(?: steps)? \+\s+(\d+)\s+measured steps\)", content)
     if benchmark_match:
         data["Warm-up steps"] = int(benchmark_match.group(1))
         data["Measured steps"] = int(benchmark_match.group(2))
@@ -63,27 +65,27 @@ def parse_log(file_path):
     if exit_match:
         data["Exit status"] = int(exit_match.group(1))
 
-    throughput_match = re.search(r"Throughput:\s+([\d.]+)\s+samples/s", content)
+    throughput_match = re.search(r"Throughput\s*:\s+([\d.]+)\s+samples/s", content)
     if throughput_match:
         data["Throughput (samples/s)"] = float(throughput_match.group(1))
         
-    elapsed_match = re.search(r"Elapsed time for \d+ steps:\s+([\d.]+)\s+s", content)
+    elapsed_match = re.search(r"Elapsed time.*?\s*:\s+([\d.]+)\s+s", content)
     if elapsed_match:
         data["Elapsed Time (s)"] = float(elapsed_match.group(1))
         
-    fwd_match = re.search(r"Total Forward time:\s+([\d.]+)\s+ms", content)
+    fwd_match = re.search(r"Total Forward time\s*:\s+([\d.]+)\s+ms", content)
     if fwd_match:
         data["Forward Time (ms)"] = float(fwd_match.group(1))
         
-    bwd_match = re.search(r"Total Backward time:\s+([\d.]+)\s+ms", content)
+    bwd_match = re.search(r"Total Backward time\s*:\s+([\d.]+)\s+ms", content)
     if bwd_match:
         data["Backward Time (ms)"] = float(bwd_match.group(1))
         
-    opt_match = re.search(r"Total Optimizer time:\s+([\d.]+)\s+ms", content)
+    opt_match = re.search(r"Total Optimizer time\s*:\s+([\d.]+)\s+ms", content)
     if opt_match:
         data["Optimizer Time (ms)"] = float(opt_match.group(1))
         
-    zero_match = re.search(r"Total Zero Grad time:\s+([\d.]+)\s+ms", content)
+    zero_match = re.search(r"Total Zero Grad time\s*:\s+([\d.]+)\s+ms", content)
     if zero_match:
         data["Zero Grad Time (ms)"] = float(zero_match.group(1))
         
