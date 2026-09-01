@@ -184,17 +184,22 @@ std::vector<GraphPartition> GraphPartitioner::partition(const Graph &graph) cons
   std::vector<GraphPartition> partitions;
   partitions.reserve(layer_counts.size());
 
+  std::cout << "\n=== Partition Metrics (GraphPartitioner) ===" << std::endl;
   size_t offset = 0;
-  for (size_t layer_count : layer_counts) {
+  for (size_t i = 0; i < layer_counts.size(); ++i) {
+    size_t layer_count = layer_counts[i];
+    std::cout << "Worker " << (i + 1) << " edges: " << layer_count << " (edges " << offset << " to " << (offset + layer_count - 1) << ")" << std::endl;
+    
     Vec<Edge> partition_edges;
     partition_edges.reserve(layer_count);
-    for (size_t i = 0; i < layer_count; ++i) {
-      partition_edges.push_back(sorted_edges[offset + i]);
+    for (size_t j = 0; j < layer_count; ++j) {
+      partition_edges.push_back(sorted_edges[offset + j]);
     }
 
     partitions.push_back(build_partition(graph, partition_edges, offset));
     offset += layer_count;
   }
+  std::cout << "============================================\n" << std::endl;
 
   return partitions;
 }
@@ -356,7 +361,7 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
         if (dp[k - 1][p] == INF) continue;
 
         double compute_time = (prefix_compute[i] - prefix_compute[p]) / P_k;
-        double comm_time = (k < K) ? (boundary_size[i] / L_k) : 0.0;
+        double comm_time = (k < K) ? ((boundary_size[i] / L_k) * 1000.0) : 0.0;
 
         double bottleneck = std::max({dp[k - 1][p], compute_time, comm_time});
 
@@ -379,6 +384,18 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
     cuts[k - 1] = parent[k][curr];
     curr = cuts[k - 1];
   }
+
+  std::cout << "\n=== Partition Metrics (ComputeBandwidthPartitioner) ===" << std::endl;
+  std::cout << "Predicted J (ms): " << dp[K][N] << std::endl;
+  for (size_t k = 0; k < K; ++k) {
+    size_t start = cuts[k];
+    size_t end = cuts[k + 1];
+    std::cout << "Worker " << (k + 1) << " edges: " << (end - start) << " (edges " << start << " to " << (end - 1) << ")" << std::endl;
+    if (k < K - 1) {
+      std::cout << "Boundary " << (k + 1) << " -> " << (k + 2) << " size (MiB): " << (boundary_size[end] / (1024.0 * 1024.0)) << std::endl;
+    }
+  }
+  std::cout << "========================================================\n" << std::endl;
 
   std::vector<GraphPartition> partitions;
   partitions.reserve(K);

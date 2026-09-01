@@ -31,6 +31,7 @@ struct TCPConfig {
   uint32_t num_io_threads = 4;
   uint32_t max_packet_size = 4 * 1024 * 1024;  // 4 MB
   uint32_t skts_per_endpoint = 1;
+  std::string partition_policy = "compute_bandwidth";
   Vec<TCPWorkerConfig> workers = {};
 
   void load_from_json(const std::string &config_path) {
@@ -47,6 +48,7 @@ struct TCPConfig {
     num_io_threads = j.value("num_io_threads", num_io_threads);
     max_packet_size = j.value("max_packet_size", max_packet_size);
     skts_per_endpoint = j.value("skts_per_endpoint", skts_per_endpoint);
+    partition_policy = j.value("partition_policy", partition_policy);
     
     if (j.contains("workers")) {
       for (const auto &w_json : j["workers"]) {
@@ -75,6 +77,7 @@ struct TCPConfig {
     fmt::print("  Number of IO threads: {}\n", num_io_threads);
     fmt::print("  Max packet size: {}\n", max_packet_size);
     fmt::print("  Sockets per endpoint: {}\n", skts_per_endpoint);
+    fmt::print("  Partition policy: {}\n", partition_policy);
     fmt::print("  Workers: {} configured\n", workers.size());
   }
 };

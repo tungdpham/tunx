@@ -109,8 +109,12 @@ int main(int argc, char *argv[]) {
   std::unique_ptr<PartitionerBase> partitioner;
 
   Tensor batch_data, batch_labels;
-  if (train_dataset->get_batch(train_config.batch_size, batch_data, batch_labels)) {
-    cout << "Profiling graph edges for ComputeBandwidthPartitioner..." << endl;
+  if (tcp_config.partition_policy == "equal") {
+    cout << "Using equal edge count GraphPartitioner..." << endl;
+    std::vector<size_t> equal_ratios(tcp_config.workers.size(), 1);
+    partitioner = std::make_unique<GraphPartitioner>(equal_ratios);
+  } else if (train_dataset->get_batch(train_config.batch_size, batch_data, batch_labels)) {
+    cout << "Profiling graph edges for partitioner..." << endl;
     GraphExecutor executor(graph);
     TensorBundle input_map({{"input", batch_data}});
 
@@ -144,16 +148,21 @@ int main(int argc, char *argv[]) {
       return 1.0;
     };
 
-    auto activation_size_fn = [node_profiles](const Node &node) -> double {
-      auto it = node_profiles.find(node);
-      if (it != node_profiles.end()) {
-        return static_cast<double>(it->second);
-      }
-      return 1048576.0;  // fallback to 1MB if unknown
-    };
-
-    partitioner =
-        std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn, activation_size_fn);
+    if (tcp_config.partition_policy == "compute") {
+      cout << "Using Compute-only ComputeBandwidthPartitioner..." << endl;
+      auto compute_only_activation_fn = [](const Node &) -> double { return 0.0; };
+      partitioner = std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn, compute_only_activation_fn);
+    } else {
+      cout << "Using Compute+Bandwidth ComputeBandwidthPartitioner..." << endl;
+      auto activation_size_fn = [node_profiles](const Node &node) -> double {
+        auto it = node_profiles.find(node);
+        if (it != node_profiles.end()) {
+          return static_cast<double>(it->second);
+        }
+        return 1048576.0;  // fallback to 1MB if unknown
+      };
+      partitioner = std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn, activation_size_fn);
+    }
     train_dataset->reset();
   } else {
     cout << "Warning: Could not get a batch to profile. Falling back to uniform GraphPartitioner."

@@ -67,6 +67,6 @@ for run in {1..5}; do
         sleep 2
     done
 done
-' > logs/nohup_master.log 2>&1 &
+' > logs/torch_compile_nohup_master.log 2>&1 &
 
 echo "Benchmark controller PID: $!"
