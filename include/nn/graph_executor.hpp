@@ -22,6 +22,12 @@ struct BuiltPlan {
   std::map<Edge, EdgeProfile> backward_edge_profiles;
   std::map<Node, size_t> node_profiles;
   std::shared_ptr<PackedAllocator> packed_allocator;
+
+  double extraction_time_ms = 0.0;
+  double scheduling_time_ms = 0.0;
+  double lifetime_time_ms = 0.0;
+  double packing_time_ms = 0.0;
+  double total_time_ms = 0.0;
 };
 
 class GraphExecutor {

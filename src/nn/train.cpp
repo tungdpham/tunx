@@ -108,6 +108,12 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
     }
 
     fmt::print("{} Order Peak Memory: {} bytes\n", name, macro_stats.peak_mem);
+    fmt::print("{} Planning Timings:\n", name);
+    fmt::print("  - Extraction: {:.3f} ms\n", built_plan.extraction_time_ms);
+    fmt::print("  - Scheduling: {:.3f} ms\n", built_plan.scheduling_time_ms);
+    fmt::print("  - Lifetime:   {:.3f} ms\n", built_plan.lifetime_time_ms);
+    fmt::print("  - Packing:    {:.3f} ms\n", built_plan.packing_time_ms);
+    fmt::print("  - Total:      {:.3f} ms\n", built_plan.total_time_ms);
     fmt::print("{} Path: ", name);
     for (size_t i = 0; i < macro_plan.order.size(); ++i) {
       fmt::print("{}", macro_plan.order[i]->layer()->name());
@@ -159,6 +165,12 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
     }
 
     fmt::print("{} Order Peak Memory: {} bytes\n", name, macro_stats.peak_mem);
+    fmt::print("{} Planning Timings:\n", name);
+    fmt::print("  - Extraction: {:.3f} ms\n", built_plan.extraction_time_ms);
+    fmt::print("  - Scheduling: {:.3f} ms\n", built_plan.scheduling_time_ms);
+    fmt::print("  - Lifetime:   {:.3f} ms\n", built_plan.lifetime_time_ms);
+    fmt::print("  - Packing:    {:.3f} ms\n", built_plan.packing_time_ms);
+    fmt::print("  - Total:      {:.3f} ms\n", built_plan.total_time_ms);
     fmt::print("{} Path: ", name);
     for (size_t i = 0; i < macro_plan.order.size(); ++i) {
       fmt::print("{}", macro_plan.order[i]->layer()->name());
