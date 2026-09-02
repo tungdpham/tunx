@@ -112,6 +112,10 @@ private:
   std::set<std::string> used_node_uids_;
   std::set<std::string> used_edge_uids_;
 
+  DType_t io_dtype_ = DType_t::FP32;
+  DType_t param_dtype_ = DType_t::FP32;
+  DType_t compute_dtype_ = DType_t::FP32;
+
   std::string generate_node_uid();
   std::string generate_edge_uid();
 };

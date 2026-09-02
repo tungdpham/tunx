@@ -66,6 +66,10 @@ void Graph::compile(IAllocator &allocator, GraphOpts opts) {
   workspace_allocator_ = DELAllocatorV2::instance(device, s).get();
   engine_handle_ = engine_->create_handle(s);
 
+  io_dtype_ = opts.io_dtype;
+  param_dtype_ = opts.param_dtype;
+  compute_dtype_ = opts.compute_dtype;
+
   InitOptions layer_opts{
       .ws_allocator = workspace_allocator_,
       .engine = engine_,
@@ -210,7 +214,8 @@ void Graph::sort() {
   nodes_ = std::move(sorted_nodes);
 }
 
-void Graph::save_dot(const std::string &filename, const std::map<Edge, EdgeProfile> *edge_profiles, const std::map<Node, size_t> *node_profiles) const {
+void Graph::save_dot(const std::string &filename, const std::map<Edge, EdgeProfile> *edge_profiles,
+                     const std::map<Node, size_t> *node_profiles) const {
   std::ofstream output(filename);
   if (!output) throw std::runtime_error("Failed to open DOT file: " + filename);
 
@@ -227,7 +232,7 @@ void Graph::save_dot(const std::string &filename, const std::map<Edge, EdgeProfi
     output << "  \"edge_" << index << "\" [shape=box, label=\"" << index << ": "
            << edge->layer()->name();
     if (edge_profiles && edge_profiles->count(edge)) {
-      const auto& prof = edge_profiles->at(edge);
+      const auto &prof = edge_profiles->at(edge);
       output << "\\na: " << prof.total_mem;
       output << "\\nb: " << prof.net_mem;
       output << "\\nworkspace: " << prof.workspace_mem;
@@ -331,76 +336,76 @@ Graph::~Graph() = default;
 namespace {
 
 constexpr std::array<char, 4> kGraphStateMagic{'T', 'U', 'N', 'X'};
-constexpr std::uint32_t kGraphStateVersion = 3;
+constexpr std::uint32_t kGraphStateVersion = 5;
 
 template <typename T>
-void write_binary(std::ostream &stream, const T &value) {
-  stream.write(reinterpret_cast<const char *>(&value), sizeof(T));
-  if (!stream) {
+void write_binary(std::ostream &os, const T &value) {
+  os.write(reinterpret_cast<const char *>(&value), sizeof(T));
+  if (!os) {
     throw std::runtime_error("Failed to write graph state");
   }
 }
 
 template <typename T>
-T read_binary(std::istream &stream) {
+T read_binary(std::istream &os) {
   T value{};
-  stream.read(reinterpret_cast<char *>(&value), sizeof(T));
-  if (!stream) {
+  os.read(reinterpret_cast<char *>(&value), sizeof(T));
+  if (!os) {
     throw std::runtime_error("Failed to read graph state");
   }
   return value;
 }
 
-void write_string(std::ostream &stream, const std::string &value) {
+void write_string(std::ostream &os, const std::string &value) {
   const size_t size = value.size();
-  write_binary(stream, size);
-  stream.write(value.data(), static_cast<std::streamsize>(size));
-  if (!stream) {
+  write_binary(os, size);
+  os.write(value.data(), static_cast<std::streamsize>(size));
+  if (!os) {
     throw std::runtime_error("Failed to write graph state string");
   }
 }
 
-std::string read_string(std::istream &stream) {
-  const size_t size = read_binary<size_t>(stream);
+std::string read_string(std::istream &os) {
+  const size_t size = read_binary<size_t>(os);
   std::string value(size, '\0');
-  stream.read(value.data(), static_cast<std::streamsize>(size));
-  if (!stream) {
+  os.read(value.data(), static_cast<std::streamsize>(size));
+  if (!os) {
     throw std::runtime_error("Failed to read graph state string");
   }
   return value;
 }
 
-Layer load_layer_config(std::istream &stream) {
-  nlohmann::json config_json = nlohmann::json::parse(read_string(stream));
+Layer load_layer_config(std::istream &os) {
+  nlohmann::json config_json = nlohmann::json::parse(read_string(os));
   LayerConfig config = LayerConfig::from_json(config_json);
   LayerFactory::register_defaults();
   return LayerFactory::create(config);
 }
 
-void save_layer_config(std::ostream &stream, const std::shared_ptr<LayerImpl> &layer) {
+void save_layer_config(std::ostream &os, const std::shared_ptr<LayerImpl> &layer) {
   nlohmann::json config_json = layer->get_config().to_json();
-  write_string(stream, config_json.dump());
+  write_string(os, config_json.dump());
 }
 
-void save_node_index_set(std::ostream &stream, const std::set<Node> &nodes,
+void save_node_index_set(std::ostream &os, const std::set<Node> &nodes,
                          const std::unordered_map<NodeImpl *, size_t> &node_indices,
                          const char *context) {
-  write_binary(stream, nodes.size());
+  write_binary(os, nodes.size());
   for (const auto &node : nodes) {
     const auto it = node_indices.find(node.get());
     if (it == node_indices.end()) {
       throw std::runtime_error(std::string("Internal error while saving graph ") + context +
                                " node state");
     }
-    write_binary(stream, it->second);
+    write_binary(os, it->second);
   }
 }
 
-void load_node_index_set(std::istream &stream, Graph &graph, const Vec<Node> &nodes,
+void load_node_index_set(std::istream &os, Graph &graph, const Vec<Node> &nodes,
                          const char *context, const std::function<void(const Node &)> &mark_node) {
-  const size_t count = read_binary<size_t>(stream);
+  const size_t count = read_binary<size_t>(os);
   for (size_t i = 0; i < count; ++i) {
-    const size_t node_index = read_binary<size_t>(stream);
+    const size_t node_index = read_binary<size_t>(os);
     if (node_index >= nodes.size()) {
       throw std::runtime_error(std::string("Graph state references an invalid ") + context +
                                " node index");
@@ -412,8 +417,8 @@ void load_node_index_set(std::istream &stream, Graph &graph, const Vec<Node> &no
 }  // namespace
 
 // TODO : save params like io dtype, param dtype, compute dtype to preserve precision.
-void Graph::save_state(std::ostream &stream) const {
-  if (!stream) {
+void Graph::save_state(std::ostream &os) const {
+  if (!os) {
     throw std::runtime_error("Stream is not ready for writing");
   }
 
@@ -435,132 +440,146 @@ void Graph::save_state(std::ostream &stream) const {
     }
   }
 
-  stream.write(kGraphStateMagic.data(), static_cast<std::streamsize>(kGraphStateMagic.size()));
-  if (!stream) {
+  os.write(kGraphStateMagic.data(), static_cast<std::streamsize>(kGraphStateMagic.size()));
+  if (!os) {
     throw std::runtime_error("Failed to write graph state header");
   }
-  write_binary(stream, kGraphStateVersion);
+  write_binary(os, kGraphStateVersion);
 
-  write_binary(stream, nodes_.size());
+  write_binary(os, static_cast<int>(io_dtype_));
+  write_binary(os, static_cast<int>(param_dtype_));
+  write_binary(os, static_cast<int>(compute_dtype_));
+
+  write_binary(os, nodes_.size());
   for (const auto &node : nodes_) {
-    write_string(stream, node->uid());
+    write_string(os, node->uid());
   }
 
-  save_node_index_set(stream, input_nodes_, node_indices, "input");
-  save_node_index_set(stream, output_nodes_, node_indices, "output");
+  save_node_index_set(os, input_nodes_, node_indices, "input");
+  save_node_index_set(os, output_nodes_, node_indices, "output");
 
-  write_binary(stream, unique_layers.size());
+  write_binary(os, unique_layers.size());
   for (const auto &layer : unique_layers) {
-    save_layer_config(stream, layer);
+    save_layer_config(os, layer);
   }
 
-  write_binary(stream, edges_.size());
+  write_binary(os, edges_.size());
   for (const auto &edge : edges_) {
     auto layer_it = layer_indices.find(edge->layer().get());
     if (layer_it == layer_indices.end()) {
       throw std::runtime_error("Internal error while saving graph state");
     }
-    write_binary(stream, layer_it->second);
+    write_binary(os, layer_it->second);
 
-    write_binary(stream, edge->producers().size());
+    write_binary(os, edge->producers().size());
     for (const auto &producer : edge->producers()) {
       auto node_it = node_indices.find(producer.get());
       if (node_it == node_indices.end()) {
         throw std::runtime_error("Graph edge producer is not registered as a node");
       }
-      write_binary(stream, node_it->second);
+      write_binary(os, node_it->second);
     }
 
-    write_binary(stream, edge->consumers().size());
+    write_binary(os, edge->consumers().size());
     for (const auto &consumer : edge->consumers()) {
       auto node_it = node_indices.find(consumer.get());
       if (node_it == node_indices.end()) {
         throw std::runtime_error("Graph edge consumer is not registered as a node");
       }
-      write_binary(stream, node_it->second);
+      write_binary(os, node_it->second);
     }
   }
 
-  write_binary(stream, unique_layers.size());
+  write_binary(os, unique_layers.size());
   for (const auto &layer : unique_layers) {
     Vec<Param> params = layer->params();
-    write_binary(stream, params.size());
+    write_binary(os, params.size());
     for (const Param &param : params) {
       if (!param) {
         throw std::runtime_error("Cannot save uninitialized layer parameter");
       }
-      save(param.data(), stream);
+      save(param.data(), os);
+      bool has_grad = static_cast<bool>(param.grad());
+      os.write(reinterpret_cast<const char *>(&has_grad), sizeof(bool));
+      if (has_grad) {
+        save(param.grad(), os);
+      }
     }
   }
 }
 
-// TODO : load params like io dtype, param dtype, compute dtype to preserve precision.
-Graph Graph::load_state(std::istream &stream, IAllocator &allocator) {
-  if (!stream) {
+Graph Graph::load_state(std::istream &os, IAllocator &allocator) {
+  if (!os) {
     throw std::runtime_error("Stream is not ready for reading");
   }
 
   std::array<char, 4> magic{};
-  stream.read(magic.data(), static_cast<std::streamsize>(magic.size()));
-  if (!stream) {
+  os.read(magic.data(), static_cast<std::streamsize>(magic.size()));
+  if (!os) {
     throw std::runtime_error("Failed to read graph state header");
   }
   if (magic != kGraphStateMagic) {
     throw std::runtime_error("Invalid graph state file header");
   }
 
-  const std::uint32_t version = read_binary<std::uint32_t>(stream);
-  if (version != 1 && version != kGraphStateVersion) {
+  const std::uint32_t version = read_binary<std::uint32_t>(os);
+  if (version != 1 && version != kGraphStateVersion && version != 3) {
     throw std::runtime_error("Unsupported graph state version: " + std::to_string(version));
   }
 
   Graph graph;
 
-  const size_t node_count = read_binary<size_t>(stream);
+  if (version >= 4) {
+    graph.io_dtype_ = static_cast<DType_t>(read_binary<int>(os));
+    graph.param_dtype_ = static_cast<DType_t>(read_binary<int>(os));
+    graph.compute_dtype_ = static_cast<DType_t>(read_binary<int>(os));
+  }
+
+  const size_t node_count = read_binary<size_t>(os);
   Vec<Node> nodes;
   nodes.reserve(node_count);
   for (size_t i = 0; i < node_count; ++i) {
-    nodes.push_back(graph.make_node(read_string(stream)));
+    nodes.push_back(graph.make_node(read_string(os)));
   }
 
   if (version >= 2) {
-    load_node_index_set(stream, graph, nodes, "input",
+    load_node_index_set(os, graph, nodes, "input",
                         [&graph](const Node &node) { graph.set_input(node); });
-    load_node_index_set(stream, graph, nodes, "output",
+    load_node_index_set(os, graph, nodes, "output",
                         [&graph](const Node &node) { graph.set_output(node); });
   }
 
-  const size_t layer_count = read_binary<size_t>(stream);
+  const size_t layer_count = read_binary<size_t>(os);
   Vec<std::shared_ptr<LayerImpl>> layers;
   layers.reserve(layer_count);
   for (size_t i = 0; i < layer_count; ++i) {
-    Layer layer = load_layer_config(stream);
+    Layer layer = load_layer_config(os);
     layers.push_back(static_cast<std::shared_ptr<LayerImpl>>(layer));
   }
 
-  const size_t edge_count = read_binary<size_t>(stream);
+  const size_t edge_count = read_binary<size_t>(os);
   for (size_t i = 0; i < edge_count; ++i) {
-    const size_t layer_index = read_binary<size_t>(stream);
+    const size_t layer_index = read_binary<size_t>(os);
     if (layer_index >= layers.size()) {
       throw std::runtime_error("Graph state references an invalid layer index");
     }
 
-    const size_t producer_count = read_binary<size_t>(stream);
+    const size_t producer_count = read_binary<size_t>(os);
     Vec<Node> producers;
     producers.reserve(producer_count);
     for (size_t j = 0; j < producer_count; ++j) {
-      const size_t node_index = read_binary<size_t>(stream);
+      const size_t node_index = read_binary<size_t>(os);
       if (node_index >= nodes.size()) {
         throw std::runtime_error("Graph state references an invalid producer node index");
       }
       producers.push_back(nodes[node_index]);
     }
 
-    const size_t consumer_count = read_binary<size_t>(stream);
+    const size_t consumer_count = read_binary<size_t>(os);
     Vec<Node> consumers;
     consumers.reserve(consumer_count);
     for (size_t j = 0; j < consumer_count; ++j) {
-      const size_t node_index = read_binary<size_t>(stream);
+      const size_t node_index = read_binary<size_t>(os);
       if (node_index >= nodes.size()) {
         throw std::runtime_error("Graph state references an invalid consumer node index");
       }
@@ -570,21 +589,35 @@ Graph Graph::load_state(std::istream &stream, IAllocator &allocator) {
     graph.add_edge(layers[layer_index], producers, consumers);
   }
 
-  graph.compile(allocator);
+  GraphOpts opts{
+      .io_dtype = graph.io_dtype_,
+      .param_dtype = graph.param_dtype_,
+      .compute_dtype = graph.compute_dtype_,
+  };
+  graph.compile(allocator, opts);
 
-  const size_t param_layer_count = read_binary<size_t>(stream);
+  const size_t param_layer_count = read_binary<size_t>(os);
   if (param_layer_count != layers.size()) {
     throw std::runtime_error("Graph state parameter section does not match layer count");
   }
 
   for (size_t i = 0; i < layers.size(); ++i) {
     Vec<Param> params = layers[i]->params();
-    const size_t param_count = read_binary<size_t>(stream);
+    const size_t param_count = read_binary<size_t>(os);
     if (param_count != params.size()) {
       throw std::runtime_error("Graph state parameter count does not match layer definition");
     }
     for (auto &param : params) {
-      load(param.data(), stream);
+      load(param.data(), os);
+      if (version >= 5) {
+        bool has_grad;
+        os.read(reinterpret_cast<char *>(&has_grad), sizeof(bool));
+        if (has_grad) {
+          load(param.grad(), os);
+        } else {
+          param.grad() = Tensor();
+        }
+      }
     }
   }
 

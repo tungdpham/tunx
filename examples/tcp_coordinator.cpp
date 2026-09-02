@@ -19,6 +19,7 @@
 #include "distributed/tcp_worker.hpp"
 #include "distributed/train.hpp"
 #include "nn/example_graphs.hpp"
+#include "nn/graph.hpp"
 #include "nn/graph_executor.hpp"
 #include "partitioner/graph_partitioner.hpp"
 
@@ -66,7 +67,15 @@ int main(int argc, char *argv[]) {
   Device &device = DeviceManager::instance().get(train_config.device_id);
   auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
-  Graph graph = load_or_create_graph(train_config.model_name, train_config.model_path, allocator);
+  GraphOpts opts{
+      .s = device.default_stream(),
+      .io_dtype = train_config.io_dtype,
+      .param_dtype = train_config.param_dtype,
+      .compute_dtype = train_config.compute_dtype,
+  };
+
+  Graph graph =
+      load_or_create_graph(train_config.model_name, train_config.model_path, allocator, opts);
 
   if (train_config.dataset_name.empty()) {
     throw std::runtime_error("dataset_name variable is not set!");
