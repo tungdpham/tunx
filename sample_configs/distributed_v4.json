@@ -39,6 +39,8 @@
   "profiler_type": "NONE",
   "print_layer_profiling": false,
   "print_layer_memory_usage": false,
+  "print_ablation": false,
+  "bootstrap_offload": true,
   "num_microbatches": 2,
   "device": "CUDA:0",
   "model_name": "tunx_v4",

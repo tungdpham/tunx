@@ -103,7 +103,8 @@ int main(int argc, char *argv[]) {
   cout << "Local worker endpoint: " << local_worker_endpoint.to_json().dump(4) << endl;
 
   // hard-coded for now
-  auto worker = std::make_unique<TCPWorker>(local_worker_endpoint, train_config.device_id);
+  auto worker = std::make_unique<TCPWorker>(local_worker_endpoint, train_config.device_id,
+                                            train_config.bootstrap_offload);
 
   // Sample compute times for ComputeBandwidthPartitioner
   std::unique_ptr<PartitionerBase> partitioner;
@@ -121,9 +122,11 @@ int main(int argc, char *argv[]) {
     // Warmup
     for (int i = 0; i < 5; ++i) {
       executor.forward(input_map);
+      executor.clear_residuals();
     }
     // Measured step
-    auto [output_map, edge_profiles, node_profiles] = executor.profile_edges_forward(input_map);
+    auto [output_map, edge_profiles, node_profiles] =
+        executor.profile_edges_forward(input_map, true);
 
     DeviceMesh mesh;
     for (size_t i = 0; i < tcp_config.workers.size(); ++i) {
@@ -151,7 +154,8 @@ int main(int argc, char *argv[]) {
     if (tcp_config.partition_policy == "compute") {
       cout << "Using Compute-only ComputeBandwidthPartitioner..." << endl;
       auto compute_only_activation_fn = [](const Node &) -> double { return 0.0; };
-      partitioner = std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn, compute_only_activation_fn);
+      partitioner = std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn,
+                                                                  compute_only_activation_fn);
     } else {
       cout << "Using Compute+Bandwidth ComputeBandwidthPartitioner..." << endl;
       auto activation_size_fn = [node_profiles](const Node &node) -> double {
@@ -161,7 +165,8 @@ int main(int argc, char *argv[]) {
         }
         return 1048576.0;  // fallback to 1MB if unknown
       };
-      partitioner = std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn, activation_size_fn);
+      partitioner =
+          std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn, activation_size_fn);
     }
     train_dataset->reset();
   } else {

@@ -9,6 +9,7 @@
 #include <string>
 
 #include "device/device_manager.hpp"
+#include "distributed/tcp_communicator.hpp"
 #include "threading/thread_wrapper.hpp"
 
 using namespace tunx;
@@ -20,16 +21,18 @@ struct Config {
   std::string device = "CPU:0";
   uint32_t io_threads = 2;
   size_t num_threads = 8;
+  bool bootstrap_offload = false;
 };
 
 void print_usage(const char *program_name) {
   cout << "Usage: " << program_name << " [options] <listen_port>" << endl;
   cout << endl;
   cout << "Options:" << endl;
-  cout << "  --gpu              Enable CUDA offloading for processing" << endl;
-  cout << "  --io-threads <N>   Number of IO threads for networking (default: 1)" << endl;
-  cout << "  --num-threads <N>  Number of worker threads for processing (default: 8)" << endl;
-  cout << "  -h, --help         Show this help message" << endl;
+  cout << "  --gpu <ID>             Enable CUDA offloading for processing" << endl;
+  cout << "  --io-threads <N>       Number of IO threads for networking (default: 1)" << endl;
+  cout << "  --num-threads <N>      Number of worker threads for processing (default: 8)" << endl;
+  cout << "  --bootstrap-offload    Enable bootstrap offload" << endl;
+  cout << "  -h, --help             Show this help message" << endl;
   cout << endl;
   cout << "Examples:" << endl;
   cout << "  " << program_name << " 8001                      # Default mode" << endl;
@@ -44,6 +47,7 @@ bool parse_arguments(int argc, char *argv[], Config &cfg) {
                                          {"gpu", required_argument, 0, 'g'},
                                          {"io-threads", required_argument, 0, 'i'},
                                          {"num-threads", required_argument, 0, 'n'},
+                                         {"bootstrap-offload", no_argument, 0, 'B'},
                                          {"help", no_argument, 0, 'h'},
                                          {0, 0, 0, 0}};
 
@@ -79,6 +83,9 @@ bool parse_arguments(int argc, char *argv[], Config &cfg) {
           cerr << "--num-threads requires a valid number argument" << endl;
           return false;
         }
+        break;
+      case 'B':
+        cfg.bootstrap_offload = true;
         break;
       case 'h':
         print_usage(argv[0]);
@@ -136,7 +143,10 @@ int main(int argc, char *argv[]) {
 
   DeviceID device_id = DeviceID::from_string(cfg.device);
   thread_wrapper.execute([&]() {
-    TCPWorker worker(Endpoint::tcp("0.0.0.0", cfg.listen_port), device_id, {cfg.io_threads});
+    TCPWorker worker(Endpoint::tcp("0.0.0.0", cfg.listen_port), device_id, cfg.bootstrap_offload,
+                     TCPCommunicator::Config{
+                         .num_io_threads = cfg.io_threads,
+                     });
     worker.start();
   });
 

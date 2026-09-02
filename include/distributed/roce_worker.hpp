@@ -30,8 +30,8 @@ public:
    * @param gid_index GID index for RoCE
    * @param use_gpu Whether to use CUDA for processing
    */
-  explicit RoCEWorker(Endpoint worker_endpoint, DeviceID device_id)
-      : Worker(device_id) {
+  explicit RoCEWorker(Endpoint worker_endpoint, DeviceID device_id, bool bootstrap_offload)
+      : Worker(device_id, bootstrap_offload) {
     auto communicator = RoCECommunicator::create(worker_endpoint, RoCECommunicator::Config{});
 
     communicator->start_server();

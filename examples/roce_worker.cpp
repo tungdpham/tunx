@@ -17,6 +17,7 @@ struct Config {
   std::string device_name;
   int gid_index = -1;
   std::string device_str = "CPU:0";
+  bool bootstrap_offload = false;
 };
 
 void print_usage(const char *program_name) {
@@ -28,21 +29,20 @@ void print_usage(const char *program_name) {
   cout << "  --device <name>        IB device name (e.g., mlx5_0) (required)" << endl;
   cout << "  --gid-index <index>    GID index for RoCE (required)" << endl;
   cout << "  --gpu                  Enable CUDA offloading" << endl;
+  cout << "  --bootstrap-offload    Enable bootstrap offload" << endl;
   cout << "  -h, --help             Show this help message" << endl;
 }
 
 bool parse_arguments(int argc, char *argv[], Config &cfg) {
   int c;
 
-  static struct option long_options[] = {{"host", required_argument, 0, 'H'},
-                                         {"port", required_argument, 0, 'p'},
-                                         {"device", required_argument, 0, 'd'},
-                                         {"gid-index", required_argument, 0, 'g'},
-                                         {"gpu", required_argument, 0, 'G'},
-                                         {"help", no_argument, 0, 'h'},
-                                         {0, 0, 0, 0}};
+  static struct option long_options[] = {
+      {"host", required_argument, 0, 'H'},   {"port", required_argument, 0, 'p'},
+      {"device", required_argument, 0, 'd'}, {"gid-index", required_argument, 0, 'g'},
+      {"gpu", required_argument, 0, 'G'},    {"bootstrap-offload", no_argument, 0, 'B'},
+      {"help", no_argument, 0, 'h'},         {0, 0, 0, 0}};
 
-  while ((c = getopt_long(argc, argv, "H:p:d:g:Gh", long_options, nullptr)) != -1) {
+  while ((c = getopt_long(argc, argv, "H:p:d:g:GBh", long_options, nullptr)) != -1) {
     switch (c) {
       case 'H':
         cfg.host = optarg;
@@ -68,6 +68,9 @@ bool parse_arguments(int argc, char *argv[], Config &cfg) {
         break;
       case 'G':
         cfg.device_str = "CUDA:" + std::string(optarg);
+        break;
+      case 'B':
+        cfg.bootstrap_offload = true;
         break;
       case 'h':
         print_usage(argv[0]);
@@ -111,7 +114,8 @@ int main(int argc, char *argv[]) {
   try {
     Endpoint worker_endpoint = Endpoint::roce(cfg.host, cfg.port, cfg.device_name, cfg.gid_index);
     DeviceID device_id = DeviceID::from_string(cfg.device_str);
-    RoCEWorker worker(worker_endpoint, device_id);
+
+    RoCEWorker worker(worker_endpoint, device_id, cfg.bootstrap_offload);
     worker.start();
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << std::endl;

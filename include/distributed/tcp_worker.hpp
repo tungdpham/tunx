@@ -35,9 +35,9 @@ public:
    * @param max_ecore_threads Maximum number of E-cores to use (-1 for all available)
    * @param io_threads Number of IO threads for the TCP communicator (default: 1)
    */
-  explicit TCPWorker(Endpoint endpoint, DeviceID device_id,
+  explicit TCPWorker(Endpoint endpoint, DeviceID device_id, bool bootstrap_offload,
                      TCPCommunicator::Config config = TCPCommunicator::Config())
-      : Worker(device_id) {
+      : Worker(device_id, bootstrap_offload) {
     auto &device = DeviceManager::instance().get(device_id);
     std::cout << "Device type: " << device_type_to_string(device.device_type()) << std::endl;
     auto &allocator = PoolAllocator::instance(device, device.default_stream());

@@ -86,7 +86,8 @@ int main(int argc, char *argv[]) {
 
   Endpoint local_worker_endpoint = Endpoint::roce(roce_config.host, roce_config.port,
                                                   roce_config.device_name, roce_config.gid_index);
-  auto local_worker = std::make_unique<RoCEWorker>(local_worker_endpoint, train_config.device_id);
+  auto local_worker = std::make_unique<RoCEWorker>(local_worker_endpoint, train_config.device_id,
+                                                   train_config.bootstrap_offload);
   roce_config.worker_endpoints.push_back(local_worker_endpoint);
 
   auto partitioner = std::make_unique<GraphPartitioner>(roce_config.partition_ratios);
