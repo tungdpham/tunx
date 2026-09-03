@@ -74,7 +74,10 @@ struct dense_fwd_graph {
       y = graph->pointwise(y, b, add_bias_attr);
     }
 
-    y->set_output(true).set_data_type(io_type);
+    y->set_output(true)
+        .set_dim({batch, m, n})
+        .set_stride({m * n, n, 1})
+        .set_data_type(io_type);
 
     ensure_ok(graph->validate(), "dense_fwd validate");
     ensure_ok(graph->build_operation_graph(handle), "dense_fwd build op graph");
@@ -129,7 +132,10 @@ struct dense_dgrad_graph {
     auto matmul_attr =
         fe::graph::Matmul_attributes().set_name("DGRAD_GEMM").set_compute_data_type(compute_type);
     dx = graph->matmul(dy, w, matmul_attr);
-    dx->set_output(true).set_data_type(io_type);
+    dx->set_output(true)
+        .set_dim({batch, m, k})
+        .set_stride({m * k, k, 1})
+        .set_data_type(io_type);
 
     ensure_ok(graph->validate(), "dense_dgrad validate");
     ensure_ok(graph->build_operation_graph(handle), "dense_dgrad build op graph");
@@ -182,7 +188,10 @@ struct dense_wgrad_graph {
     auto matmul_attr =
         fe::graph::Matmul_attributes().set_name("WGRAD_GEMM").set_compute_data_type(compute_type);
     dw = graph->matmul(dy, x, matmul_attr);
-    dw->set_output(true).set_data_type(param_type);
+    dw->set_output(true)
+        .set_dim({batch, n, k})
+        .set_stride({n * k, k, 1})
+        .set_data_type(param_type);
 
     ensure_ok(graph->validate(), "dense_wgrad validate");
     ensure_ok(graph->build_operation_graph(handle), "dense_wgrad build op graph");
