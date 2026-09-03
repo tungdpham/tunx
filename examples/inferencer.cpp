@@ -47,7 +47,7 @@ signed main(int argc, char *argv[]) {
   auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
   auto [train_dataset, val_dataset] =
-      DatasetFactory::create(train_config.dataset_name, train_config.dataset_path);
+      DatasetFactory::create(train_config.dataset_name, train_config.dataset_path, train_config.io_dtype);
   if (!train_dataset || !val_dataset) {
     cerr << "Failed to create data loaders for model: " << train_config.model_name << endl;
     return 1;

@@ -8,8 +8,8 @@
 
 #include <fmt/core.h>
 
-#include <ostream>
 #include <chrono>
+#include <ostream>
 
 #include "device/device_allocator.hpp"
 #include "device/device_manager.hpp"
@@ -123,7 +123,8 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
   auto start_extraction_fw = std::chrono::high_resolution_clock::now();
   auto [output_map, forward_edge_profiles, node_profiles] = profile_edges_forward(input_map, true);
   auto end_extraction_fw = std::chrono::high_resolution_clock::now();
-  double extraction_time_ms = std::chrono::duration<double, std::milli>(end_extraction_fw - start_extraction_fw).count();
+  double extraction_time_ms =
+      std::chrono::duration<double, std::milli>(end_extraction_fw - start_extraction_fw).count();
 
   auto start_scheduling_fw = std::chrono::high_resolution_clock::now();
   ExecutionPlan forward_plan;
@@ -133,7 +134,8 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
     forward_plan = planner.find_forward_order(forward_edge_profiles);
   }
   auto end_scheduling_fw = std::chrono::high_resolution_clock::now();
-  double scheduling_time_ms = std::chrono::duration<double, std::milli>(end_scheduling_fw - start_scheduling_fw).count();
+  double scheduling_time_ms =
+      std::chrono::duration<double, std::milli>(end_scheduling_fw - start_scheduling_fw).count();
 
   output_map.clear();
 
@@ -183,7 +185,8 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
   }
   cleanup_released(data_);
   auto end_extraction_fw2 = std::chrono::high_resolution_clock::now();
-  extraction_time_ms += std::chrono::duration<double, std::milli>(end_extraction_fw2 - start_extraction_fw2).count();
+  extraction_time_ms +=
+      std::chrono::duration<double, std::milli>(end_extraction_fw2 - start_extraction_fw2).count();
 
   TensorBundle output_grad_map;
   auto &grad_allocator = PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
@@ -198,13 +201,6 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
 
   graph_.workspace_allocator()->evict_unused();
 
-  PlanKey backward_key;
-  for (const auto &[uid, tensor] : output_grad_map) {
-    auto node = uid_to_node[uid];
-    backward_key.input_shapes[node] = tensor.shape();
-    backward_key.input_dtypes[node] = tensor.dtype();
-  }
-
   std::map<Edge, EdgeProfile> backward_edge_profiles;
   ExecutionPlan backward_plan;
   if (is_training) {
@@ -214,7 +210,8 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
     profile_res.first.clear();
     graph_.workspace_allocator()->evict_unused();
     auto end_extraction_bw = std::chrono::high_resolution_clock::now();
-    extraction_time_ms += std::chrono::duration<double, std::milli>(end_extraction_bw - start_extraction_bw).count();
+    extraction_time_ms +=
+        std::chrono::duration<double, std::milli>(end_extraction_bw - start_extraction_bw).count();
 
     auto start_scheduling_bw = std::chrono::high_resolution_clock::now();
     if (options.enable_naive) {
@@ -225,7 +222,8 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
       backward_plan = planner.find_backward_order(backward_edge_profiles);
     }
     auto end_scheduling_bw = std::chrono::high_resolution_clock::now();
-    scheduling_time_ms += std::chrono::duration<double, std::milli>(end_scheduling_bw - start_scheduling_bw).count();
+    scheduling_time_ms +=
+        std::chrono::duration<double, std::milli>(end_scheduling_bw - start_scheduling_bw).count();
   }
 
   BuiltPlan plan{forward_plan,
@@ -1150,7 +1148,8 @@ void GraphExecutor::pack_memory(BuiltPlan &plan, TensorBundle &input_map,
 
   trace.release_all(step + 1);
   auto end_lifetime = std::chrono::high_resolution_clock::now();
-  plan.lifetime_time_ms = std::chrono::duration<double, std::milli>(end_lifetime - start_lifetime).count();
+  plan.lifetime_time_ms =
+      std::chrono::duration<double, std::milli>(end_lifetime - start_lifetime).count();
 
   auto start_packing = std::chrono::high_resolution_clock::now();
   auto pack = MemoryPacker::pack(trace.records());
@@ -1160,7 +1159,8 @@ void GraphExecutor::pack_memory(BuiltPlan &plan, TensorBundle &input_map,
   plan.packed_allocator = PackedAllocator::create(pack.peak_memory, pack.offsets);
   plan.packed_allocator->set_backend_allocator(graph_.workspace_allocator());
   auto end_packing = std::chrono::high_resolution_clock::now();
-  plan.packing_time_ms = std::chrono::duration<double, std::milli>(end_packing - start_packing).count();
+  plan.packing_time_ms =
+      std::chrono::duration<double, std::milli>(end_packing - start_packing).count();
 }
 
 }  // namespace tunx
