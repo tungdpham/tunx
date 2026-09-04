@@ -62,6 +62,13 @@ public:
   Vec<std::string> input_uids() const;
   Vec<std::string> output_uids() const;
 
+  DType_t get_io_dtype() const { return io_dtype_; }
+  DType_t get_param_dtype() const { return param_dtype_; }
+  DType_t get_compute_dtype() const { return compute_dtype_; }
+  void set_io_dtype(DType_t dtype) { io_dtype_ = dtype; }
+  void set_param_dtype(DType_t dtype) { param_dtype_ = dtype; }
+  void set_compute_dtype(DType_t dtype) { compute_dtype_ = dtype; }
+
   Device &device() const { return param_allocator_->device(); }
 
   IAllocator *workspace_allocator() { return workspace_allocator_; }

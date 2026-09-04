@@ -52,7 +52,8 @@ public:
   void serialize(Writer &writer, const MessageHeader &header) { writer(header); }
 
   void serialize(Writer &writer, const MessageData &data) {
-    writer(data.payload.index());
+    uint32_t payload_type = static_cast<uint32_t>(data.payload.index());
+    writer(payload_type);
     data.payload.visit([&](const auto &value) { serialize(writer, value); });
   }
 

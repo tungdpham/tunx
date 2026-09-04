@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "cuda/error_handler.cuh"
 #include "tensor/ops.hpp"
 #include "tensor/tensor.hpp"
 #include "type/type.hpp"
@@ -41,6 +42,8 @@ void Conv2DOp::init(OpContext &ctx, const Config &config) {
 
 Tensor Conv2DOp::forward(OpContext &ctx, const Tensor &input, const Param &weight,
                          const Param &bias, const Config &config) {
+  cudaDeviceSynchronize();
+  cuda::checkCudaError(cudaGetLastError(), __func__, __FILE__, __LINE__);
   if (input.dims() != 4) {
     throw std::invalid_argument("Conv2D: Input tensor must be 4-dimensional (NHWC)");
   }

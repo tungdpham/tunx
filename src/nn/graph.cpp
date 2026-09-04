@@ -300,8 +300,12 @@ Graph::Graph(Graph &&other) noexcept
       output_nodes_(std::move(other.output_nodes_)),
       mode_(other.mode_),
       node_count_(other.node_count_),
+      edge_count_(other.edge_count_),
       used_node_uids_(std::move(other.used_node_uids_)),
-      used_edge_uids_(std::move(other.used_edge_uids_)) {}
+      used_edge_uids_(std::move(other.used_edge_uids_)),
+      io_dtype_(other.io_dtype_),
+      param_dtype_(other.param_dtype_),
+      compute_dtype_(other.compute_dtype_) {}
 
 Vec<Param> Graph::params() {
   Vec<Param> params;

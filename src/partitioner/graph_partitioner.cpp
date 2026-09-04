@@ -106,6 +106,10 @@ GraphPartition build_partition(const Graph &graph, const Vec<Edge> &edges, size_
   partition.start_layer = start_layer;
   partition.layer_count = edges.size();
 
+  partition.graph.set_io_dtype(graph.get_io_dtype());
+  partition.graph.set_param_dtype(graph.get_param_dtype());
+  partition.graph.set_compute_dtype(graph.get_compute_dtype());
+
   std::unordered_map<std::string, Node> uid_to_node;
   std::vector<std::string> node_order;
   std::unordered_set<std::string> produced_in_partition;
@@ -188,8 +192,9 @@ std::vector<GraphPartition> GraphPartitioner::partition(const Graph &graph) cons
   size_t offset = 0;
   for (size_t i = 0; i < layer_counts.size(); ++i) {
     size_t layer_count = layer_counts[i];
-    std::cout << "Worker " << (i + 1) << " edges: " << layer_count << " (edges " << offset << " to " << (offset + layer_count - 1) << ")" << std::endl;
-    
+    std::cout << "Worker " << (i + 1) << " edges: " << layer_count << " (edges " << offset << " to "
+              << (offset + layer_count - 1) << ")" << std::endl;
+
     Vec<Edge> partition_edges;
     partition_edges.reserve(layer_count);
     for (size_t j = 0; j < layer_count; ++j) {
@@ -265,8 +270,7 @@ std::vector<size_t> GraphPartitioner::resolve_layer_counts(size_t total_layers) 
 }
 
 ComputeBandwidthPartitioner::ComputeBandwidthPartitioner(
-    DeviceMesh mesh,
-    std::function<double(const Edge &)> compute_cost_fn,
+    DeviceMesh mesh, std::function<double(const Edge &)> compute_cost_fn,
     std::function<double(const Node &)> activation_size_fn)
     : mesh_(std::move(mesh)),
       compute_cost_fn_(std::move(compute_cost_fn)),
@@ -285,13 +289,16 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
   const size_t K = mesh_.compute_powers.size();
 
   if (K == 0) {
-    throw std::runtime_error("ComputeBandwidthPartitioner requires at least one machine in the mesh");
+    throw std::runtime_error(
+        "ComputeBandwidthPartitioner requires at least one machine in the mesh");
   }
   if (mesh_.link_speeds.size() != K - 1) {
-    throw std::runtime_error("ComputeBandwidthPartitioner link_speeds size must be compute_powers size - 1");
+    throw std::runtime_error(
+        "ComputeBandwidthPartitioner link_speeds size must be compute_powers size - 1");
   }
   if (N < K) {
-    throw std::runtime_error("ComputeBandwidthPartitioner cannot partition graph with fewer edges than machines");
+    throw std::runtime_error(
+        "ComputeBandwidthPartitioner cannot partition graph with fewer edges than machines");
   }
   for (double p : mesh_.compute_powers) {
     if (p <= 0.0) throw std::runtime_error("Compute power must be positive");
@@ -310,11 +317,11 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
       const std::string &uid = input_node->uid();
       uid_to_node[uid] = input_node;
       if (producer_idx.find(uid) == producer_idx.end()) {
-        producer_idx[uid] = 0; 
+        producer_idx[uid] = 0;
       }
       last_consumer_idx[uid] = std::max(last_consumer_idx[uid], i + 1);
     }
-    
+
     for (const auto &output_node : edge->consumers()) {
       const std::string &uid = output_node->uid();
       uid_to_node[uid] = output_node;
@@ -390,9 +397,11 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
   for (size_t k = 0; k < K; ++k) {
     size_t start = cuts[k];
     size_t end = cuts[k + 1];
-    std::cout << "Worker " << (k + 1) << " edges: " << (end - start) << " (edges " << start << " to " << (end - 1) << ")" << std::endl;
+    std::cout << "Worker " << (k + 1) << " edges: " << (end - start) << " (edges " << start
+              << " to " << (end - 1) << ")" << std::endl;
     if (k < K - 1) {
-      std::cout << "Boundary " << (k + 1) << " -> " << (k + 2) << " size (MiB): " << (boundary_size[end] / (1024.0 * 1024.0)) << std::endl;
+      std::cout << "Boundary " << (k + 1) << " -> " << (k + 2)
+                << " size (MiB): " << (boundary_size[end] / (1024.0 * 1024.0)) << std::endl;
     }
   }
   std::cout << "========================================================\n" << std::endl;
