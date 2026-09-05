@@ -4,7 +4,7 @@
   "local_worker_position": 0,
   "num_io_threads": 4,
   "max_packet_size": 4194304,
-  "skts_per_endpoint": 1,
+  "skts_per_endpoint": 4,
   "partition_policy": "compute_bandwidth",
   "workers": [
     {
@@ -15,7 +15,7 @@
       },
       "compute_power": 2.0,
       "interconnect_speeds": [
-        3125000000.0
+        2670000000.0
       ]
     },
     {
@@ -26,11 +26,11 @@
       },
       "compute_power": 1.0,
       "interconnect_speeds": [
-        3125000000.0
+        2670000000.0
       ]
     }
   ],
-  "epochs": 20,
+  "epochs": 1,
   "batch_size": 128,
   "max_steps": -1,
   "gradient_accumulation_steps": 1,
@@ -41,7 +41,7 @@
   "print_layer_memory_usage": false,
   "print_ablation": false,
   "bootstrap_offload": true,
-  "num_microbatches": 2,
+  "num_microbatches": 4,
   "device": "CUDA:0",
   "model_name": "tunx_v1",
   "model_path": "",
@@ -52,18 +52,20 @@
   "compute_dtype": "FP32",
   "optimizer": {
     "type": "adam",
-    "learning_rate": 0.001,
+    "learning_rate": 0.00015,
     "beta1": 0.9,
     "beta2": 0.999,
     "epsilon": 1e-8,
-    "weight_decay": 0.0,
+    "weight_decay": 3e-4,
     "decouple_weight_decay": false
   },
   "scheduler": {
-    "type": "step_lr",
-    "base_lr": 0.001,
-    "step_size": 980,
-    "gamma": 0.1
+    "type": "warmup_cosine_annealing",
+    "start_lr": 0.00015,
+    "base_lr": 0.0003,
+    "warmup_steps": 100,
+    "T_max": 10,
+    "eta_min": 0.0
   },
   "loss": {
     "type": "logsoftmax_cross_entropy"

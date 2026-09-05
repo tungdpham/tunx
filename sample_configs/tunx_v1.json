@@ -21,7 +21,7 @@
   "compute_dtype": "FP32",
   "optimizer": {
     "type": "adam",
-    "learning_rate": 0.001,
+    "learning_rate": 0.00015,
     "beta1": 0.9,
     "beta2": 0.999,
     "epsilon": 1e-8,
