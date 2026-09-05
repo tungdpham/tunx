@@ -22,6 +22,7 @@ namespace tunx {
 MemoryPacker::PackResult MemoryPacker::pack(std::vector<TensorAllocation> allocations) {
   int max_step = 0;
   for (auto& a : allocations) {
+    a.size = (a.size + 255) & ~255;
     if (a.end_step == -1) {
       a.end_step = 1000000;
     }
