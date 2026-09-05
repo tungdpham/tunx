@@ -90,8 +90,10 @@ struct maxpool2d_inf_graph {
   std::shared_ptr<fe::graph::Graph> graph;
   std::shared_ptr<fe::graph::Tensor_attributes> x;
   std::shared_ptr<fe::graph::Tensor_attributes> y;
+  std::shared_ptr<fe::graph::Tensor_attributes> mask;
 
   size_t workspace_size;
+  size_t mask_size;
 
   maxpool2d_inf_graph(cudnnHandle_t handle, const MaxPool2DStats& stats, DTypeDesc& type_desc) {
     const int64 n = static_cast<int64>(stats.batch_size);
@@ -125,14 +127,19 @@ struct maxpool2d_inf_graph {
             .set_post_padding({static_cast<int64>(stats.pad_h), static_cast<int64>(stats.pad_w)})
             .set_stride({static_cast<int64>(stats.stride_h), static_cast<int64>(stats.stride_w)})
             .set_compute_data_type(compute_type)
-            .set_generate_index(false);
+            .set_generate_index(true);
 
     auto outputs = graph->resample(x, resample_options);
     y = outputs[0];
+    mask = outputs[1];
     y->set_output(true)
         .set_dim({n, c, output_h, output_w})
         .set_stride({output_h * output_w * c, 1, output_w * c, c})
         .set_data_type(io_type);
+    mask->set_output(true)
+        .set_dim({n, c, output_h, output_w})
+        .set_stride({output_h * output_w * c, 1, output_w * c, c})
+        .set_data_type(fe::DataType_t::INT32);
 
     ensure_ok(graph->validate(), "maxpool2d_inf validate");
     ensure_ok(graph->build_operation_graph(handle), "maxpool2d_inf build op graph");
@@ -144,7 +151,10 @@ struct maxpool2d_inf_graph {
 
     int64 ws = 0;
     ensure_ok(graph->get_workspace_size(ws), "maxpool2d_inf workspace");
-    workspace_size = (static_cast<size_t>(ws) + 255) & ~static_cast<size_t>(255);
+    size_t base_ws = (static_cast<size_t>(ws) + 255) & ~static_cast<size_t>(255);
+    mask_size = n * c * output_h * output_w * sizeof(int32_t);
+    mask_size = (mask_size + 255) & ~static_cast<size_t>(255);
+    workspace_size = base_ws + mask_size;
   }
 };
 
@@ -327,9 +337,17 @@ void CuDNNEngine::maxpool2d_infer(engine_handle backend_handle, const MaxPool2DS
         "cuDNN Graph not found for maxpool2d infer. Please call query_maxpool2d_graph first.");
   }
   auto& graph_struct = std::any_cast<maxpool2d_inf_graph&>(it->second);
+  
+  void* mask_ptr = nullptr;
+  if (graph_struct.mask_size > 0 && workspace != nullptr) {
+    size_t base_ws = graph_struct.workspace_size - graph_struct.mask_size;
+    mask_ptr = static_cast<char*>(workspace) + base_ws;
+  }
+
   std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = {
       {graph_struct.x, const_cast<void*>(input)},
       {graph_struct.y, output},
+      {graph_struct.mask, mask_ptr},
   };
   auto status = graph_struct.graph->execute(handle, variant_pack, workspace);
   ensure_ok(status, "maxpool2d infer execute");
