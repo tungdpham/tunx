@@ -768,7 +768,7 @@ EdgeProfile GraphExecutor::profile_edge_forward(const Edge &edge) {
   for (const Node &producer : edge->producers()) {
     inputs[producer] = data(producer);
   }
-  auto *backend_allocator = edge->layer()->workspace_allocator();
+  auto *backend_allocator = graph_.workspace_allocator();
   EdgeProfilingAllocator tracker(backend_allocator);
   tracker.set_current_edge(edge->uid() + "_fw");
 
@@ -914,7 +914,7 @@ EdgeProfile GraphExecutor::profile_edge_backward(const Edge &edge) {
     is_first_to_init[producer] = grads_.find(producer) == grads_.end();
   }
 
-  auto *backend_allocator = edge->layer()->workspace_allocator();
+  auto *backend_allocator = graph_.workspace_allocator();
   EdgeProfilingAllocator tracker(backend_allocator);
   tracker.set_current_edge(edge->uid() + "_bw");
 
