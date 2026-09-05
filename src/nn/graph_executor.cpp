@@ -262,6 +262,8 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
   key.enable_linear = true;
   key.enable_branching = true;
   key.enable_joining = true;
+  key.is_training = (graph_.mode() == ExecutionMode::TRAIN);
+  key.device = graph_.device().get_id();
   for (const auto &[uid, tensor] : input_map) {
     auto &node = uid_to_node.at(uid);
     key.input_shapes[node] = tensor.shape();

@@ -86,6 +86,7 @@ public:
   Node make_node(std::string uid = "");
 
   void set_mode(ExecutionMode mode);
+  ExecutionMode mode() const { return mode_; }
 
   void set_input(Node node);
   void set_output(Node node);
