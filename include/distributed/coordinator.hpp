@@ -72,6 +72,8 @@ public:
 
   void initialize() { initialize_topology(); }
 
+  const std::vector<GraphPartition>& get_partitions() const { return partitions_; }
+
   void set_partitioner(std::unique_ptr<PartitionerBase> partitioner) {
     partitioner_ = std::move(partitioner);
   }

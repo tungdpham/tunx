@@ -33,6 +33,7 @@
   "epochs": 1,
   "batch_size": 64,
   "max_steps": -1,
+  "benchmark_mode": true,
   "gradient_accumulation_steps": 1,
   "progress_print_interval": 10,
   "num_threads": 8,

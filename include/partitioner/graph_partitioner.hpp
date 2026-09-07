@@ -49,7 +49,10 @@ public:
   ComputeBandwidthPartitioner(
       DeviceMesh mesh,
       std::function<double(const Edge &)> compute_cost_fn = nullptr,
-      std::function<double(const Node &)> activation_size_fn = nullptr);
+      std::function<double(const Node &)> activation_size_fn = nullptr,
+      size_t num_microbatches = 1,
+      double optimizer_step_time = 0.0,
+      double zero_grads_time = 0.0);
 
   std::vector<GraphPartition> partition(const Graph &graph) const override;
 
@@ -57,6 +60,9 @@ private:
   DeviceMesh mesh_;
   std::function<double(const Edge &)> compute_cost_fn_;
   std::function<double(const Node &)> activation_size_fn_;
+  size_t num_microbatches_ = 1;
+  double optimizer_step_time_ = 0.0;
+  double zero_grads_time_ = 0.0;
 };
 
 }  // namespace tunx

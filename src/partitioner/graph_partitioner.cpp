@@ -188,12 +188,9 @@ std::vector<GraphPartition> GraphPartitioner::partition(const Graph &graph) cons
   std::vector<GraphPartition> partitions;
   partitions.reserve(layer_counts.size());
 
-  std::cout << "\n=== Partition Metrics (GraphPartitioner) ===" << std::endl;
   size_t offset = 0;
   for (size_t i = 0; i < layer_counts.size(); ++i) {
     size_t layer_count = layer_counts[i];
-    std::cout << "Worker " << (i + 1) << " edges: " << layer_count << " (edges " << offset << " to "
-              << (offset + layer_count - 1) << ")" << std::endl;
 
     Vec<Edge> partition_edges;
     partition_edges.reserve(layer_count);
@@ -204,8 +201,6 @@ std::vector<GraphPartition> GraphPartitioner::partition(const Graph &graph) cons
     partitions.push_back(build_partition(graph, partition_edges, offset));
     offset += layer_count;
   }
-  std::cout << "============================================\n" << std::endl;
-
   return partitions;
 }
 
@@ -271,10 +266,14 @@ std::vector<size_t> GraphPartitioner::resolve_layer_counts(size_t total_layers) 
 
 ComputeBandwidthPartitioner::ComputeBandwidthPartitioner(
     DeviceMesh mesh, std::function<double(const Edge &)> compute_cost_fn,
-    std::function<double(const Node &)> activation_size_fn)
+    std::function<double(const Node &)> activation_size_fn,
+    size_t num_microbatches, double optimizer_step_time, double zero_grads_time)
     : mesh_(std::move(mesh)),
       compute_cost_fn_(std::move(compute_cost_fn)),
-      activation_size_fn_(std::move(activation_size_fn)) {
+      activation_size_fn_(std::move(activation_size_fn)),
+      num_microbatches_(num_microbatches),
+      optimizer_step_time_(optimizer_step_time),
+      zero_grads_time_(zero_grads_time) {
   if (compute_cost_fn_ == nullptr) {
     compute_cost_fn_ = [](const Edge &) { return 1.0; };
   }
@@ -392,18 +391,26 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
     curr = cuts[k - 1];
   }
 
-  std::cout << "\n=== Partition Metrics (ComputeBandwidthPartitioner) ===" << std::endl;
-  std::cout << "Predicted J (ms): " << dp[K][N] << std::endl;
+  double bottleneck = dp[K][N];
+  
+  double sum_latencies = 0.0;
   for (size_t k = 0; k < K; ++k) {
     size_t start = cuts[k];
     size_t end = cuts[k + 1];
-    std::cout << "Worker " << (k + 1) << " edges: " << (end - start) << " (edges " << start
-              << " to " << (end - 1) << ")" << std::endl;
-    if (k < K - 1) {
-      std::cout << "Boundary " << (k + 1) << " -> " << (k + 2)
-                << " size (MiB): " << (boundary_size[end] / (1024.0 * 1024.0)) << std::endl;
-    }
+    double compute_time = (prefix_compute[end] - prefix_compute[start]) / mesh_.compute_powers[k];
+    double comm_time = (k < K - 1) ? ((boundary_size[end] / mesh_.link_speeds[k]) * 1000.0) : 0.0;
+    sum_latencies += std::max(compute_time, comm_time);
   }
+
+  double pipeline_bubble = (num_microbatches_ > 0 ? (num_microbatches_ - 1) * bottleneck : 0.0);
+  double predicted_step_time = sum_latencies + pipeline_bubble + optimizer_step_time_ + zero_grads_time_;
+
+  std::cout << "\n=== Partition Metrics (ComputeBandwidthPartitioner) ===" << std::endl;
+  std::cout << "Predicted Bottleneck J (ms): " << bottleneck << std::endl;
+  std::cout << "Pipeline Bubble (ms): " << pipeline_bubble << std::endl;
+  std::cout << "Optimizer Step (ms): " << optimizer_step_time_ << std::endl;
+  std::cout << "Zero Gradients (ms): " << zero_grads_time_ << std::endl;
+  std::cout << "Predicted Total Step Time (ms): " << predicted_step_time << std::endl;
   std::cout << "========================================================\n" << std::endl;
 
   std::vector<GraphPartition> partitions;
