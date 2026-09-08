@@ -55,8 +55,8 @@ struct TrainingConfig {
   DType_t compute_dtype = DType_t::FP32;
   std::string log_dir = "logs";
 
-  bool prefetch_data = false;
-  size_t prefetch_depth = 2;
+  bool prefetch_data = true;
+  size_t prefetch_depth = 4;
   bool async_pipeline = true;
   bool augmentation = true;
   bool benchmark_mode = false;

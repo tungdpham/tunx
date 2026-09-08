@@ -402,8 +402,8 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
     sum_latencies += std::max(compute_time, comm_time);
   }
 
-  double pipeline_bubble = (num_microbatches_ > 0 ? (num_microbatches_ - 1) * bottleneck : 0.0);
-  double predicted_step_time = sum_latencies + pipeline_bubble + optimizer_step_time_ + zero_grads_time_;
+  double pipeline_bubble = (num_microbatches_ > 0 ? (sum_latencies - bottleneck) / num_microbatches_ : 0.0);
+  double predicted_step_time = bottleneck + pipeline_bubble + optimizer_step_time_ + zero_grads_time_;
 
   std::cout << "\n=== Partition Metrics (ComputeBandwidthPartitioner) ===" << std::endl;
   std::cout << "Predicted Bottleneck J (ms): " << bottleneck << std::endl;
