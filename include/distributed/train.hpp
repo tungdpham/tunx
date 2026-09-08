@@ -355,7 +355,12 @@ inline void run_distributed_benchmark(Coordinator &coordinator, std::unique_ptr<
   };
   start_prefetcher();
 
+  double total_data_time = 0;
+  double total_misc_time = 0;
+  double total_gpu_time = 0;
+
   auto step = [&]() {
+    auto t0 = std::chrono::high_resolution_clock::now();
     if (!get_next_batch(*train_dataset, prefetcher.get(), config.batch_size, batch_data, batch_labels)) {
       if (prefetcher) prefetcher->stop();
       train_dataset->shuffle();
@@ -363,6 +368,7 @@ inline void run_distributed_benchmark(Coordinator &coordinator, std::unique_ptr<
       start_prefetcher();
       get_next_batch(*train_dataset, prefetcher.get(), config.batch_size, batch_data, batch_labels);
     }
+    auto t1 = std::chrono::high_resolution_clock::now();
 
     Vec<Tensor> splitted_inputs;
     split(batch_data, splitted_inputs, config.num_microbatches);
@@ -372,6 +378,7 @@ inline void run_distributed_benchmark(Coordinator &coordinator, std::unique_ptr<
     }
     Vec<Tensor> micro_batch_labels;
     split(batch_labels, micro_batch_labels, config.num_microbatches);
+    auto t2 = std::chrono::high_resolution_clock::now();
 
     if (config.async_pipeline) {
       coordinator.async_train_batch(micro_batch_inputs, micro_batch_labels, criterion, config.gradient_accumulation_steps);
@@ -384,6 +391,11 @@ inline void run_distributed_benchmark(Coordinator &coordinator, std::unique_ptr<
       coordinator.update_parameters();
       accumulation_steps = 0;
     }
+    auto t3 = std::chrono::high_resolution_clock::now();
+
+    total_data_time += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / 1000.0;
+    total_misc_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000.0;
+    total_gpu_time += std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count() / 1000.0;
   };
 
   std::cout << "Running 50 warmup steps..." << std::endl;
@@ -392,6 +404,9 @@ inline void run_distributed_benchmark(Coordinator &coordinator, std::unique_ptr<
   }
 
   std::cout << "Warmup complete. Running 2000 measured steps..." << std::endl;
+  total_data_time = 0;
+  total_misc_time = 0;
+  total_gpu_time = 0;
   auto start_time = std::chrono::high_resolution_clock::now();
   for (int i = 0; i < 2000; ++i) {
     step();
@@ -399,6 +414,7 @@ inline void run_distributed_benchmark(Coordinator &coordinator, std::unique_ptr<
   
   auto end_time = std::chrono::high_resolution_clock::now();
   double elapsed_sec = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count() / 1000000.0;
+  elapsed_sec -= (total_data_time / 1000.0); // Exclude data loading time
 
   bool is_lm = (config.dataset_name == "openwebtext");
   if (is_lm) {
@@ -409,6 +425,9 @@ inline void run_distributed_benchmark(Coordinator &coordinator, std::unique_ptr<
     std::cout << "Throughput: " << std::fixed << std::setprecision(2) << throughput << " samples/s" << std::endl;
   }
   std::cout << "Elapsed time for 2000 steps: " << std::fixed << std::setprecision(3) << elapsed_sec << " s" << std::endl;
+  std::cout << "Average Data Loading Time: " << std::fixed << std::setprecision(3) << (total_data_time / 2000.0) << " ms/batch" << std::endl;
+  std::cout << "Average Misc Time (e.g. split): " << std::fixed << std::setprecision(3) << (total_misc_time / 2000.0) << " ms/batch" << std::endl;
+  std::cout << "Average GPU Processing Time: " << std::fixed << std::setprecision(3) << (total_gpu_time / 2000.0) << " ms/batch" << std::endl;
 
   if (prefetcher) prefetcher->stop();
 }
