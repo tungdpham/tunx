@@ -75,10 +75,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     configs_to_run = [
-        "configs/distributed_v1.json",
-        "configs/distributed_v2.json",
-        "configs/distributed_v3.json",
-        "configs/distributed_v4.json"
+        "../configs/distributed_v1.json",
+        "../configs/distributed_v2.json",
+        "../configs/distributed_v3.json",
+        "../configs/distributed_v4.json"
     ]
     
     policies_to_run = [
