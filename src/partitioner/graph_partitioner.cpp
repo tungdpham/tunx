@@ -391,27 +391,11 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
     curr = cuts[k - 1];
   }
 
-  double bottleneck = dp[K][N];
-  
-  double sum_latencies = 0.0;
-  for (size_t k = 0; k < K; ++k) {
-    size_t start = cuts[k];
-    size_t end = cuts[k + 1];
-    double compute_time = (prefix_compute[end] - prefix_compute[start]) / mesh_.compute_powers[k];
-    double comm_time = (k < K - 1) ? ((boundary_size[end] / mesh_.link_speeds[k]) * 1000.0) : 0.0;
-    sum_latencies += std::max(compute_time, comm_time);
-  }
 
-  double pipeline_bubble = (num_microbatches_ > 0 ? (sum_latencies - bottleneck) / num_microbatches_ : 0.0);
-  double predicted_step_time = bottleneck + pipeline_bubble + optimizer_step_time_ + zero_grads_time_;
 
-  std::cout << "\n=== Partition Metrics (ComputeBandwidthPartitioner) ===" << std::endl;
-  std::cout << "Predicted Bottleneck J (ms): " << bottleneck << std::endl;
-  std::cout << "Pipeline Bubble (ms): " << pipeline_bubble << std::endl;
-  std::cout << "Optimizer Step (ms): " << optimizer_step_time_ << std::endl;
-  std::cout << "Zero Gradients (ms): " << zero_grads_time_ << std::endl;
-  std::cout << "Predicted Total Step Time (ms): " << predicted_step_time << std::endl;
-  std::cout << "========================================================\n" << std::endl;
+
+
+
 
   std::vector<GraphPartition> partitions;
   partitions.reserve(K);

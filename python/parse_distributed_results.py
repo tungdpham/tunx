@@ -46,34 +46,15 @@ def parse_log(filename):
         boundary_match = re.search(r'Boundary 1 -> 2 size \(MiB\): (\d+)', section)
         boundary = boundary_match.group(1) if boundary_match else "N/A"
         
-        predicted_j_match = re.search(r'Predicted J \(ms\): ([\d\.]+)', section)
+        predicted_j_match = re.search(r'Predicted Bottleneck J \(ms\): ([\d\.]+)', section)
         predicted_j = predicted_j_match.group(1) if predicted_j_match else "N/A"
         
         # Parse throughput
-        # Using Batch processing times
-        # e.g., Batch 100 Loss: ..., Processing Time: 121856 us
-        processing_times = re.findall(r'Processing Time: (\d+) us', section)
-        
-        throughput_str = "N/A"
-        if processing_times:
-            # Drop the first 10% or just the first few as warmup
-            warmup_skip = max(1, len(processing_times) // 10)
-            valid_times = [float(t) for t in processing_times[warmup_skip:]]
-            if valid_times:
-                # assuming batch size 128
-                throughputs = [128.0 / (t / 1e6) for t in valid_times]
-                
-                n = len(throughputs)
-                mean_thpt = sum(throughputs) / n
-                
-                # 95% CI
-                if n > 1:
-                    variance = sum((x - mean_thpt) ** 2 for x in throughputs) / (n - 1)
-                    std_dev = math.sqrt(variance)
-                    ci = 1.96 * std_dev / math.sqrt(n)
-                else:
-                    ci = 0.0
-                throughput_str = f"{mean_thpt:.1f} \\pm {ci:.1f}"
+        throughput_match = re.search(r'Throughput: ([\d\.]+) samples/s', section)
+        if throughput_match:
+            throughput_str = throughput_match.group(1)
+        else:
+            throughput_str = "N/A"
         
         key = (workload, policy_name)
         results[key] = {
@@ -81,8 +62,7 @@ def parse_log(filename):
             "edges": edges_w1_w2,
             "boundary": boundary,
             "predicted_j": predicted_j,
-            "throughput": throughput_str,
-            "vram": "N/A/N/A"
+            "throughput": throughput_str
         }
         
     return results
@@ -98,12 +78,12 @@ def main():
     workloads = ["V1", "V2", "V3", "V4"]
     policies = ["Equal edge count", "Compute only", "Compute+bandwidth"]
     
-    print("Workload | Policy | Cut after edge | Edges W1/W2 | Boundary (MiB) | Predicted J (ms) | Throughput (samples/s) | Peak VRAM W1/W2 (GiB)")
-    print("-" * 140)
+    print("Workload | Policy | Cut after edge | Edges W1/W2 | Boundary (MiB) | Predicted J (ms) | Throughput (samples/s)")
+    print("-" * 122)
     for w in workloads:
         for p in policies:
             res = results.get((w, p), {})
-            print(f"{w:8} | {p:18} | {res.get('cut', 'N/A'):14} | {res.get('edges', 'N/A'):11} | {res.get('boundary', 'N/A'):14} | {res.get('predicted_j', 'N/A'):16} | {res.get('throughput', 'N/A'):22} | {res.get('vram', 'N/A')}")
+            print(f"{w:8} | {p:18} | {res.get('cut', 'N/A'):14} | {res.get('edges', 'N/A'):11} | {res.get('boundary', 'N/A'):14} | {res.get('predicted_j', 'N/A'):16} | {res.get('throughput', 'N/A')}")
             
 if __name__ == '__main__':
     main()

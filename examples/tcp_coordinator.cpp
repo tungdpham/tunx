@@ -80,8 +80,8 @@ int main(int argc, char *argv[]) {
   if (train_config.dataset_name.empty()) {
     throw std::runtime_error("dataset_name variable is not set!");
   }
-  auto [train_dataset, val_dataset] =
-      DatasetFactory::create(train_config.dataset_name, train_config.dataset_path, train_config.io_dtype);
+  auto [train_dataset, val_dataset] = DatasetFactory::create(
+      train_config.dataset_name, train_config.dataset_path, train_config.io_dtype);
   if (!train_dataset || !val_dataset) {
     cerr << "Failed to create data loaders for model: " << train_config.model_name << endl;
     return 1;
@@ -120,6 +120,21 @@ int main(int argc, char *argv[]) {
 
   Tensor batch_data, batch_labels;
   std::unordered_map<std::string, size_t> global_node_profiles;
+  std::unordered_map<std::shared_ptr<LayerImpl>, double> global_edge_costs;
+  double optimizer_step_time = 0.0;
+  double zero_grads_time = 0.0;
+  DeviceMesh mesh;
+
+  for (size_t i = 0; i < tcp_config.workers.size(); ++i) {
+    mesh.compute_powers.push_back(tcp_config.workers[i].compute_power);
+    if (i < tcp_config.workers.size() - 1) {
+      if (!tcp_config.workers[i].interconnect_speeds.empty()) {
+        mesh.link_speeds.push_back(tcp_config.workers[i].interconnect_speeds[0]);
+      } else {
+        mesh.link_speeds.push_back(3000000.0);  // fallback 3GB/s
+      }
+    }
+  }
 
   if (train_dataset->get_batch(train_config.batch_size, batch_data, batch_labels)) {
     cout << "Profiling graph edges for partitioner..." << endl;
@@ -137,63 +152,58 @@ int main(int argc, char *argv[]) {
 
     auto &mem_pool = PoolAllocator::instance(graph.device(), graph.device().default_stream());
     TensorBundle output_grad_map;
-    for (const auto& [name, tensor] : output_map) {
-        output_grad_map.set(name, Tensor(tensor.shape(), tensor.dtype(), mem_pool));
+    for (const auto &[name, tensor] : output_map) {
+      output_grad_map.set(name, Tensor(tensor.shape(), tensor.dtype(), mem_pool));
     }
     auto [backward_output_map, backward_edge_profiles] =
         executor.profile_edges_backward(output_grad_map, false);
-    
-    for(const auto& pair : node_profiles) {
-        global_node_profiles[pair.first->uid()] = pair.second;
+
+    for (const auto &pair : node_profiles) {
+      global_node_profiles[pair.first->uid()] = pair.second;
     }
 
     optimizer->attach(graph);
     for (int i = 0; i < 5; ++i) {
-        optimizer->zero_grads();
-        optimizer->update();
+      optimizer->zero_grads();
+      optimizer->update();
     }
     graph.device().default_stream().sync();
 
     auto zero_start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < 10; ++i) {
-        optimizer->zero_grads();
+      optimizer->zero_grads();
     }
     graph.device().default_stream().sync();
     auto zero_end = std::chrono::high_resolution_clock::now();
-    double zero_grads_time = std::chrono::duration_cast<std::chrono::microseconds>(zero_end - zero_start).count() / 1000.0 / 10.0;
+    zero_grads_time =
+        std::chrono::duration_cast<std::chrono::microseconds>(zero_end - zero_start).count() /
+        1000.0 / 10.0;
 
     auto opt_start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < 10; ++i) {
-        optimizer->update();
+      optimizer->update();
     }
     graph.device().default_stream().sync();
     auto opt_end = std::chrono::high_resolution_clock::now();
-    double optimizer_step_time = std::chrono::duration_cast<std::chrono::microseconds>(opt_end - opt_start).count() / 1000.0 / 10.0;
-
-    DeviceMesh mesh;
-    for (size_t i = 0; i < tcp_config.workers.size(); ++i) {
-      mesh.compute_powers.push_back(tcp_config.workers[i].compute_power);
-      if (i < tcp_config.workers.size() - 1) {
-        if (!tcp_config.workers[i].interconnect_speeds.empty()) {
-          mesh.link_speeds.push_back(tcp_config.workers[i].interconnect_speeds[0]);
-        } else {
-          mesh.link_speeds.push_back(3000000.0);  // fallback 3GB/s
-        }
-      }
-    }
+    optimizer_step_time =
+        std::chrono::duration_cast<std::chrono::microseconds>(opt_end - opt_start).count() /
+        1000.0 / 10.0;
 
     // Use the first compute power as the baseline multiplier
     double baseline_power = mesh.compute_powers.empty() ? 1.0 : mesh.compute_powers[0];
 
-    auto compute_cost_fn = [edge_profiles, backward_edge_profiles, baseline_power](const Edge &edge) -> double {
+    for (const auto &pair : edge_profiles) {
+      global_edge_costs[pair.first->layer()] += pair.second.exec_time;
+    }
+    for (const auto &pair : backward_edge_profiles) {
+      global_edge_costs[pair.first->layer()] += pair.second.exec_time;
+    }
+
+    auto compute_cost_fn = [&global_edge_costs, baseline_power](const Edge &edge) -> double {
       double cost = 0.0;
-      auto it_fwd = edge_profiles.find(edge);
-      if (it_fwd != edge_profiles.end()) {
-        cost += it_fwd->second.exec_time;
-      }
-      auto it_bwd = backward_edge_profiles.find(edge);
-      if (it_bwd != backward_edge_profiles.end()) {
-        cost += it_bwd->second.exec_time;
+      auto it = global_edge_costs.find(edge->layer());
+      if (it != global_edge_costs.end()) {
+        cost = it->second;
       }
       return cost > 0.0 ? cost * baseline_power : 1.0;
     };
@@ -205,25 +215,21 @@ int main(int argc, char *argv[]) {
     } else if (tcp_config.partition_policy == "compute") {
       cout << "Using Compute-only ComputeBandwidthPartitioner..." << endl;
       auto compute_only_activation_fn = [](const Node &) -> double { return 0.0; };
-      partitioner = std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn,
-                                                                  compute_only_activation_fn,
-                                                                  train_config.num_microbatches,
-                                                                  optimizer_step_time,
-                                                                  zero_grads_time);
+      partitioner = std::make_unique<ComputeBandwidthPartitioner>(
+          mesh, compute_cost_fn, compute_only_activation_fn, train_config.num_microbatches,
+          optimizer_step_time, zero_grads_time);
     } else {
       cout << "Using Compute+Bandwidth ComputeBandwidthPartitioner..." << endl;
       auto activation_size_fn = [node_profiles](const Node &node) -> double {
         auto it = node_profiles.find(node);
         if (it != node_profiles.end()) {
-          return static_cast<double>(it->second) * 2.0; // 2x for forward + backward communication
+          return static_cast<double>(it->second) * 2.0;  // 2x for forward + backward communication
         }
         return 1048576.0;  // fallback to 1MB if unknown
       };
-      partitioner =
-          std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn, activation_size_fn,
-                                                        train_config.num_microbatches,
-                                                        optimizer_step_time,
-                                                        zero_grads_time);
+      partitioner = std::make_unique<ComputeBandwidthPartitioner>(
+          mesh, compute_cost_fn, activation_size_fn, train_config.num_microbatches,
+          optimizer_step_time, zero_grads_time);
     }
     train_dataset->reset();
   } else {
@@ -250,27 +256,76 @@ int main(int argc, char *argv[]) {
   coordinator.initialize();
 
   cout << "\n=== Unified Partition Metrics ===" << endl;
-  auto& partitions = coordinator.get_partitions();
+  auto &partitions = coordinator.get_partitions();
   for (size_t k = 0; k < partitions.size(); ++k) {
     size_t start = partitions[k].start_layer;
     size_t end = start + partitions[k].layer_count;
-    cout << "Worker " << (k + 1) << " edges: " << partitions[k].layer_count 
-         << " (edges " << start << " to " << (end - 1) << ")" << endl;
+    cout << "Worker " << (k + 1) << " edges: " << partitions[k].layer_count << " (edges " << start
+         << " to " << (end - 1) << ")" << endl;
     if (k < partitions.size() - 1) {
       double boundary_bytes = 0.0;
-      for (const auto& uid : partitions[k].output_uids) {
+      for (const auto &uid : partitions[k].output_uids) {
         auto it = global_node_profiles.find(uid);
         if (it != global_node_profiles.end()) {
           boundary_bytes += static_cast<double>(it->second);
         } else {
-          boundary_bytes += 1048576.0; // 1MB fallback
+          boundary_bytes += 1048576.0;  // 1MB fallback
         }
       }
-      cout << "Boundary " << (k + 1) << " -> " << (k + 2) 
+      cout << "Boundary " << (k + 1) << " -> " << (k + 2)
            << " size (MiB): " << std::round(boundary_bytes / (1024.0 * 1024.0)) << endl;
     }
   }
   cout << "=================================\n" << endl;
+
+  if (partitions.size() > 0 && !mesh.compute_powers.empty()) {
+    double sum_latencies = 0.0;
+    double bottleneck = 0.0;
+    double baseline_power = mesh.compute_powers.empty() ? 1.0 : mesh.compute_powers[0];
+    for (size_t k = 0; k < partitions.size(); ++k) {
+      double compute_time = 0.0;
+      for (const auto &edge : partitions[k].graph.edges()) {
+        auto it = global_edge_costs.find(edge->layer());
+        if (it != global_edge_costs.end()) {
+          compute_time += (it->second > 0.0 ? it->second * baseline_power : 1.0);
+        } else {
+          compute_time += 1.0;
+        }
+      }
+      compute_time /= mesh.compute_powers[k];
+
+      double comm_time = 0.0;
+      if (k < partitions.size() - 1) {
+        double boundary_bytes = 0.0;
+        for (const auto &uid : partitions[k].output_uids) {
+          auto it = global_node_profiles.find(uid);
+          if (it != global_node_profiles.end()) {
+            boundary_bytes += static_cast<double>(it->second) * 2.0;
+          } else {
+            boundary_bytes += 1048576.0;  // fallback to 1MB if unknown
+          }
+        }
+        comm_time = (boundary_bytes / mesh.link_speeds[k]) * 1000.0;
+      }
+
+      sum_latencies += std::max(compute_time, comm_time);
+      bottleneck = std::max({bottleneck, compute_time, comm_time});
+    }
+
+    double pipeline_bubble = (train_config.num_microbatches > 0)
+                                 ? (sum_latencies - bottleneck) / train_config.num_microbatches
+                                 : 0.0;
+    double predicted_step_time =
+        bottleneck + pipeline_bubble + optimizer_step_time + zero_grads_time;
+
+    cout << "\n=== Predicted Step Metrics ===" << endl;
+    cout << "Predicted Bottleneck J (ms): " << bottleneck << endl;
+    cout << "Pipeline Bubble (ms): " << pipeline_bubble << endl;
+    cout << "Optimizer Step (ms): " << optimizer_step_time << endl;
+    cout << "Zero Gradients (ms): " << zero_grads_time << endl;
+    cout << "Predicted Total Step Time (ms): " << predicted_step_time << endl;
+    cout << "================================\n" << endl;
+  }
 
   if (!coordinator.deploy_stages()) {
     cerr << "Failed to deploy stages. Make sure workers are running." << endl;
