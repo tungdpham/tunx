@@ -1,5 +1,7 @@
 // ! NOTE: This is a JSONC file, which is JSON with comments. To load the actual file, make a copy without comments.
 {
+  "prefetch_data": true,
+  "prefetch_depth": 4,
   "epochs": 20,
   "batch_size": 256,
   "max_steps": -1, // If > 0, overrides epochs and batch_size to run for a fixed number of steps.

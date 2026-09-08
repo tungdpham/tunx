@@ -1,4 +1,6 @@
 {
+  "prefetch_data": true,
+  "prefetch_depth": 4,
   "epochs": 1,
   "batch_size": 64,
   "max_steps": -1,

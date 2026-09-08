@@ -1,4 +1,6 @@
 {
+  "prefetch_data": true,
+  "prefetch_depth": 4,
   "host": "10.10.0.2",
   "port": 9000,
   "local_worker_position": 0,

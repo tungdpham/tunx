@@ -1,4 +1,6 @@
 {
+  "prefetch_data": true,
+  "prefetch_depth": 4,
   "max_steps": 20000,
   "batch_size": 8,
   "gradient_accumulation_steps": 1,
