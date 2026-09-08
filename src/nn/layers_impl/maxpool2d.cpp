@@ -63,7 +63,7 @@ Tensor MaxPool2DOp::forward(OpContext &ctx, const Tensor &input, const Config &c
 
   WorkspaceReq ws_req = ctx.engine->query_maxpool2d_graph(ctx.handle, stats, type_desc);
 
-  Tensor output = ctx.make_tensor({batch_size, output_h, output_w, channels}, input.dtype());
+  Tensor output = ctx.make_tensor({batch_size, output_h, output_w, channels}, ctx.io_dtype);
   size_t ws_size = ctx.is_training ? ws_req.fwd_workspace : ws_req.inf_workspace;
   Tensor ws = ctx.make_tensor({ws_size}, DType_t::BYTE);
 

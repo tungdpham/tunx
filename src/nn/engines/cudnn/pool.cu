@@ -290,30 +290,7 @@ void CuDNNEngine::avgpool_bwd(engine_handle backend_handle, const AvgPool2DStats
 void CuDNNEngine::maxpool2d_fwd(engine_handle backend_handle, const MaxPool2DStats& stats,
                                 const void* input, void* output, void* mask, void* workspace,
                                 DTypeDesc type_desc) {
-  cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
-  GraphCacheKey key{
-      .op_type = OpType::MAXPOOL2D_FWD,
-      .dtype_desc = type_desc,
-      .dims = {stats.batch_size, stats.channels, stats.height, stats.width},
-      .attributes = {{"pool_h", stats.pool_h},
-                     {"pool_w", stats.pool_w},
-                     {"stride_h", stats.stride_h},
-                     {"stride_w", stats.stride_w},
-                     {"pad_h", stats.pad_h},
-                     {"pad_w", stats.pad_w}},
-  };
-  auto it = graph_cache_.find(key);
-  if (it == graph_cache_.end()) {
-    throw std::runtime_error("cuDNN Graph not found for maxpool2d fwd.");
-  }
-  auto& graph_struct = std::any_cast<maxpool2d_fwd_graph&>(it->second);
-  std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack = {
-      {graph_struct.x, const_cast<void*>(input)},
-      {graph_struct.y, output},
-      {graph_struct.mask, mask},
-  };
-  auto status = graph_struct.graph->execute(handle, variant_pack, workspace);
-  ensure_ok(status, "avgpool fwd execute");
+  cuda_engine_.maxpool2d_fwd(backend_handle, stats, input, output, mask, workspace, type_desc);
 }
 
 void CuDNNEngine::maxpool2d_infer(engine_handle backend_handle, const MaxPool2DStats& stats,

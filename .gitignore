@@ -82,6 +82,7 @@ logs/
 *.data.old
 /output_images/
 /plots/
+/dump_*/
 
 # model snapshots
 /model_snapshots/

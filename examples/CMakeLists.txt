@@ -23,3 +23,6 @@ create_executable(graph_api_v2_test.cpp LIBS tunx_lib)
 
 # Partitioner executables
 create_executable(partitioner_example.cpp LIBS tunx_lib)
+
+# Equivalence executables
+create_executable(test_equivalence.cpp LIBS tunx_lib)
