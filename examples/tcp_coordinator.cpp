@@ -138,7 +138,7 @@ int main(int argc, char *argv[]) {
 
   if (train_dataset->get_batch(train_config.batch_size, batch_data, batch_labels)) {
     cout << "Profiling graph edges for partitioner..." << endl;
-    GraphExecutor executor(graph);
+    GraphExecutor executor(graph, train_config.bootstrap_offload);
     TensorBundle input_map({{"input", batch_data}});
 
     // Warmup
