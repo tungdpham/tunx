@@ -83,6 +83,7 @@ logs/
 /output_images/
 /plots/
 /dump_*/
+/*_dumps/
 
 # model snapshots
 /model_snapshots/
@@ -122,3 +123,7 @@ private/
 
 # experiment results
 /experiments/
+
+# generated multi-seed equivalence dumps
+/multiseed_results/
+/multiseed_results_smoke/

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <map>
 #include <ostream>
 #include <tuple>
@@ -54,12 +55,55 @@ public:
 
   std::tuple<TensorBundle, std::map<Edge, EdgeProfile>, std::map<Node, size_t>>
   profile_edges_forward(TensorBundle &input_map, bool discard_residuals = false);
+  // edge_order, when non-null, overrides the default naive reverse-topological edge
+  // iteration order. This is used to re-profile backward buffer roles (GradientOutput vs
+  // GradientContribution vs Workspace) using the actual solver-scheduled order, since that
+  // classification is order-sensitive at multi-producer (fan-out/accumulate) nodes.
   std::pair<TensorBundle, std::map<Edge, EdgeProfile>> profile_edges_backward(
-      TensorBundle &output_grad_map, bool prefetch_residuals = false);
+      TensorBundle &output_grad_map, bool prefetch_residuals = false,
+      const Vec<Edge> *edge_order = nullptr);
 
   std::map<Edge, Residuals> &residuals() { return residuals_; }
   const std::map<Edge, Residuals> &residuals() const { return residuals_; }
   void clear_residuals() { residuals_.clear(); }
+
+  const Tensor &data(const Node &node) const;
+  const Tensor &grad(const Node &node) const;
+  bool has_data(const Node &node) const { return data_.count(node) > 0; }
+  bool has_grad(const Node &node) const { return grads_.count(node) > 0; }
+
+  // Returns a snapshot of all currently-live activation tensors (node uid -> tensor).
+  std::map<std::string, Tensor> snapshot_data() const {
+    std::map<std::string, Tensor> out;
+    for (const auto &[node, entry] : data_) {
+      if (entry.ref_count > 0) out[node->uid()] = entry.tensor;
+    }
+    return out;
+  }
+
+  // Returns a snapshot of all currently-live gradient tensors (node uid -> tensor).
+  std::map<std::string, Tensor> snapshot_grads() const {
+    std::map<std::string, Tensor> out;
+    for (const auto &[node, entry] : grads_) {
+      if (entry.ref_count > 0) out[node->uid()] = entry.tensor;
+    }
+    return out;
+  }
+
+  // Set a hook called during each backward_edge().
+  // - consumers_grads: grad w.r.t. each consumer node's output (= PyTorch's grad_output);
+  //   captured before release_grad() so these are the gradients flowing INTO the layer.
+  // - producers_grads: grad w.r.t. each producer node's output (= PyTorch's grad_input);
+  //   captured after accumulate_grad() so these are the gradients flowing OUT of the layer.
+  // Both maps are keyed by node UID.
+  // Pass nullptr to clear a previously-set hook.
+  using BackwardGradHook =
+      std::function<void(const Edge &, const std::map<std::string, Tensor> &consumers_grads,
+                         const std::map<std::string, Tensor> &producers_grads)>;
+  void set_backward_grad_hook(BackwardGradHook hook) { backward_grad_hook_ = std::move(hook); }
+
+  using ForwardHook = std::function<void(const Edge &, const std::map<std::string, Tensor> &)>;
+  void set_forward_hook(ForwardHook hook) { forward_hook_ = std::move(hook); }
 
   void set_log_stream(std::ostream *os) { os_ = os; }
 
@@ -102,11 +146,11 @@ private:
   std::map<Edge, Residuals> residuals_;
   std::map<Node, int> data_ref_counts_;
   std::map<Node, int> grad_ref_counts_;
+  BackwardGradHook backward_grad_hook_;
+  ForwardHook forward_hook_;
 
-  const Tensor &data(const Node &node) const;
   void set_data(const Node &node, const Tensor &tensor, int ref_count);
   void release_data(const Node &node);
-  const Tensor &grad(const Node &node) const;
   void set_grad(const Node &node, const Tensor &tensor, int ref_count);
   void accumulate_grad(const Node &node, const Tensor &tensor, int ref_count);
   void release_grad(const Node &node);

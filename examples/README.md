@@ -39,3 +39,14 @@ Then, run coordinator after all worker:
 # Run coordinator with RDMA (default)
 ./bin/roce_coordinator --device {device_id}
 ```
+
+
+## Running Equivalence Tests
+
+```bash
+uv run python torch_benchmark/dump_utils.py --model resnet50 --dump-dir dump_pt --batch-size 32
+
+./build/bin/test_equivalence --model resnet50 --pt-dir dump_pt --tunx-dir dump_tunx --batch-size 32
+
+uv run python torch_benchmark/compare_equivalence.py --pt_dir dump_pt --tunx_dir dump_tunx > comparison_output.txt 
+```

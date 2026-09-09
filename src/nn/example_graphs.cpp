@@ -159,7 +159,8 @@ Graph create_imagenet100_resnet50_graph(IAllocator &allocator, GraphOpts opts) {
   Shape shape = {1, 224, 224, 3};
 
   Node x = conv2d(input, shape, 64, 7, 2, 3, true, "conv1");
-  x = batchnorm(x, shape, true, "bn1");
+  x = batchnorm(x, shape, false, "bn1");
+  x = relu(x, shape, "relu");
   x = maxpool2d(x, shape, 3, 2, 1, "maxpool");
   x = bottleneck_residual_block(x, shape, 64, 256, 1, "layer1_block1");
   x = bottleneck_residual_block(x, shape, 64, 256, 1, "layer1_block2");
@@ -239,44 +240,44 @@ Graph create_tunx_v1_graph(IAllocator &allocator, GraphOpts opts) {
   Shape shape = {1, 224, 224, 3};
 
   Node x = conv2d(input, shape, 16, 7, 2, 3, false, "conv1");  // -> {112, 112, 16}
-  x = batchnorm(x, shape, false, "bn1");                        // -> {112, 112, 16}
+  x = batchnorm(x, shape, false, "bn1");                       // -> {112, 112, 16}
   x = relu(x, shape, "relu_bn1");
-  x = maxpool2d(x, shape, 4, 4, 0, "pool1");                   // -> {28, 28, 16}
+  x = maxpool2d(x, shape, 4, 4, 0, "pool1");  // -> {28, 28, 16}
 
   const Shape initial_shape = shape;
 
   Shape b1_shape = initial_shape;
   Node b1 = convtranspose2d(x, b1_shape, 32, 2, 2, 0, false, "b1_up1");  // -> {56, 56, 32}
-  b1 = batchnorm(b1, b1_shape, false, "b1_bn1");                          // -> {56, 56, 32}
+  b1 = batchnorm(b1, b1_shape, false, "b1_bn1");                         // -> {56, 56, 32}
   b1 = relu(b1, b1_shape, "relu_b1_bn1");
-  b1 = convtranspose2d(b1, b1_shape, 64, 4, 4, 0, false, "b1_up2");      // -> {224, 224, 64}
-  b1 = batchnorm(b1, b1_shape, false, "b1_bn2");                          // -> {224, 224, 64}
+  b1 = convtranspose2d(b1, b1_shape, 64, 4, 4, 0, false, "b1_up2");  // -> {224, 224, 64}
+  b1 = batchnorm(b1, b1_shape, false, "b1_bn2");                     // -> {224, 224, 64}
   b1 = relu(b1, b1_shape, "relu_b1_bn2");
-  b1 = conv2d(b1, b1_shape, 64, 3, 1, 1, false, "b1_down");              // -> {224, 224, 64}
-  b1 = maxpool2d(b1, b1_shape, 4, 4, 0, "b1_pool");                      // -> {56, 56, 64}
+  b1 = conv2d(b1, b1_shape, 64, 3, 1, 1, false, "b1_down");  // -> {224, 224, 64}
+  b1 = maxpool2d(b1, b1_shape, 4, 4, 0, "b1_pool");          // -> {56, 56, 64}
 
   Shape b2_shape = initial_shape;
   Node b2 = convtranspose2d(x, b2_shape, 64, 2, 2, 0, false, "b2_trans");  // -> {56, 56, 64}
-  b2 = batchnorm(b2, b2_shape, false, "b2_bn1");                            // -> {56, 56, 64}
+  b2 = batchnorm(b2, b2_shape, false, "b2_bn1");                           // -> {56, 56, 64}
   b2 = relu(b2, b2_shape, "relu_b2_bn1");
-  b2 = convtranspose2d(b2, b2_shape, 64, 2, 2, 0, false, "b2_up2");        // -> {112, 112, 64}
-  b2 = batchnorm(b2, b2_shape, false, "b2_bn2");                            // -> {112, 112, 64}
+  b2 = convtranspose2d(b2, b2_shape, 64, 2, 2, 0, false, "b2_up2");  // -> {112, 112, 64}
+  b2 = batchnorm(b2, b2_shape, false, "b2_bn2");                     // -> {112, 112, 64}
   b2 = relu(b2, b2_shape, "relu_b2_bn2");
-  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv");                // -> {112, 112, 64}
-  b2 = batchnorm(b2, b2_shape, false, "b2_bn3");                            // -> {112, 112, 64}
+  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv");  // -> {112, 112, 64}
+  b2 = batchnorm(b2, b2_shape, false, "b2_bn3");             // -> {112, 112, 64}
   b2 = relu(b2, b2_shape, "relu_b2_bn3");
-  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv2");               // -> {112, 112, 64}
-  b2 = batchnorm(b2, b2_shape, false, "b2_bn4");                            // -> {112, 112, 64}
+  b2 = conv2d(b2, b2_shape, 64, 3, 1, 1, false, "b2_conv2");  // -> {112, 112, 64}
+  b2 = batchnorm(b2, b2_shape, false, "b2_bn4");              // -> {112, 112, 64}
   b2 = relu(b2, b2_shape, "relu_b2_bn4");
-  b2 = b2 * -1;                                                            // -> {112, 112, 64}
-  b2 = maxpool2d(b2, b2_shape, 2, 2, 0, "b2_pool");                        // -> {56, 56, 64}
+  b2 = b2 * -1;                                      // -> {112, 112, 64}
+  b2 = maxpool2d(b2, b2_shape, 2, 2, 0, "b2_pool");  // -> {56, 56, 64}
 
   Shape b3_shape = initial_shape;
   Node b3 = convtranspose2d(x, b3_shape, 32, 2, 2, 0, false, "b3_up1");  // -> {56, 56, 32}
   b3 = convtranspose2d(b3, b3_shape, 128, 4, 4, 0, false, "b3_up2");     // -> {224, 224, 128}
   b3 = avgpool2d(b3, b3_shape, 4, 4, 0, "b3_pool");                      // -> {56, 56, 128}
   b3 = conv2d(b3, b3_shape, 64, 3, 1, 1, false, "b3_down1");             // -> {56, 56, 64}
-  b3 = batchnorm(b3, b3_shape, false, "b3_bn2");                          // -> {56, 56, 64}
+  b3 = batchnorm(b3, b3_shape, false, "b3_bn2");                         // -> {56, 56, 64}
   b3 = relu(b3, b3_shape, "relu_b3_bn2");
 
   Shape y_shape = b1_shape;
@@ -312,21 +313,21 @@ Graph create_tunx_v2_graph(IAllocator &allocator, GraphOpts opts) {
   Shape shape = {1, 224, 224, 3};
 
   Node x = conv2d(input, shape, 16, 7, 2, 3, false, "conv1");  // -> {112, 112, 16}
-  x = batchnorm(x, shape, false, "bn1");                        // -> {112, 112, 16}
+  x = batchnorm(x, shape, false, "bn1");                       // -> {112, 112, 16}
   x = relu(x, shape, "relu_bn1");
-  x = maxpool2d(x, shape, 4, 4, 0, "pool1");                   // -> {56, 56, 16}
+  x = maxpool2d(x, shape, 4, 4, 0, "pool1");  // -> {56, 56, 16}
 
   const Shape initial_shape = shape;
 
   Shape b1_shape = initial_shape;
   Node b1 = convtranspose2d(x, b1_shape, 64, 2, 2, 0, false, "b1_up1");  // -> {112, 112, 64}
-  b1 = batchnorm(b1, b1_shape, false, "b1_bn1");                          // -> {112, 112, 64}
+  b1 = batchnorm(b1, b1_shape, false, "b1_bn1");                         // -> {112, 112, 64}
   b1 = relu(b1, b1_shape, "relu_b1_bn1");
-  b1 = convtranspose2d(b1, b1_shape, 128, 2, 2, 0, false, "b1_up2");     // -> {224, 224, 128}
-  b1 = batchnorm(b1, b1_shape, false, "b1_bn2");                          // -> {224,224, 128}
+  b1 = convtranspose2d(b1, b1_shape, 128, 2, 2, 0, false, "b1_up2");  // -> {224, 224, 128}
+  b1 = batchnorm(b1, b1_shape, false, "b1_bn2");                      // -> {224,224, 128}
   b1 = relu(b1, b1_shape, "relu_b1_bn2");
-  b1 = conv2d(b1, b1_shape, 128, 3, 1, 1, false, "b1_down");             // -> {224, 224, 128}
-  b1 = maxpool2d(b1, b1_shape, 2, 2, 0, "b1_pool");                      // -> {112, 112, 128}
+  b1 = conv2d(b1, b1_shape, 128, 3, 1, 1, false, "b1_down");  // -> {224, 224, 128}
+  b1 = maxpool2d(b1, b1_shape, 2, 2, 0, "b1_pool");           // -> {112, 112, 128}
 
   Shape b2_shape = initial_shape;
   Node b2 = convtranspose2d(x, b2_shape, 128, 2, 2, 0, false, "b2_trans");  // -> {56, 56, 128}
@@ -380,9 +381,9 @@ Graph create_tunx_v3_graph(IAllocator &allocator, GraphOpts opts) {
   Shape shape = {1, 224, 224, 3};
 
   Node x = conv2d(input, shape, 16, 7, 2, 3, false, "conv1");  // -> {112, 112, 16}
-  x = batchnorm(x, shape, false, "bn1");                        // -> {112, 112, 16}
+  x = batchnorm(x, shape, false, "bn1");                       // -> {112, 112, 16}
   x = relu(x, shape, "relu_bn1");
-  x = maxpool2d(x, shape, 4, 4, 0, "pool1");                   // -> {28, 28, 16}
+  x = maxpool2d(x, shape, 4, 4, 0, "pool1");  // -> {28, 28, 16}
 
   const Shape initial_shape = shape;
 

@@ -9,6 +9,7 @@
 #include <cudnn_graph.h>
 #include <fmt/core.h>
 
+#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
@@ -21,6 +22,13 @@
 #include "type/type.hpp"
 
 namespace tunx {
+
+namespace {
+bool use_naive_conv2d() {
+  const char* value = std::getenv("TUNX_NAIVE_CONV2D");
+  return value && value[0] != '\0' && value[0] != '0';
+}
+}  // namespace
 
 struct conv2d_fwd_graph {
   std::shared_ptr<fe::graph::Graph> graph;
@@ -237,6 +245,7 @@ struct conv2d_wgrad_graph {
 
 WorkspaceReq CuDNNEngine::query_conv2d_graph(engine_handle backend_handle, const Conv2DStats& stats,
                                              DTypeDesc type_desc) {
+  if (use_naive_conv2d()) return {0, 0, 0};
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey fwd_key{
@@ -310,6 +319,11 @@ WorkspaceReq CuDNNEngine::query_conv2d_graph(engine_handle backend_handle, const
 void CuDNNEngine::conv2d_fwd(engine_handle backend_handle, const Conv2DStats& stats,
                              const void* input, const void* weight, const void* bias, void* output,
                              void* workspace, DTypeDesc type_desc) {
+  if (use_naive_conv2d()) {
+    cuda_engine_.conv2d_fwd(backend_handle, stats, input, weight, bias, output, workspace,
+                            type_desc);
+    return;
+  }
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::CONV2D_FWD,
@@ -346,6 +360,11 @@ void CuDNNEngine::conv2d_fwd(engine_handle backend_handle, const Conv2DStats& st
 void CuDNNEngine::conv2d_dgrad(engine_handle backend_handle, const Conv2DStats& stats,
                                const void* grad_output, const void* weight, void* grad_input,
                                void* workspace, DTypeDesc type_desc) {
+  if (use_naive_conv2d()) {
+    cuda_engine_.conv2d_dgrad(backend_handle, stats, grad_output, weight, grad_input, workspace,
+                              type_desc);
+    return;
+  }
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::CONV2D_DGRAD,
@@ -377,6 +396,11 @@ void CuDNNEngine::conv2d_dgrad(engine_handle backend_handle, const Conv2DStats& 
 void CuDNNEngine::conv2d_wgrad(engine_handle backend_handle, const Conv2DStats& stats,
                                const void* grad_output, const void* input, void* grad_weight,
                                void* workspace, DTypeDesc type_desc) {
+  if (use_naive_conv2d()) {
+    cuda_engine_.conv2d_wgrad(backend_handle, stats, grad_output, input, grad_weight, workspace,
+                              type_desc);
+    return;
+  }
   size_t grad_weight_temp_size = stats.out_channels * stats.kernel_h * stats.kernel_w *
                                  stats.in_channels * get_dtype_size(type_desc.param_dtype);
   void* grad_weight_temp = workspace;

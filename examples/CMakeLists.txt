@@ -26,3 +26,5 @@ create_executable(partitioner_example.cpp LIBS tunx_lib)
 
 # Equivalence executables
 create_executable(test_equivalence.cpp LIBS tunx_lib)
+create_executable(test_conv1_isolated.cpp LIBS tunx_lib)
+create_executable(test_block_equivalence.cpp LIBS tunx_lib)

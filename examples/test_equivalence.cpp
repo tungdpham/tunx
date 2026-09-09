@@ -1,6 +1,7 @@
 #include <sys/stat.h>
 
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -16,7 +17,7 @@
 using namespace tunx;
 
 int main(int argc, char** argv) {
-  std::string model_name = "tunx_v1";
+  std::string model_name = "resnet50";
   std::string pt_dir = "";
   std::string tunx_dir = "";
   size_t batch_size = 1;
@@ -25,11 +26,11 @@ int main(int argc, char** argv) {
     std::string arg = argv[i];
     if (arg == "--model" && i + 1 < argc) {
       model_name = argv[++i];
-    } else if (arg == "--pt_dir" && i + 1 < argc) {
+    } else if (arg == "--pt-dir" && i + 1 < argc) {
       pt_dir = argv[++i];
-    } else if (arg == "--tunx_dir" && i + 1 < argc) {
+    } else if (arg == "--tunx-dir" && i + 1 < argc) {
       tunx_dir = argv[++i];
-    } else if (arg == "--batch_size" && i + 1 < argc) {
+    } else if (arg == "--batch-size" && i + 1 < argc) {
       batch_size = std::stoi(argv[++i]);
     } else {
       std::cerr << "Unknown argument: " << arg << std::endl;
@@ -38,15 +39,14 @@ int main(int argc, char** argv) {
   }
 
   if (pt_dir.empty() || tunx_dir.empty()) {
-    std::cerr << "Usage: " << argv[0] << " --model <name> --pt_dir <dir> --tunx_dir <dir> [--batch_size <N>]"
-              << std::endl;
+    std::cerr << "Usage: " << argv[0]
+              << " --model <name> --pt-dir <dir> --tunx-dir <dir> [--batch-size <N>]" << std::endl;
     return 1;
   }
 
   // Ensure output directory exists
   mkdir(tunx_dir.c_str(), 0777);
 
-  initializeDefaultDevices();
   DeviceManager& manager = DeviceManager::instance();
   auto device_ids = manager.get_all();
   if (device_ids.empty()) {
@@ -71,7 +71,14 @@ int main(int argc, char** argv) {
 
   GraphOpts opts;
 
-  Graph graph = ExampleGraphs::create(model_name, allocator, opts);
+  std::string actual_model_name = model_name;
+  if (model_name == "resnet50") {
+    actual_model_name = "imagenet100_resnet50";
+  } else if (model_name == "gpt2") {
+    actual_model_name = "gpt2_small";
+  }
+
+  Graph graph = ExampleGraphs::create(actual_model_name, allocator, opts);
 
   std::cout << "Loading initial parameters from " << pt_dir << std::endl;
   for (auto& edge : graph.edges()) {
@@ -97,11 +104,6 @@ int main(int argc, char** argv) {
         std::cerr << "Warning: Missing " << path << std::endl;
       }
     }
-    // BN also has running mean and var, but in TunX Layer::params() only returns trainable
-    // parameters (weight, bias). For full correctness, running stats should be loaded too, but
-    // TunX's BatchNorm doesn't expose running_mean in params(). If it diverges, we might need to
-    // expose them. For 1 step equivalence, initial running stats are 0 and 1, which both frameworks
-    // default to.
   }
 
   std::cout << "Loading inputs and labels..." << std::endl;
@@ -113,19 +115,44 @@ int main(int argc, char** argv) {
     label_shape = {batch_size, 1024};
   }
 
-  Tensor inputs = Tensor(input_shape, DType_t::FP32, allocator);
+  Tensor inputs;
+  if (is_lm) {
+    inputs = Tensor(input_shape, DType_t::INT32, allocator);
+  } else {
+    inputs = Tensor(input_shape, DType_t::FP32, allocator);
+  }
   load_tensor_bin(inputs, pt_dir + "/inputs.bin");
 
-  Tensor labels;
-  if (is_lm) {
-    labels = Tensor(label_shape, DType_t::INT32, allocator);
-  } else {
-    labels = Tensor(label_shape, DType_t::FP32, allocator);
-  }
+  Tensor labels = Tensor(label_shape, DType_t::INT32, allocator);
   load_tensor_bin(labels, pt_dir + "/labels.bin");
+
+  // Build a uid -> layer_name map from all consumer nodes so we can name the dumped files.
+  std::map<std::string, std::string> uid_to_layer_name;  // node_uid -> layer_name
+  for (auto& edge : graph.edges()) {
+    auto layer = edge->layer();
+    if (!layer) continue;
+    std::string name = layer->name();
+    for (auto& consumer : edge->consumers()) {
+      uid_to_layer_name[consumer->uid()] = name;
+    }
+  }
 
   std::cout << "Running forward pass..." << std::endl;
   GraphExecutor executor(graph);
+
+  std::map<std::string, Tensor> captured_acts;
+  executor.set_forward_hook(
+      [&](const Edge& edge, const std::map<std::string, Tensor>& consumers_data) {
+        for (const auto& consumer : edge->consumers()) {
+          const std::string& uid = consumer->uid();
+          auto it = consumers_data.find(uid);
+          if (it != consumers_data.end()) {
+            Tensor t_copy(it->second.shape(), it->second.dtype(), allocator);
+            tunx::copy(it->second, t_copy, executor.graph().handle().get_stream());
+            captured_acts[uid] = std::move(t_copy);
+          }
+        }
+      });
 
   TensorBundle input_tensors{{"input", inputs}};
 
@@ -135,6 +162,15 @@ int main(int argc, char** argv) {
   std::cout << "Dumping outputs..." << std::endl;
   save_tensor_bin(predictions, tunx_dir + "/outputs.bin");
 
+  // Capture intermediate activations right after each layer via the hook to prevent packed
+  // allocator from overwriting them
+  std::cout << "Dumping intermediate activations..." << std::endl;
+  for (auto& [uid, tensor] : captured_acts) {
+    auto it = uid_to_layer_name.find(uid);
+    if (it == uid_to_layer_name.end()) continue;
+    save_tensor_bin(tensor, tunx_dir + "/" + it->second + ".act.bin");
+  }
+
   std::cout << "Running backward pass..." << std::endl;
 
   std::shared_ptr<Loss> criterion = std::make_shared<CrossEntropyLoss>();
@@ -142,10 +178,40 @@ int main(int argc, char** argv) {
   criterion->compute_loss(predictions, labels, loss);
   Tensor loss_gradient = Tensor(predictions.shape(), predictions.dtype(), allocator);
   criterion->compute_gradient(predictions, labels, loss_gradient);
+  save_tensor_bin(loss_gradient, tunx_dir + "/grad_output.bin");
 
   TensorBundle output_grads{{"output", loss_gradient}};
 
+  std::shared_ptr<Optimizer> optimizer = std::make_shared<Adam>(1e-3, 0.9, 0.999, 1e-8, 3e-4);
+  optimizer->attach(graph);
+  optimizer->zero_grads();
+
+  std::map<std::string, Tensor> captured_grads;
+  executor.set_backward_grad_hook([&](const Edge& edge,
+                                      const std::map<std::string, Tensor>& consumers_grads,
+                                      const std::map<std::string, Tensor>& /*producers_grads*/) {
+    for (const auto& consumer : edge->consumers()) {
+      const std::string& uid = consumer->uid();
+      auto it = consumers_grads.find(uid);
+      if (it != consumers_grads.end()) {
+        Tensor t_copy(it->second.shape(), it->second.dtype(), allocator);
+        tunx::copy(it->second, t_copy, executor.graph().handle().get_stream());
+        captured_grads[uid] = std::move(t_copy);
+        // use copy since packed allocator do not respect ownership that much. Will need fix later
+      }
+    }
+  });
+
   executor.backward(output_grads);
+  cudaDeviceSynchronize();
+
+  // Dump intermediate gradients — collected during backward via the hook.
+  std::cout << "Dumping intermediate gradients..." << std::endl;
+  for (auto& [uid, tensor] : captured_grads) {
+    auto it = uid_to_layer_name.find(uid);
+    if (it == uid_to_layer_name.end()) continue;
+    save_tensor_bin(tensor, tunx_dir + "/" + it->second + ".act.grad.bin");
+  }
 
   std::cout << "Dumping gradients..." << std::endl;
 
@@ -165,8 +231,6 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "Running optimizer step..." << std::endl;
-  std::shared_ptr<Optimizer> optimizer = std::make_shared<Adam>(1e-3, 0.9, 0.999, 1e-8, 3e-4);
-  optimizer->attach(graph);
   optimizer->update();
 
   std::cout << "Dumping updated parameters..." << std::endl;

@@ -195,11 +195,14 @@ inline Node bottleneck_residual_block(Node input, Shape &shape, size_t mid_chann
                                       size_t out_channels, size_t stride, const std::string &name) {
   Shape main_shape = shape;
   Node main = conv2d(input, main_shape, mid_channels, 1, 1, 0, false, name + "_conv1");
-  main = batchnorm(main, main_shape, true, name + "_bn0");
+  main = batchnorm(main, main_shape, false, name + "_bn0");
+  main = relu(main, main_shape, name + "_relu1");
   main = conv2d(main, main_shape, mid_channels, 3, stride, 1, false, name + "_conv2");
-  main = batchnorm(main, main_shape, true, name + "_bn1");
+  main = batchnorm(main, main_shape, false, name + "_bn1");
+  main = relu(main, main_shape, name + "_relu2");
   main = conv2d(main, main_shape, out_channels, 1, 1, 0, false, name + "_conv3");
-  main = batchnorm(main, main_shape, true, name + "_bn2");
+  main = batchnorm(main, main_shape, false, name + "_bn2");
+  main = relu(main, main_shape, name + "_relu3");
 
   Shape shortcut_shape = shape;
   Node shortcut = input;
@@ -209,7 +212,8 @@ inline Node bottleneck_residual_block(Node input, Shape &shape, size_t mid_chann
   }
 
   shape = main_shape;
-  return main + shortcut;
+  Node out = main + shortcut;
+  return relu(out, shape, name + "_relu4");
 }
 
 inline Node gpt_block(Node input, Shape &shape, size_t embed_dim, size_t num_heads, size_t ffn_dim,

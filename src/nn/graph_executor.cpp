@@ -68,7 +68,7 @@ void GraphExecutor::set_grad(const Node &node, const Tensor &tensor, int ref_cou
 void GraphExecutor::accumulate_grad(const Node &node, const Tensor &tensor, int ref_count) {
   auto [it, inserted] = grads_.try_emplace(node, Entry{tensor, ref_count});
   if (!inserted) {
-    it->second.tensor += tensor;
+    add(it->second.tensor, tensor, it->second.tensor, graph_.handle().get_stream());
   }
 }
 
@@ -220,6 +220,51 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
       }
     } else {
       backward_plan = planner.find_backward_order(backward_edge_profiles);
+
+      // The MacroSolver may schedule edges in an order that differs from the naive
+      // reverse-topological order used above to classify backward buffer roles
+      // (BufferRole::GradientOutput vs Workspace). That classification is order-sensitive
+      // at multi-producer (fan-out/accumulate) nodes such as residual/skip connections: it
+      // decides which edge "owns" the persistent buffer that the gradient is accumulated
+      // into. If the memory packer (pack_memory) later lays out buffers using
+      // backward_plan.order but roles computed under a different order, it can free/reuse
+      // a gradient's memory before all of its contributions have actually been written,
+      // silently corrupting gradients. Re-profile backward buffer roles using the real
+      // scheduled order so they stay consistent with what pack_memory will assume.
+      //
+      // profile_edges_backward() consumes (erases) residuals_ as it runs, so residuals
+      // must be regenerated via a fresh forward pass before re-profiling. Any parameter
+      // gradients accumulated by this extra pass are discarded the same way the first
+      // profiling pass's gradients are: callers are expected to zero gradients after the
+      // graph is compiled (i.e. after the first forward() call) and before the first real
+      // backward() call.
+      data_.clear();
+      for (const auto &[uid, tensor] : input_map) {
+        auto node_it = uid_to_node.find(uid);
+        if (node_it == uid_to_node.end()) continue;
+        Tensor device_tensor = tensor;
+        if (tensor.device() != graph_.device()) {
+          device_tensor = Tensor(tensor.shape(), tensor.dtype(), *graph_.workspace_allocator());
+          copy(tensor, device_tensor, graph_.handle().get_stream());
+        }
+        set_data(node_it->second, device_tensor, data_ref_counts_[node_it->second]);
+      }
+      for (const Edge &edge : forward_plan.order) {
+        forward_edge(edge);
+        for (const Node &consumer : edge->consumers()) {
+          if (graph_.is_output(consumer)) {
+            release_data(consumer);
+          }
+        }
+      }
+      cleanup_released(data_);
+      graph_.workspace_allocator()->evict_unused();
+
+      auto reprofile_res =
+          profile_edges_backward(output_grad_map, should_offload, &backward_plan.order);
+      backward_edge_profiles = std::move(reprofile_res.second);
+      reprofile_res.first.clear();
+      graph_.workspace_allocator()->evict_unused();
     }
     auto end_scheduling_bw = std::chrono::high_resolution_clock::now();
     scheduling_time_ms +=
@@ -345,13 +390,11 @@ TensorBundle GraphExecutor::backward(TensorBundle &output_grad_map) {
     active_built_plan_.packed_allocator->set_current_edge(edge->uid() + "_bw");
     backward_edge(edge);
     residuals_.erase(edge);
+  }
 
-    for (const auto &producer : edge->producers()) {
-      if (graph_.is_input(producer)) {
-        grad_input_map.set(producer->uid(), grad(producer));
-        release_grad(producer);
-      }
-    }
+  for (const auto &input : graph_.inputs()) {
+    grad_input_map.set(input->uid(), grad(input));
+    release_grad(input);
   }
 
   cleanup_released(grads_);
@@ -485,7 +528,7 @@ ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,
 }
 
 std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edges_backward(
-    TensorBundle &output_grad_map, bool prefetch_residuals) {
+    TensorBundle &output_grad_map, bool prefetch_residuals, const Vec<Edge> *edge_order) {
   std::map<Edge, EdgeProfile> edge_profiles;
   std::map<std::string, Node> uid_to_node;
   for (const auto &node : graph_.nodes()) {
@@ -507,9 +550,13 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
 
   auto *allocator = graph_.workspace_allocator();
 
-  for (auto it = graph_.edges().rbegin(); it != graph_.edges().rend(); ++it) {
-    const Edge &edge = *it;
+  Vec<Edge> naive_order;
+  if (!edge_order) {
+    naive_order.assign(graph_.edges().rbegin(), graph_.edges().rend());
+    edge_order = &naive_order;
+  }
 
+  for (const Edge &edge : *edge_order) {
     if (prefetch_residuals) {
       residuals_[edge].apply_tensors([this](Tensor &tensor) {
         if (!tensor) return;
@@ -523,14 +570,13 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
 
     EdgeProfile profile = profile_edge_backward(edge);
     edge_profiles[edge] = profile;
-
-    for (const auto &producer : edge->producers()) {
-      if (graph_.is_input(producer)) {
-        grad_input_map.set(producer->uid(), grad(producer));
-        release_grad(producer);
-      }
-    }
   }
+
+  for (const auto &input : graph_.inputs()) {
+    grad_input_map.set(input->uid(), grad(input));
+    release_grad(input);
+  }
+
   cleanup_released(grads_);
   allocator->evict_unused();
 
@@ -674,10 +720,11 @@ ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
 void GraphExecutor::forward_edge(const Edge &edge) {
   Vec<Tensor> inputs;
   for (const auto &producer : edge->producers()) {
-    if (!data(producer)) {
-      throw std::runtime_error("Null input data while forwarding graph");
+    try {
+      inputs.push_back(data(producer));
+    } catch (const std::out_of_range &) {
+      throw std::runtime_error("out_of_range for producer data: " + producer->uid());
     }
-    inputs.push_back(data(producer));
     release_data(producer);
   }
   Residuals residuals;
@@ -689,15 +736,39 @@ void GraphExecutor::forward_edge(const Edge &edge) {
     const Node &consumer = edge->consumers()[index];
     set_data(consumer, output_data[index], data_ref_counts_[consumer]);
   }
+
+  if (forward_hook_) {
+    std::map<std::string, Tensor> consumers_snap;
+    for (const auto &consumer : edge->consumers()) {
+      auto it = data_.find(consumer);
+      if (it != data_.end() && it->second.ref_count > 0) {
+        consumers_snap[consumer->uid()] = it->second.tensor;
+      }
+    }
+    forward_hook_(edge, consumers_snap);
+  }
 }
 
 void GraphExecutor::backward_edge(const Edge &edge) {
+  // Capture consumer grads before releasing — these are the gradients flowing INTO this layer
+  // (PyTorch's grad_output), corresponding to d_loss/d_output of the forward layer.
+  std::map<std::string, Tensor> consumers_snap;
+  if (backward_grad_hook_) {
+    for (const auto &consumer : edge->consumers()) {
+      auto it = grads_.find(consumer);
+      if (it != grads_.end() && it->second.ref_count > 0) {
+        consumers_snap[consumer->uid()] = it->second.tensor;
+      }
+    }
+  }
+
   Vec<Tensor> grad_outputs;
   for (const auto &consumer : edge->consumers()) {
-    if (!grad(consumer)) {
-      throw std::runtime_error("Null output gradient while backwarding graph");
+    try {
+      grad_outputs.push_back(grad(consumer));
+    } catch (const std::out_of_range &) {
+      throw std::runtime_error("out_of_range for consumer grad: " + consumer->uid());
     }
-    grad_outputs.push_back(grad(consumer));
     release_grad(consumer);
   }
   auto residuals_it = residuals_.find(edge);
@@ -709,6 +780,18 @@ void GraphExecutor::backward_edge(const Edge &edge) {
   for (size_t index = 0; index < edge->producers().size(); ++index) {
     const Node &producer = edge->producers()[index];
     accumulate_grad(producer, grad_inputs[index], grad_ref_counts_[producer]);
+  }
+
+  if (backward_grad_hook_) {
+    // Capture producer grads after accumulating — these are d_loss/d_input (PyTorch's grad_input).
+    std::map<std::string, Tensor> producers_snap;
+    for (const auto &producer : edge->producers()) {
+      auto it = grads_.find(producer);
+      if (it != grads_.end() && it->second.ref_count > 0) {
+        producers_snap[producer->uid()] = it->second.tensor;
+      }
+    }
+    backward_grad_hook_(edge, consumers_snap, producers_snap);
   }
 }
 
