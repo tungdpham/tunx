@@ -171,6 +171,31 @@ int main(int argc, char** argv) {
     save_tensor_bin(tensor, tunx_dir + "/" + it->second + ".act.bin");
   }
 
+  // Dump BatchNorm statistics captured by the training forward pass.
+  for (auto& edge : graph.edges()) {
+    auto layer = edge->layer();
+    if (!layer) continue;
+    auto residual_it = executor.residuals().find(edge);
+    if (residual_it == executor.residuals().end()) continue;
+
+    const std::string& name = layer->name();
+    const auto residual_tensors = residual_it->second.tensors();
+    auto batch_mean = residual_tensors.find("batch_mean.");
+    auto batch_invar = residual_tensors.find("batch_invar.");
+    if (batch_mean != residual_tensors.end()) {
+      save_tensor_bin(batch_mean->second, tunx_dir + "/" + name + ".batch_mean.bin");
+    }
+    if (batch_invar != residual_tensors.end()) {
+      save_tensor_bin(batch_invar->second, tunx_dir + "/" + name + ".batch_invar.bin");
+    }
+
+    auto params = layer->params();
+    if (params.size() >= 6 && batch_mean != residual_tensors.end()) {
+      save_tensor_bin(params[4].data(), tunx_dir + "/" + name + ".running_mean.bin");
+      save_tensor_bin(params[5].data(), tunx_dir + "/" + name + ".running_var.bin");
+    }
+  }
+
   std::cout << "Running backward pass..." << std::endl;
 
   std::shared_ptr<Loss> criterion = std::make_shared<CrossEntropyLoss>();

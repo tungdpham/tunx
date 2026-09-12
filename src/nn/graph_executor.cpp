@@ -26,6 +26,59 @@
 
 namespace tunx {
 
+namespace {
+
+class ParameterStateGuard {
+public:
+  ParameterStateGuard(const Vec<Param> &params, Device &device, stream s)
+      : stream_(s),
+        params_(params) {
+    auto &allocator = PoolAllocator::instance(device, s);
+    for (const auto &param : params) {
+      if (!param || param.size() == 0) {
+        snapshots_.push_back({});
+        continue;
+      }
+
+      Snapshot snapshot;
+      snapshot.data = Tensor(param.shape(), param.dtype(), allocator);
+      copy(param.data(), snapshot.data, stream_);
+      if (param.grad()) {
+        snapshot.grad = Tensor(param.shape(), param.dtype(), allocator);
+        copy(param.grad(), snapshot.grad, stream_);
+      }
+      snapshots_.push_back(std::move(snapshot));
+    }
+    stream_.sync();
+  }
+
+  ~ParameterStateGuard() {
+    for (size_t i = 0; i < snapshots_.size(); ++i) {
+      if (!snapshots_[i].data) continue;
+      copy(snapshots_[i].data, params_[i].data(), stream_);
+      if (snapshots_[i].grad) {
+        copy(snapshots_[i].grad, params_[i].grad(), stream_);
+      }
+    }
+    stream_.sync();
+  }
+
+  ParameterStateGuard(const ParameterStateGuard &) = delete;
+  ParameterStateGuard &operator=(const ParameterStateGuard &) = delete;
+
+private:
+  struct Snapshot {
+    Tensor data;
+    Tensor grad;
+  };
+
+  stream stream_;
+  Vec<Param> params_;
+  Vec<Snapshot> snapshots_;
+};
+
+}  // namespace
+
 GraphExecutor::GraphExecutor(Graph &graph, bool bootstrap_offload)
     : graph_(graph),
       bootstrap_offload_(bootstrap_offload),
@@ -118,6 +171,10 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
   if (built_plans_.count(key)) {
     return built_plans_.at(key);
   }
+
+  ParameterStateGuard parameter_state_guard(graph_.params(), graph_.device(),
+                                            graph_.handle().get_stream());
+
   auto start_total = std::chrono::high_resolution_clock::now();
   MacroSolver planner(graph_, os_, options);
   auto start_extraction_fw = std::chrono::high_resolution_clock::now();
@@ -449,6 +506,9 @@ GraphExecutor::profile_edges_forward(TensorBundle &input_map, bool discard_resid
 
 ExecutionPlanStats GraphExecutor::profile_forward_plan(TensorBundle &input_map,
                                                        const ExecutionPlan &plan) {
+  ParameterStateGuard parameter_state_guard(graph_.params(), graph_.device(),
+                                            graph_.handle().get_stream());
+
   std::map<std::string, Node> uid_to_node;
   for (const auto &node : graph_.nodes()) {
     uid_to_node[node->uid()] = node;
@@ -586,6 +646,9 @@ std::pair<TensorBundle, std::map<Edge, EdgeProfile>> GraphExecutor::profile_edge
 ExecutionPlanStats GraphExecutor::profile_backward_plan(TensorBundle &input_map,
                                                         const ExecutionPlan &forward_plan,
                                                         const ExecutionPlan &backward_plan) {
+  ParameterStateGuard parameter_state_guard(graph_.params(), graph_.device(),
+                                            graph_.handle().get_stream());
+
   std::map<std::string, Node> uid_to_node;
   for (const auto &node : graph_.nodes()) {
     uid_to_node[node->uid()] = node;
@@ -860,28 +923,7 @@ EdgeProfile GraphExecutor::profile_edge_forward(const Edge &edge) {
   const size_t hook_id = backend_allocator->add_allocation_hook(
       [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
   auto stream = graph_.handle().get_stream();
-  std::vector<Tensor> param_snapshots;
-  std::vector<Tensor> grad_snapshots;
-  for (const auto &param : edge->layer()->params()) {
-    if (param.size() > 0) {
-      auto &pool = tunx::PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
-      Tensor snapshot(param.shape(), param.dtype(), pool);
-      copy(param.data(), snapshot, stream);
-      param_snapshots.push_back(snapshot);
-    } else {
-      param_snapshots.push_back(Tensor());
-    }
-    if (param.size() > 0 && param.grad()) {
-      auto &pool = tunx::PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
-      Tensor grad_snapshot(param.shape(), param.dtype(), pool);
-      copy(param.grad(), grad_snapshot, stream);
-      grad_snapshots.push_back(grad_snapshot);
-    } else {
-      grad_snapshots.push_back(Tensor());
-    }
-  }
-
-  stream.sync();
+  ParameterStateGuard parameter_state_guard(edge->layer()->params(), graph_.device(), stream);
   auto start = std::chrono::high_resolution_clock::now();
 
   edge->layer()->set_workspace_allocator(&tracker);
@@ -892,16 +934,6 @@ EdgeProfile GraphExecutor::profile_edge_forward(const Edge &edge) {
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double, std::milli> elapsed = end - start;
 
-  auto params = edge->layer()->params();
-  for (size_t i = 0; i < params.size(); ++i) {
-    if (params[i].size() > 0) {
-      copy(param_snapshots[i], params[i].data(), stream);
-      if (params[i].grad()) {
-        copy(grad_snapshots[i], params[i].grad(), stream);
-      }
-    }
-  }
-  stream.sync();
   const size_t usage_after = backend_allocator->allocated();
   backend_allocator->remove_allocation_hook(hook_id);
   for (const Node &consumer : edge->consumers()) {
@@ -1006,28 +1038,7 @@ EdgeProfile GraphExecutor::profile_edge_backward(const Edge &edge) {
   const size_t hook_id = backend_allocator->add_allocation_hook(
       [&peak_usage](size_t usage) { peak_usage = std::max(peak_usage, usage); });
   auto stream = graph_.handle().get_stream();
-  std::vector<Tensor> param_snapshots;
-  std::vector<Tensor> grad_snapshots;
-  for (const auto &param : edge->layer()->params()) {
-    if (param.size() > 0) {
-      auto &pool = tunx::PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
-      Tensor snapshot(param.shape(), param.dtype(), pool);
-      copy(param.data(), snapshot, stream);
-      param_snapshots.push_back(snapshot);
-    } else {
-      param_snapshots.push_back(Tensor());
-    }
-    if (param.size() > 0 && param.grad()) {
-      auto &pool = tunx::PoolAllocator::instance(graph_.device(), graph_.handle().get_stream());
-      Tensor grad_snapshot(param.shape(), param.dtype(), pool);
-      copy(param.grad(), grad_snapshot, stream);
-      grad_snapshots.push_back(grad_snapshot);
-    } else {
-      grad_snapshots.push_back(Tensor());
-    }
-  }
-
-  stream.sync();
+  ParameterStateGuard parameter_state_guard(edge->layer()->params(), graph_.device(), stream);
   auto start = std::chrono::high_resolution_clock::now();
 
   edge->layer()->set_workspace_allocator(&tracker);
@@ -1039,17 +1050,6 @@ EdgeProfile GraphExecutor::profile_edge_backward(const Edge &edge) {
   stream.sync();
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double, std::milli> elapsed = end - start;
-
-  auto params = edge->layer()->params();
-  for (size_t i = 0; i < params.size(); ++i) {
-    if (params[i].size() > 0) {
-      copy(param_snapshots[i], params[i].data(), stream);
-      if (params[i].grad()) {
-        copy(grad_snapshots[i], params[i].grad(), stream);
-      }
-    }
-  }
-  stream.sync();
 
   for (const auto &producer : edge->producers()) {
     grad_inputs[producer] = grad(producer);

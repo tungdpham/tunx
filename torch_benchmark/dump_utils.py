@@ -181,6 +181,15 @@ def main():
     def get_forward_hook(name):
         def hook(module, input, output):
             activation_tensors[name] = output
+            if isinstance(module, nn.BatchNorm2d) and module.training:
+                batch_input = input[0].detach()
+                batch_mean = batch_input.mean(dim=(0, 2, 3))
+                batch_var = batch_input.var(dim=(0, 2, 3), unbiased=False)
+                batch_invar = torch.rsqrt(batch_var + module.eps)
+                save_tensor_bin(batch_mean, os.path.join(args.dump_dir, f"{name}.batch_mean.bin"))
+                save_tensor_bin(batch_invar, os.path.join(args.dump_dir, f"{name}.batch_invar.bin"))
+                save_tensor_bin(module.running_mean, os.path.join(args.dump_dir, f"{name}.running_mean.bin"))
+                save_tensor_bin(module.running_var, os.path.join(args.dump_dir, f"{name}.running_var.bin"))
         return hook
 
     def get_backward_hook(name):

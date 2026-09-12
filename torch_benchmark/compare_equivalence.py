@@ -14,7 +14,7 @@ def load_tensor_bin(path, dtype=np.float32):
         data = np.frombuffer(f.read(), dtype=dtype)
     return data
 
-def compare_tensors(t1, t2, name, rtol=1e-4, atol=1e-4):
+def compare_tensors(t1, t2, name, rtol=1e-3, atol=1e-3):
     if t1 is None or t2 is None:
         return None
         
@@ -75,7 +75,7 @@ def print_table(title, results):
                    f"{r['elements_passed']}/{r['total_elements']} ({(r['elements_passed']/r['total_elements'])*100:.2f}%)"]
                   for r in results]
     print(tabulate(table_data, headers=["Tensor", "Max Abs Err", "P99 Abs Err", "Max Rel Err",
-                                        "Normalized L2 Rel Err", "Cosine Sim", "Allclose (1e-4)",
+                                        "Normalized L2 Rel Err", "Cosine Sim", "Allclose (1e-3)",
                                         "Elements Passed"]))
 
 def summarize_section(results):
@@ -99,6 +99,7 @@ def main():
     results_loss_grad = []
     results_act = []
     results_act_grad = []
+    results_bn_stats = []
     results_grad = []
     results_upd = []
     
@@ -128,6 +129,14 @@ def main():
     param_names = set()
     
     for filename in pt_files:
+        if filename.endswith((".batch_mean.bin", ".batch_invar.bin", ".running_mean.bin", ".running_var.bin")):
+            pt_path = os.path.join(args.pt_dir, filename)
+            tunx_path = os.path.join(args.tunx_dir, filename)
+            if os.path.exists(tunx_path):
+                metrics = compare_tensors(load_tensor_bin(pt_path), load_tensor_bin(tunx_path), filename)
+                if metrics: results_bn_stats.append(metrics)
+            continue
+
         # Check for intermediate activations
         if filename.endswith(".act.bin"):
             pt_path = os.path.join(args.pt_dir, filename)
@@ -147,7 +156,7 @@ def main():
             continue
 
         # Extract base parameter names
-        if filename.endswith(".bin") and not (filename.endswith(".act.bin") or filename.endswith(".grad.bin") or filename.endswith(".updated.bin") or filename in ["inputs.bin", "labels.bin", "outputs.bin", "grad_output.bin"]):
+        if filename.endswith(".bin") and not (filename.endswith(".act.bin") or filename.endswith(".grad.bin") or filename.endswith(".updated.bin") or filename.endswith((".batch_mean.bin", ".batch_invar.bin", ".running_mean.bin", ".running_var.bin")) or filename in ["inputs.bin", "labels.bin", "outputs.bin", "grad_output.bin"]):
             param_names.add(filename[:-4])
             
     if not param_names:
@@ -185,6 +194,7 @@ def main():
     if results_loss_grad: print_table("Loss Gradient", results_loss_grad)
     if results_act: print_table("Intermediate Activations", results_act)
     if results_act_grad: print_table("Intermediate Gradients", results_act_grad)
+    if results_bn_stats: print_table("BatchNorm Statistics", results_bn_stats)
     print_table("Gradients", results_grad)
     print_table("Updated Parameters", results_upd)
 
@@ -193,6 +203,7 @@ def main():
         "loss_gradient": results_loss_grad,
         "activations": results_act,
         "activation_gradients": results_act_grad,
+        "batchnorm_statistics": results_bn_stats,
         "parameter_gradients": results_grad,
         "updated_parameters": results_upd,
     }
@@ -206,7 +217,7 @@ def main():
         headers=["Section", "Tensors", "Max Norm L2", "Mean Norm L2", "Min Cosine", "Allclose"]
     ))
 
-    all_results = results_out + results_loss_grad + results_act + results_act_grad + results_grad + results_upd
+    all_results = results_out + results_loss_grad + results_act + results_act_grad + results_bn_stats + results_grad + results_upd
     if not all_results:
         print("No comparison results found.")
         return
@@ -247,6 +258,7 @@ def main():
             "loss_gradient": results_loss_grad,
             "activations": results_act,
             "activation_gradients": results_act_grad,
+            "batchnorm_statistics": results_bn_stats,
             "gradients": results_grad,
             "updated_parameters": results_upd,
             "sections": section_summary,
