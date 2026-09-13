@@ -146,7 +146,7 @@ inline dptr make_dptr(sref<Device> device, size_t byte_size, size_t alignment = 
     throw std::runtime_error("Bad Alloc");
   }
   auto storage = std::make_shared<device_storage>(
-      device, ptr, byte_size, [&device, &ptr]() { device->deallocate_aligned_memory(ptr); });
+      device, ptr, byte_size, [device, ptr]() { device->deallocate_aligned_memory(ptr); });
   return dptr(storage, 0, byte_size);
 }
 

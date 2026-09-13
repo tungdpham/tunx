@@ -27,6 +27,11 @@ __global__ void update_adam_kernel(T* params_data, const T* grads_data, T* m_dat
 
   float grad = static_cast<float>(grads_data[idx]);
   float param = static_cast<float>(params_data[idx]);
+
+  if (weight_decay > 0.0f && !decouple_weight_decay) {
+    grad += weight_decay * param;
+  }
+
   float m = static_cast<float>(m_data[idx]);
   float v = static_cast<float>(v_data[idx]);
 
@@ -38,12 +43,8 @@ __global__ void update_adam_kernel(T* params_data, const T* grads_data, T* m_dat
 
   float update = (learning_rate * m_hat) / (sqrtf(v_hat) + epsilon);
 
-  if (weight_decay > 0.0f) {
-    if (decouple_weight_decay) {
-      param -= weight_decay * learning_rate * param;
-    } else {
-      update += weight_decay * learning_rate * param;
-    }
+  if (weight_decay > 0.0f && decouple_weight_decay) {
+    param -= weight_decay * learning_rate * param;
   }
 
   param -= update;
@@ -72,6 +73,11 @@ __global__ void update_adam_kernel_vec(T* params_data, const T* grads_data, T* m
     if (idx + i < size) {
       float grad = static_cast<float>(g_arr[i]);
       float param = static_cast<float>(p_arr[i]);
+
+      if (weight_decay > 0.0f && !decouple_weight_decay) {
+        grad += weight_decay * param;
+      }
+
       float m = static_cast<float>(m_arr[i]);
       float v = static_cast<float>(v_arr[i]);
 
@@ -82,12 +88,8 @@ __global__ void update_adam_kernel_vec(T* params_data, const T* grads_data, T* m
       float v_hat = v / bias_correction2;
       float update = (learning_rate * m_hat) / (sqrtf(v_hat) + epsilon);
 
-      if (weight_decay > 0.0f) {
-        if (decouple_weight_decay) {
-          param -= weight_decay * learning_rate * param;
-        } else {
-          update += weight_decay * learning_rate * param;
-        }
+      if (weight_decay > 0.0f && decouple_weight_decay) {
+        param -= weight_decay * learning_rate * param;
       }
       param -= update;
 

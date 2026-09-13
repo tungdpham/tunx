@@ -112,7 +112,7 @@ Graph create_cifar100_wrn16_8_graph(IAllocator &allocator, GraphOpts opts) {
   Node input = graph.input("input");
   Shape shape = {1, 32, 32, 3};
 
-  Node x = conv2d(input, shape, 16, 3, 1, 1, true, "conv1");
+  Node x = conv2d(input, shape, 16, 3, 1, 1, false, "conv1");
   x = wide_residual_block(x, shape, c1, 1, dropout_rate, "group1_block1");
   x = wide_residual_block(x, shape, c1, 1, dropout_rate, "group1_block2");
   x = wide_residual_block(x, shape, c2, 2, dropout_rate, "group2_block1");
@@ -138,7 +138,7 @@ Graph create_tiny_imagenet_wrn16_8_graph(IAllocator &allocator, GraphOpts opts) 
   Node input = graph.input("input");
   Shape shape = {1, 64, 64, 3};
 
-  Node x = conv2d(input, shape, 16, 3, 1, 1, true, "conv1");
+  Node x = conv2d(input, shape, 16, 3, 1, 1, false, "conv1");
   x = wide_residual_block(x, shape, c1, 1, dropout_rate, "group1_block1");
   x = wide_residual_block(x, shape, c1, 1, dropout_rate, "group1_block2");
   x = wide_residual_block(x, shape, c2, 2, dropout_rate, "group2_block1");
@@ -158,7 +158,7 @@ Graph create_imagenet100_resnet50_graph(IAllocator &allocator, GraphOpts opts) {
   Node input = graph.input("input");
   Shape shape = {1, 224, 224, 3};
 
-  Node x = conv2d(input, shape, 64, 7, 2, 3, true, "conv1");
+  Node x = conv2d(input, shape, 64, 7, 2, 3, false, "conv1");
   x = batchnorm(x, shape, false, "bn1");
   x = relu(x, shape, "relu");
   x = maxpool2d(x, shape, 3, 2, 1, "maxpool");
@@ -189,7 +189,7 @@ Graph create_gpt2_graph(IAllocator &allocator, size_t embed_dim, size_t num_head
                         size_t num_layers, const std::string &name, GraphOpts opts) {
   constexpr size_t seq_len = 1024;
   constexpr size_t vocab_size = 50257;
-  constexpr float dropout_rate = 0.1f;
+  constexpr float dropout_rate = 0.0f;
 
   Graph graph;
   Node input = graph.input("input");

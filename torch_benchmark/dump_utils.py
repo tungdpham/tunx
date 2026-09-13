@@ -116,7 +116,34 @@ def map_param_name(name):
     
     module_path = "_".join(parts[:-1])
     mapped_name = f"{module_path}.{param_type}"
+    
+    # GPT-2 mapping
+    if "blocks." in name:
+        mapped_name = mapped_name.replace("blocks_", "gpt2_small_block_")
+    
     return mapped_name
+
+def save_mapped_param(tensor, name, dump_dir, suffix=".bin"):
+    mapped_name = map_param_name(name)
+    
+    if "attn_qkv" in mapped_name:
+        # Split qkv into q, k, v
+        base_name = mapped_name.replace("attn_qkv", "attn")
+        chunk_size = tensor.shape[0] // 3
+        q, k, v = torch.split(tensor, chunk_size, dim=0)
+        param_type = "weight" if "weight" in name else "bias"
+        base_name = base_name.replace(f".{param_type}", "")
+        
+        save_tensor_bin(q, os.path.join(dump_dir, f"{base_name}.q.{param_type}{suffix}"), name=name)
+        save_tensor_bin(k, os.path.join(dump_dir, f"{base_name}.k.{param_type}{suffix}"), name=name)
+        save_tensor_bin(v, os.path.join(dump_dir, f"{base_name}.v.{param_type}{suffix}"), name=name)
+    elif "attn_proj" in mapped_name:
+        base_name = mapped_name.replace("attn_proj", "attn")
+        param_type = "weight" if "weight" in name else "bias"
+        base_name = base_name.replace(f".{param_type}", "")
+        save_tensor_bin(tensor, os.path.join(dump_dir, f"{base_name}.out.{param_type}{suffix}"), name=name)
+    else:
+        save_tensor_bin(tensor, os.path.join(dump_dir, f"{mapped_name}{suffix}"), name=name)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -150,8 +177,7 @@ def main():
     # Dump initial parameters
     print("Dumping initial parameters...")
     for name, param in model.named_parameters():
-        mapped_name = map_param_name(name)
-        save_tensor_bin(param, os.path.join(args.dump_dir, f"{mapped_name}.bin"), name=name)
+        save_mapped_param(param, name, args.dump_dir, suffix=".bin")
         
     # Generate deterministic inputs
     input_shape = get_input_shape(args.model, args.batch_size)
@@ -228,16 +254,14 @@ def main():
     print("Dumping gradients...")
     for name, param in model.named_parameters():
         if param.grad is not None:
-            mapped_name = map_param_name(name)
-            save_tensor_bin(param.grad, os.path.join(args.dump_dir, f"{mapped_name}.grad.bin"), name=name)
+            save_mapped_param(param.grad, name, args.dump_dir, suffix=".grad.bin")
             
     print("Running optimizer step...")
     optimizer.step()
     
     print("Dumping updated parameters...")
     for name, param in model.named_parameters():
-        mapped_name = map_param_name(name)
-        save_tensor_bin(param, os.path.join(args.dump_dir, f"{mapped_name}.updated.bin"), name=name)
+        save_mapped_param(param, name, args.dump_dir, suffix=".updated.bin")
         
     print(f"Dump complete for {args.model} in {args.dump_dir}")
 

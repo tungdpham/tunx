@@ -11,8 +11,10 @@
 #include "nn/engines/cuda_engine.hpp"
 #include "type/cuda/vectorized_types.cuh"
 #include "type/type.hpp"
+#include "cuda/helpers.cuh"
 
 namespace tunx {
+using namespace cuda;
 
 #define BLOCK_SIZE 256
 #define WARP_SIZE 32
@@ -530,14 +532,45 @@ __global__ void transpose_kernel(const IO_T* input, IO_T* output, CudaTransposeP
 
 WorkspaceReq CUDAEngine::query_sdpa_graph(engine_handle backend_handle, const AttentionStats& stats,
                                           DTypeDesc type_desc) {
-  throw std::runtime_error("SDPA is not implemented for generic CUDAEngine. Use CuDNNEngine.");
+  if (type_desc.io_dtype != DType_t::FP32) {
+    throw std::runtime_error("Generic CUDAEngine SDPA only implemented for FP32. Use CuDNNEngine for FP16/BF16.");
+  }
+  size_t num_elements = stats.batch_size * stats.num_heads * stats.seq_len * stats.seq_len;
+  size_t fwd_workspace = num_elements * sizeof(float) + num_elements * sizeof(float);
+  size_t bwd_workspace = num_elements * sizeof(float) + num_elements * sizeof(float) + num_elements * sizeof(float);
+  return WorkspaceReq{fwd_workspace, bwd_workspace, fwd_workspace};
 }
 
 void CUDAEngine::sdpa_fwd(engine_handle backend_handle, const AttentionStats& stats,
                           const void* q_data, const void* k_data, const void* v_data, void* o_data,
                           void* stats_data, void* workspace, DTypeDesc type_desc) {
-  throw std::runtime_error(
-      "SDPA forward is not implemented for generic CUDAEngine. Use CuDNNEngine.");
+  if (type_desc.io_dtype != DType_t::FP32) {
+    throw std::runtime_error("Generic CUDAEngine SDPA only implemented for FP32.");
+  }
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
+  size_t batch_heads = stats.batch_size * stats.num_heads;
+  size_t seq_len = stats.seq_len;
+  size_t head_dim = stats.head_dim;
+  size_t total_rows = batch_heads * seq_len;
+  
+  if (total_rows == 0) return;
+
+  float* scores = reinterpret_cast<float*>(workspace);
+  float* attn_weights = scores + batch_heads * seq_len * seq_len;
+  
+  size_t threads = 256;
+  size_t blocks = total_rows;
+  
+  sdpa_compute_scores_kernel<float><<<blocks, threads, 0, stream>>>(
+      static_cast<const float*>(q_data), static_cast<const float*>(k_data), scores,
+      batch_heads, seq_len, head_dim, stats.attn_scale, stats.is_causal);
+
+  sdpa_softmax_kernel<float><<<blocks, threads, 0, stream>>>(
+      scores, attn_weights, total_rows, seq_len);
+
+  sdpa_output_kernel<float><<<blocks, threads, 0, stream>>>(
+      attn_weights, static_cast<const float*>(v_data), static_cast<float*>(o_data),
+      batch_heads, seq_len, head_dim);
 }
 
 void CUDAEngine::sdpa_bwd(engine_handle backend_handle, const AttentionStats& stats,
@@ -545,8 +578,51 @@ void CUDAEngine::sdpa_bwd(engine_handle backend_handle, const AttentionStats& st
                           const void* o_data, const void* dO_data, const void* stats_data,
                           void* dQ_data, void* dK_data, void* dV_data, void* workspace,
                           DTypeDesc type_desc) {
-  throw std::runtime_error(
-      "SDPA backward is not implemented for generic CUDAEngine. Use CuDNNEngine.");
+  if (type_desc.io_dtype != DType_t::FP32) {
+    throw std::runtime_error("Generic CUDAEngine SDPA only implemented for FP32.");
+  }
+  cudaStream_t stream = *backend_handle.stream_as<cuda_stream>();
+  size_t batch_heads = stats.batch_size * stats.num_heads;
+  size_t seq_len = stats.seq_len;
+  size_t head_dim = stats.head_dim;
+  size_t total_rows = batch_heads * seq_len;
+  
+  if (total_rows == 0) return;
+
+  float* scores = reinterpret_cast<float*>(workspace);
+  float* attn_weights = scores + batch_heads * seq_len * seq_len;
+  float* grad_scores = attn_weights + batch_heads * seq_len * seq_len;
+  
+  size_t threads = 256;
+  size_t blocks = total_rows;
+  
+  // Recompute scores and attn_weights
+  sdpa_compute_scores_kernel<float><<<blocks, threads, 0, stream>>>(
+      static_cast<const float*>(q_data), static_cast<const float*>(k_data), scores,
+      batch_heads, seq_len, head_dim, stats.attn_scale, stats.is_causal);
+
+  sdpa_softmax_kernel<float><<<blocks, threads, 0, stream>>>(
+      scores, attn_weights, total_rows, seq_len);
+      
+  // Backprop through SDPA
+  sdpa_dgrad_v_kernel<float><<<blocks, threads, 0, stream>>>(
+      attn_weights, static_cast<const float*>(dO_data), static_cast<float*>(dV_data),
+      batch_heads, seq_len, head_dim);
+      
+  sdpa_dgrad_attn_kernel<float><<<blocks, threads, 0, stream>>>(
+      static_cast<const float*>(dO_data), static_cast<const float*>(v_data), grad_scores,
+      batch_heads, seq_len, head_dim);
+      
+  sdpa_softmax_dgrad_kernel<float><<<blocks, threads, 0, stream>>>(
+      attn_weights, grad_scores, total_rows, seq_len);
+      
+  sdpa_dgrad_q_kernel<float><<<blocks, threads, 0, stream>>>(
+      grad_scores, static_cast<const float*>(k_data), static_cast<float*>(dQ_data),
+      batch_heads, seq_len, head_dim, stats.attn_scale);
+      
+  sdpa_dgrad_k_kernel<float><<<blocks, threads, 0, stream>>>(
+      grad_scores, static_cast<const float*>(q_data), static_cast<float*>(dK_data),
+      batch_heads, seq_len, head_dim, stats.attn_scale);
 }
 
 WorkspaceReq CUDAEngine::query_transpose_graph(engine_handle backend_handle,

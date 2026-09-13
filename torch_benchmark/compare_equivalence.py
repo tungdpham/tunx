@@ -95,14 +95,18 @@ def compare_tensors(t1, t2, name, rtol=1e-3, atol=1e-3):
     
     return {
         'name': name,
-        'max_abs': max_abs,
-        'p99_abs': p99_abs,
-        'max_rel': max_rel,
-        'normalized_l2': normalized_l2,
-        'cos_sim': cos_sim,
-        'allclose': is_allclose,
+        'max_abs': float(max_abs),
+        'p99_abs': float(p99_abs),
+        'max_rel': float(max_rel),
+        'normalized_l2': float(normalized_l2),
+        'cos_sim': float(cos_sim),
+        'allclose': bool(is_allclose),
         'elements_passed': int(elements_passed),
-        'total_elements': int(total_elements)
+        'total_elements': int(total_elements),
+        'sq_diff': float(np.sum(abs_diff**2)),
+        'sq_norm1': float(np.sum(t1.astype(np.float64)**2)),
+        'sq_norm2': float(np.sum(t2.astype(np.float64)**2)),
+        'dot_product': float(np.dot(t1.flatten().astype(np.float64), t2.flatten().astype(np.float64))),
     }
 
 def print_table(title, results):
@@ -120,12 +124,29 @@ def print_table(title, results):
 
 def summarize_section(results):
     finite_l2 = [r['normalized_l2'] for r in results if np.isfinite(r['normalized_l2'])]
+    
+    total_sq_diff = sum(r['sq_diff'] for r in results)
+    total_sq_norm1 = sum(r['sq_norm1'] for r in results)
+    total_sq_norm2 = sum(r['sq_norm2'] for r in results)
+    total_dot = sum(r['dot_product'] for r in results)
+    
+    eps = 1e-12
+    global_l2 = np.sqrt(total_sq_diff) / (np.sqrt(total_sq_norm2) + eps)
+    global_cos = total_dot / (np.sqrt(total_sq_norm1) * np.sqrt(total_sq_norm2) + eps)
+    
+    total_elements = sum(r['total_elements'] for r in results)
+    total_passed = sum(r['elements_passed'] for r in results)
+    element_allclose_pct = float(100 * total_passed / total_elements) if total_elements > 0 else 0.0
+
     return {
         'tensor_count': len(results),
         'max_normalized_l2': float(max(finite_l2)) if finite_l2 else float('nan'),
         'mean_normalized_l2': float(np.mean(finite_l2)) if finite_l2 else float('nan'),
+        'global_l2': float(global_l2),
         'min_cosine': float(min(r['cos_sim'] for r in results)),
+        'global_cosine': float(global_cos),
         'tensor_allclose_pct': float(100 * sum(r['allclose'] for r in results) / len(results)),
+        'element_allclose_pct': element_allclose_pct,
     }
 
 def main():
@@ -251,10 +272,10 @@ def main():
     print("\n--- Section Aggregates ---")
     print(tabulate(
         [[name, values['tensor_count'], f"{values['max_normalized_l2']:.2e}",
-          f"{values['mean_normalized_l2']:.2e}", f"{values['min_cosine']:.6f}",
-          f"{values['tensor_allclose_pct']:.2f}%"]
+          f"{values['global_l2']:.2e}", f"{values['min_cosine']:.6f}", f"{values['global_cosine']:.6f}",
+          f"{values['tensor_allclose_pct']:.2f}%", f"{values['element_allclose_pct']:.2f}%"]
          for name, values in section_summary.items()],
-        headers=["Section", "Tensors", "Max Norm L2", "Mean Norm L2", "Min Cosine", "Allclose"]
+        headers=["Section", "Tensors", "Max Norm L2", "Global L2", "Min Cosine", "Global Cosine", "Tensor Allclose", "Element Allclose"]
     ))
 
     all_results = results_out + results_loss_grad + results_act + results_act_grad + results_bn_stats + results_grad + results_upd
@@ -271,6 +292,23 @@ def main():
     overall_mean_l2 = float(np.mean(finite_l2)) if finite_l2 else float("nan")
     overall_min_cos = min(r['cos_sim'] for r in all_results)
     
+    total_sq_diff = sum(r['sq_diff'] for r in all_results)
+    total_sq_norm1 = sum(r['sq_norm1'] for r in all_results)
+    total_sq_norm2 = sum(r['sq_norm2'] for r in all_results)
+    total_dot = sum(r['dot_product'] for r in all_results)
+    
+    def safe_min(items):
+        return min((r['cos_sim'] for r in items), default=float("nan"))
+    
+    min_cosine_fwd = safe_min(results_out + results_act + results_bn_stats)
+    min_cosine_act_grads = safe_min(results_loss_grad + results_act_grad)
+    min_cosine_param_grads = safe_min(results_grad)
+    min_cosine_updated_params = safe_min(results_upd)
+    
+    eps = 1e-12
+    overall_global_l2 = np.sqrt(total_sq_diff) / (np.sqrt(total_sq_norm2) + eps)
+    overall_global_cos = total_dot / (np.sqrt(total_sq_norm1) * np.sqrt(total_sq_norm2) + eps)
+    
     total_tensors = len(all_results)
     allclose_passes = sum(1 for r in all_results if r['allclose'])
     allclose_pct = (allclose_passes / total_tensors) * 100
@@ -286,7 +324,9 @@ def main():
         ["Max element-wise relative error", f"{overall_max_rel:.2e}"],
         ["Max normalized L2 relative error", f"{overall_max_l2:.2e}"],
         ["Mean normalized L2 relative error", f"{overall_mean_l2:.2e}"],
+        ["Global normalized L2 relative error", f"{overall_global_l2:.2e}"],
         ["Min cosine similarity", f"{overall_min_cos:.6f}"],
+        ["Global cosine similarity", f"{overall_global_cos:.6f}"],
         ["Tensor-level allclose passes (%)", f"{allclose_pct:.2f}% ({allclose_passes}/{total_tensors})"],
         ["Element-level allclose passes (%)", f"{element_pass_pct:.2f}% ({total_passed_elements}/{total_elements})"]
     ]
@@ -308,10 +348,16 @@ def main():
                 "max_rel": float(overall_max_rel),
                 "max_normalized_l2": float(overall_max_l2),
                 "mean_normalized_l2": float(overall_mean_l2),
+                "global_l2": float(overall_global_l2),
                 "min_cosine": float(overall_min_cos),
+                "global_cosine": float(overall_global_cos),
                 "tensor_allclose_pct": float(allclose_pct),
                 "element_allclose_pct": float(element_pass_pct),
                 "tensor_count": total_tensors,
+                "min_cosine_fwd": float(min_cosine_fwd),
+                "min_cosine_act_grads": float(min_cosine_act_grads),
+                "min_cosine_param_grads": float(min_cosine_param_grads),
+                "min_cosine_updated_params": float(min_cosine_updated_params),
             },
         }
         with open(args.summary_json, "w", encoding="utf-8") as f:

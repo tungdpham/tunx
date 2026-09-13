@@ -108,8 +108,3 @@ for block in residual inception attention gpt2; do
 		> "dump_blocks/$block/comparison_output.txt"
 done
 ```
-
-For a reproducible multi-seed run across ResNet and all isolated blocks, use
-`./run_multiseed_equivalence.sh`. Set `SEEDS`, `BLOCK_BATCH_SIZE`, and `RESULTS_DIR`
-to customize the sweep; generated dump directories are ignored by Git and can be
-deleted after the run to reclaim disk space.

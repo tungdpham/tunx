@@ -304,10 +304,10 @@ class BasicResidualBlock(nn.Module):
     def __init__(self, channels: int):
         super().__init__()
         self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, stride=1,
-                               padding=1, bias=True)
+                               padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(channels, eps=1e-5, momentum=0.1)
         self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, stride=1,
-                               padding=1, bias=True)
+                               padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(channels, eps=1e-5, momentum=0.1)
 
     def forward(self, x):
@@ -322,10 +322,10 @@ class ResNet9CIFAR10(nn.Module):
     def __init__(self, num_classes: int = 10):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3,
-                               stride=1, padding=1, bias=True)
+                               stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
         self.conv2 = nn.Conv2d(64, 128, kernel_size=3,
-                               stride=1, padding=1, bias=True)
+                               stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
@@ -333,7 +333,7 @@ class ResNet9CIFAR10(nn.Module):
         self.res2 = BasicResidualBlock(128)
 
         self.conv3 = nn.Conv2d(128, 256, kernel_size=3,
-                               stride=1, padding=1, bias=True)
+                               stride=1, padding=1, bias=False)
         self.bn3 = nn.BatchNorm2d(256, eps=1e-5, momentum=0.1)
         self.maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
@@ -341,7 +341,7 @@ class ResNet9CIFAR10(nn.Module):
         self.res4 = BasicResidualBlock(256)
 
         self.conv4 = nn.Conv2d(256, 512, kernel_size=3,
-                               stride=1, padding=1, bias=True)
+                               stride=1, padding=1, bias=False)
         self.bn4 = nn.BatchNorm2d(512, eps=1e-5, momentum=0.1)
         self.maxpool3 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
@@ -380,11 +380,11 @@ class WideResidualBlock(nn.Module):
         super().__init__()
         self.bn1 = nn.BatchNorm2d(in_channels, eps=1e-5, momentum=0.1)
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3,
-                               stride=stride, padding=1, bias=True)
+                               stride=stride, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels, eps=1e-5, momentum=0.1)
-        self.dropout = nn.Dropout(dropout_rate) if dropout_rate > 0.0 else None
+        self.dropout = nn.Dropout(0.0)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3,
-                               stride=1, padding=1, bias=True)
+                               stride=1, padding=1, bias=False)
 
         self.shortcut = None
         if stride != 1 or in_channels != out_channels:
@@ -413,7 +413,7 @@ class WRN16_8CIFAR100(nn.Module):
         c2 = 32 * width_factor   # 256
         c3 = 64 * width_factor   # 512
 
-        self.conv1 = nn.Conv2d(3, 16, 3, stride=1, padding=1, bias=True)
+        self.conv1 = nn.Conv2d(3, 16, 3, stride=1, padding=1, bias=False)
 
         # Group 1: 16 -> 128, stride 1
         self.group1_block1 = WideResidualBlock(
@@ -500,7 +500,7 @@ class ResNet50TinyImageNet(nn.Module):
     def __init__(self, num_classes: int = 200):
         super().__init__()
 
-        self.conv1 = nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=True)
+        self.conv1 = nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
         self.maxpool = nn.MaxPool2d(3, stride=2, padding=1)
 
@@ -557,7 +557,7 @@ class ResNet50ImageNet100(nn.Module):
     def __init__(self, num_classes: int = 100):
         super().__init__()
 
-        self.conv1 = nn.Conv2d(3, 64, 7, stride=2, padding=3, bias=True)
+        self.conv1 = nn.Conv2d(3, 64, 7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
         self.maxpool = nn.MaxPool2d(3, stride=2, padding=1)
 
@@ -618,8 +618,8 @@ class CausalSelfAttention(nn.Module):
         self.head_dim = embed_dim // num_heads
         self.embed_dim = embed_dim
 
-        self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=True)
-        self.proj = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=False)
+        self.proj = nn.Linear(embed_dim, embed_dim, bias=False)
         self.attn_drop = nn.Dropout(dropout)
         self.resid_drop = nn.Dropout(dropout)
 
@@ -676,7 +676,7 @@ class GPT2Small(nn.Module):
                  num_heads: int = 12,
                  num_layers: int = 12,
                  ffn_dim: int = 3072,
-                 dropout: float = 0.1):
+                 dropout: float = 0.0):
         super().__init__()
         self.seq_len = seq_len
         self.embed_dim = embed_dim
@@ -692,9 +692,8 @@ class GPT2Small(nn.Module):
 
         self.ln_f = nn.LayerNorm(embed_dim, eps=1e-5)
         self.head = nn.Linear(embed_dim, vocab_size, bias=True)
-
-        # Weight tying
-        self.head.weight = self.token_embed.weight
+        # Untie weights to match TunX implementation and allow separate gradient verification
+        self.head.weight = nn.Parameter(self.token_embed.weight.clone())
 
         self._init_weights()
 

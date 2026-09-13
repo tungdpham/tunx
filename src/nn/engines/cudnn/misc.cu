@@ -168,6 +168,10 @@ WorkspaceReq CuDNNEngine::query_dropout_graph(engine_handle backend_handle,
 
 WorkspaceReq CuDNNEngine::query_sdpa_graph(engine_handle backend_handle,
                                            const AttentionStats& stats, DTypeDesc type_desc) {
+  if (type_desc.io_dtype == DType_t::FP32) {
+    return cuda_engine_.query_sdpa_graph(backend_handle, stats, type_desc);
+  }
+
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey fwd_key{
@@ -208,6 +212,11 @@ WorkspaceReq CuDNNEngine::query_sdpa_graph(engine_handle backend_handle,
 void CuDNNEngine::sdpa_fwd(engine_handle backend_handle, const AttentionStats& stats,
                            const void* q_data, const void* k_data, const void* v_data, void* o_data,
                            void* stats_data, void* workspace, DTypeDesc type_desc) {
+  if (type_desc.io_dtype == DType_t::FP32) {
+    cuda_engine_.sdpa_fwd(backend_handle, stats, q_data, k_data, v_data, o_data, stats_data, workspace, type_desc);
+    return;
+  }
+
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey key{
@@ -239,6 +248,11 @@ void CuDNNEngine::sdpa_bwd(engine_handle backend_handle, const AttentionStats& s
                            const void* o_data, const void* dO_data, const void* stats_data,
                            void* dQ_data, void* dK_data, void* dV_data, void* workspace,
                            DTypeDesc type_desc) {
+  if (type_desc.io_dtype == DType_t::FP32) {
+    cuda_engine_.sdpa_bwd(backend_handle, stats, q_data, k_data, v_data, o_data, dO_data, stats_data, dQ_data, dK_data, dV_data, workspace, type_desc);
+    return;
+  }
+
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey key{

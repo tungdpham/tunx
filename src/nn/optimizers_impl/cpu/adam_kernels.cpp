@@ -26,6 +26,10 @@ void update_adam(T *params_data, const T *grads_data, T *m_data, T *v_data, size
   parallel_for<size_t>(0, size, [&](size_t i) {
     T grad = grads_data[i];
 
+    if (weight_decay > 0.0f && !decouple_weight_decay) {
+      grad += static_cast<T>(weight_decay) * params_data[i];
+    }
+
     m_data[i] = static_cast<T>(beta1) * m_data[i] + one_minus_beta1 * grad;
 
     v_data[i] = static_cast<T>(beta2) * v_data[i] + one_minus_beta2 * grad * grad;
@@ -36,13 +40,9 @@ void update_adam(T *params_data, const T *grads_data, T *m_data, T *v_data, size
     T update = static_cast<T>(learning_rate) * m_hat /
                (static_cast<T>(std::sqrt(static_cast<float>(v_hat))) + static_cast<T>(epsilon));
 
-    if (weight_decay > 0.0f) {
-      if (decouple_weight_decay) {
-        params_data[i] -=
-            static_cast<T>(weight_decay) * static_cast<T>(learning_rate) * params_data[i];
-      } else {
-        update += static_cast<T>(weight_decay) * static_cast<T>(learning_rate) * params_data[i];
-      }
+    if (weight_decay > 0.0f && decouple_weight_decay) {
+      params_data[i] -=
+          static_cast<T>(weight_decay) * static_cast<T>(learning_rate) * params_data[i];
     }
 
     params_data[i] -= update;

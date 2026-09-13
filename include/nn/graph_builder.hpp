@@ -172,12 +172,12 @@ inline Node wide_residual_block(Node input, Shape &shape, size_t out_channels, s
                                 float dropout_rate, const std::string &name) {
   Shape main_shape = shape;
   Node main = batchnorm(input, main_shape, true, name + "_bn1");
-  main = conv2d(main, main_shape, out_channels, 3, stride, 1, true, name + "_conv1");
+  main = conv2d(main, main_shape, out_channels, 3, stride, 1, false, name + "_conv1");
   main = batchnorm(main, main_shape, true, name + "_bn2");
   if (dropout_rate > 0.0f) {
     main = dropout(main, main_shape, dropout_rate, name + "_dropout");
   }
-  main = conv2d(main, main_shape, out_channels, 3, 1, 1, true, name + "_conv2");
+  main = conv2d(main, main_shape, out_channels, 3, 1, 1, false, name + "_conv2");
 
   Shape shortcut_shape = shape;
   Node shortcut = input;
