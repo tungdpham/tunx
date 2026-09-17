@@ -108,3 +108,9 @@ for block in residual inception attention gpt2; do
 		> "dump_blocks/$block/comparison_output.txt"
 done
 ```
+
+## Running Convergence Tests
+```bash
+python run_convergence_tests.py --model resnet50 --steps 1000
+python plot_convergence.py --model resnet50 --steps 1000
+```

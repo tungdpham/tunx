@@ -130,6 +130,63 @@ private:
     return true;
   }
 
+  template <typename T>
+  bool get_batch_by_indices_impl(const Vec<size_t> &indices, Tensor &batch_data, Tensor &batch_labels) {
+    size_t actual_batch_size = indices.size();
+    if (actual_batch_size == 0) return false;
+
+    // NHWC format: (Batch, Height, Width, Channels)
+    batch_data = Tensor({actual_batch_size, imagenet100_constants::IMAGE_HEIGHT,
+                         imagenet100_constants::IMAGE_WIDTH, imagenet100_constants::NUM_CHANNELS},
+                        dtype_of<T>(), allocator_);
+    batch_labels = Tensor({actual_batch_size}, DType_t::INT32, allocator_);
+
+    T *batch_raw = batch_data.data_as<T>();
+    int *labels_raw = batch_labels.data_as<int>();
+    size_t image_size = imagenet100_constants::IMAGE_SIZE;
+
+    parallel_for<size_t>(0, actual_batch_size, [&](size_t i) {
+      size_t target_index = indices[i];
+      if (target_index >= sample_list_.size()) {
+        for (size_t j = 0; j < image_size; ++j) batch_raw[i * image_size + j] = T(0);
+        labels_raw[i] = -1;
+        return;
+      }
+      
+      const auto &[path, class_index] = sample_list_[target_index];
+
+      T *sample_dst = batch_raw + i * image_size;
+      bool success = false;
+
+      if constexpr (std::is_same_v<T, float>) {
+        success = load_jpeg_image(path, sample_dst);
+      } else {
+        dptr hwc_dptr = allocator_.allocate(image_size * sizeof(float));
+        float *hwc_buf = hwc_dptr.get<float>();
+        if (load_jpeg_image(path, hwc_buf)) {
+          for (size_t j = 0; j < image_size; ++j) {
+            sample_dst[j] = static_cast<T>(hwc_buf[j]);
+          }
+          success = true;
+        }
+      }
+
+      if (success) {
+        labels_raw[i] = class_index;
+      } else {
+        // Zero out failed sample and mark with sentinel label
+        for (size_t j = 0; j < image_size; ++j) {
+          sample_dst[j] = T(0);
+        }
+        labels_raw[i] = -1;  // Sentinel value for failed load
+      }
+    });
+
+    this->apply_augmentation(batch_data, batch_labels);
+    return true;
+  }
+
+
   /**
    * Load class IDs and names from Labels.json
    */
@@ -254,7 +311,7 @@ private:
     dptr crop_resize_dptr = allocator_.allocate(out_h * out_w * 3);
     unsigned char *out224 = crop_resize_dptr.get<unsigned char>();
 
-    if (is_train_mode_) {
+    if (is_train_mode_ && !this->disable_augmentation_) {
       const CropBox crop = sample_random_resized_crop(width, height);
       const unsigned char *crop_src = img + (crop.y * width + crop.x) * 3;
       unsigned char *result = stbir_resize_uint8_linear(crop_src, crop.w, crop.h, width * 3, out224,
@@ -418,6 +475,10 @@ public:
 
   bool get_batch(size_t batch_size, Tensor &batch_data, Tensor &batch_labels) override {
     DISPATCH_ANY_DTYPE(dtype_, T, return get_batch_impl<T>(batch_size, batch_data, batch_labels));
+  }
+
+  bool get_batch_by_indices(const Vec<size_t> &indices, Tensor &batch_data, Tensor &batch_labels) override {
+    DISPATCH_ANY_DTYPE(dtype_, T, return get_batch_by_indices_impl<T>(indices, batch_data, batch_labels));
   }
 
   void reset() override { this->current_index_ = 0; }

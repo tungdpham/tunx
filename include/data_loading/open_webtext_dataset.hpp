@@ -45,6 +45,35 @@ private:
     return true;
   }
 
+  template <typename T>
+  bool get_batch_by_indices_impl(const Vec<size_t> &indices, Tensor &batch_data, Tensor &batch_labels) {
+    size_t actual_batch_size = indices.size();
+    if (actual_batch_size == 0) return false;
+
+    batch_data = Tensor({actual_batch_size, context_length_}, dtype_of<T>(), allocator_);
+    batch_labels = Tensor({actual_batch_size, context_length_}, DType_t::INT32, allocator_);
+
+    for (size_t b = 0; b < actual_batch_size; ++b) {
+      size_t start_pos = indices[b];
+      if (start_pos >= num_samples_) {
+        // Fallback or skip, but let's just pad with padding token
+        for (size_t i = 0; i < context_length_; ++i) {
+          batch_data.at<T>({b, i}) = static_cast<T>(padding_token_id_);
+          batch_labels.at<int>({b, i}) = padding_token_id_;
+        }
+        continue;
+      }
+
+      for (size_t i = 0; i < context_length_; ++i) {
+        batch_data.at<T>({b, i}) = static_cast<T>(mapped_data_[start_pos + i]);
+        int token_id = static_cast<int>(mapped_data_[start_pos + i + 1]);
+        batch_labels.at<int>({b, i}) = token_id;
+      }
+    }
+
+    return true;
+  }
+
 public:
   OpenWebText(size_t context_length, DType_t dtype = DType_t::FP32, int padding_token_id = -1)
       : allocator_(PoolAllocator::instance(getHost(), nullptr)),
@@ -100,6 +129,10 @@ public:
 
   bool get_batch(size_t batch_size, Tensor &batch_data, Tensor &batch_labels) override {
     DISPATCH_ANY_DTYPE(dtype_, T, return get_batch_impl<T>(batch_size, batch_data, batch_labels));
+  }
+
+  bool get_batch_by_indices(const Vec<size_t> &indices, Tensor &batch_data, Tensor &batch_labels) override {
+    DISPATCH_ANY_DTYPE(dtype_, T, return get_batch_by_indices_impl<T>(indices, batch_data, batch_labels));
   }
 
   void reset() override { this->current_index_ = 0; }
