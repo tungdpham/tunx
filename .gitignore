@@ -84,7 +84,7 @@ logs/
 /plots/
 /dump_*/
 /*_dumps/
-
+/dump/
 # model snapshots
 /model_snapshots/
 

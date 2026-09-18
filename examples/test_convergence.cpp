@@ -2,16 +2,16 @@
 #include <sys/stat.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <string>
 #include <vector>
-#include <cstdlib>
 
+#include "data_augmentation/augmentation.hpp"
 #include "data_loading/imagenet100_dataset.hpp"
 #include "data_loading/open_webtext_dataset.hpp"
-
 #include "device/device_allocator.hpp"
 #include "device/device_manager.hpp"
 #include "equivalence_utils.hpp"
@@ -25,6 +25,29 @@
 
 using namespace tunx;
 
+namespace {
+
+void dump_parameters(const Graph& graph, const std::string& directory, bool gradients) {
+  mkdir(directory.c_str(), 0777);
+  for (const auto& edge : graph.edges()) {
+    auto layer = edge->layer();
+    const auto params = layer->params();
+    if (params.empty()) continue;
+
+    const std::string& name = layer->name();
+    if (params.size() >= 1 && params[0].requires_grad()) {
+      save_tensor_bin(gradients ? params[0].grad() : params[0].data(),
+                      directory + "/" + name + ".weight" + (gradients ? ".grad.bin" : ".bin"));
+    }
+    if (params.size() >= 2 && params[1].requires_grad()) {
+      save_tensor_bin(gradients ? params[1].grad() : params[1].data(),
+                      directory + "/" + name + ".bias" + (gradients ? ".grad.bin" : ".bin"));
+    }
+  }
+}
+
+}  // namespace
+
 int main(int argc, char** argv) {
   std::string model_name = "resnet50";
   std::string pt_dir = "";
@@ -35,6 +58,10 @@ int main(int argc, char** argv) {
   std::string executor_mode = "optimized";
   std::string engine_mode = "default";
   bool no_aug = false;
+  bool dump_inputs = false;
+  bool load_inputs = false;
+  bool dump_params = false;
+  std::string debug_layer = "";
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -52,6 +79,14 @@ int main(int argc, char** argv) {
       seed = std::stoi(argv[++i]);
     } else if (arg == "--no-aug") {
       no_aug = true;
+    } else if (arg == "--dump-inputs") {
+      dump_inputs = true;
+    } else if (arg == "--load-inputs") {
+      load_inputs = true;
+    } else if (arg == "--dump-params") {
+      dump_params = true;
+    } else if (arg == "--debug-layer" && i + 1 < argc) {
+      debug_layer = argv[++i];
     } else if (arg == "--executor-mode" && i + 1 < argc) {
       executor_mode = argv[++i];
     } else if (arg == "--engine" && i + 1 < argc) {
@@ -65,7 +100,8 @@ int main(int argc, char** argv) {
   if (pt_dir.empty() || tunx_dir.empty()) {
     std::cerr << "Usage: " << argv[0]
               << " --model <name> --pt-dir <dir> --tunx-dir <dir> [--batch-size <N>] [--steps <N>] "
-                 "[--seed <N>] [--no-aug]"
+                 "[--seed <N>] [--no-aug] [--dump-inputs] [--load-inputs] [--dump-params]"
+                 " [--debug-layer <name>]"
               << " [--executor-mode optimized|naive|linear|branching|joining]"
               << " [--engine default|cuda|cudnn]" << std::endl;
     return 1;
@@ -164,11 +200,11 @@ int main(int argc, char** argv) {
     const char* path = std::getenv("OPENWEBTEXT_PATH");
     std::string root = path ? path : "data/open-web-text/train.bin";
     if (root.length() > 10 && root.substr(root.length() - 10) == "/train.bin") {
-        root = root.substr(0, root.length() - 10);
+      root = root.substr(0, root.length() - 10);
     }
     if (!ds->load_data(root)) {
-        std::cerr << "Failed to load OpenWebText from " << root << std::endl;
-        return 1;
+      std::cerr << "Failed to load OpenWebText from " << root << std::endl;
+      return 1;
     }
     dataset = std::move(ds);
   } else {
@@ -176,9 +212,12 @@ int main(int argc, char** argv) {
     const char* path = std::getenv("IMAGENET100_ROOT");
     std::string root = path ? path : "data/imagenet-100";
     if (!ds->load_data(root, true)) {
-        std::cerr << "Failed to load ImageNet100 from " << root << std::endl;
-        return 1;
+      std::cerr << "Failed to load ImageNet100 from " << root << std::endl;
+      return 1;
     }
+    ds->set_augmentation(AugmentationBuilder()
+                             .normalize({0.485f, 0.456f, 0.406f}, {0.229f, 0.224f, 0.225f})
+                             .build());
     if (no_aug) ds->set_disable_augmentation(true);
     dataset = std::move(ds);
   }
@@ -189,8 +228,8 @@ int main(int argc, char** argv) {
   {
     std::ifstream is(indices_path, std::ios::binary);
     if (!is) {
-       std::cerr << "Cannot open " << indices_path << std::endl;
-       return 1;
+      std::cerr << "Cannot open " << indices_path << std::endl;
+      return 1;
     }
     is.seekg(0, std::ios::end);
     size_t size = is.tellg();
@@ -200,10 +239,10 @@ int main(int argc, char** argv) {
     is.read((char*)temp_indices.data(), size);
     for (int32_t idx : temp_indices) all_indices.push_back(idx);
   }
-  
+
   if (all_indices.size() < steps * batch_size) {
-      std::cerr << "Not enough indices for requested steps and batch size!" << std::endl;
-      return 1;
+    std::cerr << "Not enough indices for requested steps and batch size!" << std::endl;
+    return 1;
   }
 
   Tensor inputs;
@@ -216,6 +255,37 @@ int main(int argc, char** argv) {
   Tensor labels = Tensor(single_label_shape, DType_t::INT32, allocator);
 
   GraphExecutor executor(graph);
+  std::map<std::string, Tensor> debug_activations;
+  std::map<std::string, Tensor> debug_grad_inputs;
+  std::map<std::string, Tensor> debug_grad_outputs;
+  if (!debug_layer.empty()) {
+    executor.set_forward_hook(
+        [&](const Edge& edge, const std::map<std::string, Tensor>& consumers_data) {
+          if (edge->layer()->name() != debug_layer) return;
+          for (const auto& [uid, tensor] : consumers_data) {
+            Tensor copy_tensor(tensor.shape(), tensor.dtype(), allocator);
+            copy(tensor, copy_tensor, executor.graph().handle().get_stream());
+            debug_activations[uid] = std::move(copy_tensor);
+          }
+        });
+    executor.set_backward_grad_hook([&](const Edge& edge,
+                                        const std::map<std::string, Tensor>& consumers_grads,
+                                        const std::map<std::string, Tensor>& producers_grads) {
+      if (edge->layer()->name() != debug_layer) return;
+      for (const auto& [uid, tensor] : consumers_grads) {
+        Tensor copy_tensor(tensor.shape(), tensor.dtype(), allocator);
+        copy(tensor, copy_tensor, executor.graph().handle().get_stream());
+        debug_grad_outputs[uid] = std::move(copy_tensor);
+      }
+      if (!producers_grads.empty()) {
+        for (const auto& [uid, tensor] : producers_grads) {
+          Tensor copy_tensor(tensor.shape(), tensor.dtype(), allocator);
+          copy(tensor, copy_tensor, executor.graph().handle().get_stream());
+          debug_grad_inputs[uid] = std::move(copy_tensor);
+        }
+      }
+    });
+  }
   SolverOptions solver_options;
   if (executor_mode == "naive") {
     solver_options = SolverOptions{true, false, false, false};
@@ -225,8 +295,9 @@ int main(int argc, char** argv) {
     solver_options = SolverOptions{false, true, true, false};
   } else if (executor_mode == "joining") {
     solver_options = SolverOptions{false, true, false, true};
-  } else {
-    solver_options = SolverOptions{false, true, false, false};
+  } else if (executor_mode != "optimized") {
+    std::cerr << "Unknown executor mode: " << executor_mode << std::endl;
+    return 1;
   }
 
   TensorBundle input_tensors{{"input", inputs}};
@@ -252,33 +323,54 @@ int main(int argc, char** argv) {
 
   for (size_t step = 0; step < steps; ++step) {
     optimizer->zero_grads();
-
-    // Copy step inputs and labels
-    Vec<size_t> step_indices;
-    for (size_t i = 0; i < batch_size; ++i) {
-       step_indices.push_back(all_indices[step * batch_size + i]);
-    }
+    debug_activations.clear();
+    debug_grad_inputs.clear();
+    debug_grad_outputs.clear();
 
     Tensor inputs_host, labels_host;
-    if (!dataset->get_batch_by_indices(step_indices, inputs_host, labels_host)) {
+    const std::string step_suffix = "_step_" + std::to_string(step + 1) + ".bin";
+    if (load_inputs) {
+      load_tensor_bin(inputs, pt_dir + "/inputs" + step_suffix);
+      load_tensor_bin(labels, pt_dir + "/labels" + step_suffix);
+      input_tensors.set("input", inputs);
+    } else {
+      Vec<size_t> step_indices;
+      for (size_t i = 0; i < batch_size; ++i) {
+        step_indices.push_back(all_indices[step * batch_size + i]);
+      }
+      if (!dataset->get_batch_by_indices(step_indices, inputs_host, labels_host)) {
         std::cerr << "Failed to get batch for step " << step << std::endl;
         return 1;
+      }
+
+      if (device.device_type() == DeviceType::CUDA) {
+        cudaMemcpy(inputs.data_as<void>(), inputs_host.data_as<void>(), input_bytes,
+                   cudaMemcpyHostToDevice);
+        cudaMemcpy(labels.data_as<void>(), labels_host.data_as<void>(), label_bytes,
+                   cudaMemcpyHostToDevice);
+      } else {
+        memcpy(inputs.data_as<void>(), inputs_host.data_as<void>(), input_bytes);
+        memcpy(labels.data_as<void>(), labels_host.data_as<void>(), label_bytes);
+      }
     }
 
-    if (device.device_type() == DeviceType::CUDA) {
-      cudaMemcpy(inputs.data_as<void>(), inputs_host.data_as<void>(),
-                 input_bytes, cudaMemcpyHostToDevice);
-      cudaMemcpy(labels.data_as<void>(), labels_host.data_as<void>(),
-                 label_bytes, cudaMemcpyHostToDevice);
-    } else {
-      memcpy(inputs.data_as<void>(), inputs_host.data_as<void>(),
-             input_bytes);
-      memcpy(labels.data_as<void>(), labels_host.data_as<void>(),
-             label_bytes);
+    if (dump_inputs) {
+      save_tensor_bin(inputs, tunx_dir + "/inputs" + step_suffix);
+      save_tensor_bin(labels, tunx_dir + "/labels" + step_suffix);
     }
 
     TensorBundle outputs = executor.forward(input_tensors);
     Tensor predictions = outputs.get("output");
+
+    if (!debug_layer.empty()) {
+      if (debug_activations.empty()) {
+        std::cerr << "No forward activation captured for layer " << debug_layer << std::endl;
+        return 1;
+      }
+      save_tensor_bin(
+          debug_activations.begin()->second,
+          tunx_dir + "/" + debug_layer + ".output_step_" + std::to_string(step + 1) + ".bin");
+    }
 
     float loss = 0.0f;
     criterion->compute_loss(predictions, labels, loss);
@@ -326,7 +418,27 @@ int main(int argc, char** argv) {
 
     if (device.device_type() == DeviceType::CUDA) cudaDeviceSynchronize();
 
+    if (!debug_layer.empty()) {
+      if (debug_grad_outputs.empty()) {
+        std::cerr << "No backward gradients captured for layer " << debug_layer << std::endl;
+        return 1;
+      }
+      if (!debug_grad_inputs.empty()) {
+        save_tensor_bin(
+            debug_grad_inputs.begin()->second,
+            tunx_dir + "/" + debug_layer + ".grad_input_step_" + std::to_string(step + 1) + ".bin");
+      }
+      save_tensor_bin(
+          debug_grad_outputs.begin()->second,
+          tunx_dir + "/" + debug_layer + ".grad_output_step_" + std::to_string(step + 1) + ".bin");
+    }
+
+    const std::string parameter_dir = tunx_dir + "/params_step_" + std::to_string(step + 1);
+    if (dump_params) dump_parameters(graph, parameter_dir, true);
     optimizer->update();
+    if (dump_params) {
+      dump_parameters(graph, parameter_dir, false);
+    }
   }
 
   csv_file.close();

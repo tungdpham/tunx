@@ -110,12 +110,9 @@ int main(int argc, char** argv) {
     if (is_attn && (params.size() == 8 || params.size() == 4)) {
       // FlashAttentionBlock: q, k, v, out
       bool has_bias = (params.size() == 8);
-      const char* suffixes_w[] = {
-          ".q.weight.bin", ".k.weight.bin", ".v.weight.bin", ".out.weight.bin"
-      };
-      const char* suffixes_b[] = {
-          ".q.bias.bin", ".k.bias.bin", ".v.bias.bin", ".out.bias.bin"
-      };
+      const char* suffixes_w[] = {".q.weight.bin", ".k.weight.bin", ".v.weight.bin",
+                                  ".out.weight.bin"};
+      const char* suffixes_b[] = {".q.bias.bin", ".k.bias.bin", ".v.bias.bin", ".out.bias.bin"};
       for (size_t i = 0; i < 4; ++i) {
         size_t w_idx = has_bias ? (i * 2) : i;
         std::string w_path = pt_dir + "/" + name + suffixes_w[i];
@@ -124,7 +121,7 @@ int main(int argc, char** argv) {
         } else {
           std::cerr << "Warning: Missing " << w_path << std::endl;
         }
-        
+
         if (has_bias) {
           std::string b_path = pt_dir + "/" + name + suffixes_b[i];
           if (file_exists(b_path)) {
@@ -312,12 +309,10 @@ int main(int argc, char** argv) {
     bool is_attn = (name.find("attn") != std::string::npos);
     if (is_attn && (params.size() == 8 || params.size() == 4)) {
       bool has_bias = (params.size() == 8);
-      const char* suffixes_w[] = {
-          ".q.weight.grad.bin", ".k.weight.grad.bin", ".v.weight.grad.bin", ".out.weight.grad.bin"
-      };
-      const char* suffixes_b[] = {
-          ".q.bias.grad.bin", ".k.bias.grad.bin", ".v.bias.grad.bin", ".out.bias.grad.bin"
-      };
+      const char* suffixes_w[] = {".q.weight.grad.bin", ".k.weight.grad.bin", ".v.weight.grad.bin",
+                                  ".out.weight.grad.bin"};
+      const char* suffixes_b[] = {".q.bias.grad.bin", ".k.bias.grad.bin", ".v.bias.grad.bin",
+                                  ".out.bias.grad.bin"};
       for (size_t i = 0; i < 4; ++i) {
         size_t w_idx = has_bias ? (i * 2) : i;
         save_tensor_bin(params[w_idx].grad(), tunx_dir + "/" + name + suffixes_w[i]);
@@ -349,12 +344,10 @@ int main(int argc, char** argv) {
     bool is_attn = (name.find("attn") != std::string::npos);
     if (is_attn && (params.size() == 8 || params.size() == 4)) {
       bool has_bias = (params.size() == 8);
-      const char* suffixes_w[] = {
-          ".q.weight.updated.bin", ".k.weight.updated.bin", ".v.weight.updated.bin", ".out.weight.updated.bin"
-      };
-      const char* suffixes_b[] = {
-          ".q.bias.updated.bin", ".k.bias.updated.bin", ".v.bias.updated.bin", ".out.bias.updated.bin"
-      };
+      const char* suffixes_w[] = {".q.weight.updated.bin", ".k.weight.updated.bin",
+                                  ".v.weight.updated.bin", ".out.weight.updated.bin"};
+      const char* suffixes_b[] = {".q.bias.updated.bin", ".k.bias.updated.bin",
+                                  ".v.bias.updated.bin", ".out.bias.updated.bin"};
       for (size_t i = 0; i < 4; ++i) {
         size_t w_idx = has_bias ? (i * 2) : i;
         save_tensor_bin(params[w_idx].data(), tunx_dir + "/" + name + suffixes_w[i]);

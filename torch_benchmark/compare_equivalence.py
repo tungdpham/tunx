@@ -53,7 +53,7 @@ def load_tensor_bin(path, dtype=np.float32):
         data = np.frombuffer(f.read(), dtype=dtype)
     return data
 
-def compare_tensors(t1, t2, name, rtol=1e-3, atol=1e-3):
+def compare_tensors(t1, t2, name, rtol=1e-4, atol=1e-4):
     if t1 is None or t2 is None:
         return None
         

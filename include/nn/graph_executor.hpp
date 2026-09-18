@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <ostream>
 #include <tuple>
 
@@ -141,6 +142,7 @@ private:
   std::unique_ptr<OffloadAllocator> host_allocator_;
   BuiltPlan active_built_plan_;
   std::map<PlanKey, BuiltPlan> built_plans_;
+  std::optional<PlanKey> requested_plan_key_;
   std::map<Node, Entry> data_;
   std::map<Node, Entry> grads_;
   std::map<Edge, Residuals> residuals_;

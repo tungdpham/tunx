@@ -169,6 +169,7 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
     key.input_dtypes[node] = tensor.dtype();
   }
   if (built_plans_.count(key)) {
+    requested_plan_key_ = key;
     return built_plans_.at(key);
   }
 
@@ -348,6 +349,7 @@ const BuiltPlan &GraphExecutor::build_plans(TensorBundle &input_map, SolverOptio
   plan.total_time_ms = std::chrono::duration<double, std::milli>(end_total - start_total).count();
 
   auto [it, inserted] = built_plans_.emplace(key, std::move(plan));
+  requested_plan_key_ = key;
 
   graph_.workspace_allocator()->evict_unused();
 
@@ -369,6 +371,14 @@ TensorBundle GraphExecutor::forward(TensorBundle &input_map) {
   for (const auto &[uid, tensor] : input_map) {
     auto &node = uid_to_node.at(uid);
     key.input_shapes[node] = tensor.shape();
+    key.input_dtypes[node] = tensor.dtype();
+  }
+
+  if (requested_plan_key_ && requested_plan_key_->input_shapes == key.input_shapes &&
+      requested_plan_key_->input_dtypes == key.input_dtypes &&
+      requested_plan_key_->is_training == key.is_training &&
+      requested_plan_key_->device == key.device) {
+    key = *requested_plan_key_;
   }
 
   auto it = built_plans_.find(key);

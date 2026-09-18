@@ -8,7 +8,7 @@ import torch.optim as optim
 import csv
 import math
 
-from dump_utils import get_model, get_input_shape, save_tensor_bin, save_mapped_param
+from dump_utils import get_model, get_input_shape, map_param_name, save_tensor_bin, save_mapped_param
 from torch_trainer import get_model_config
 from torch.utils.data import DataLoader
 
@@ -21,6 +21,12 @@ def main():
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no-aug", action="store_true", help="Disable augmentation for dataset")
+    parser.add_argument("--dump-inputs", action="store_true",
+                        help="Dump each pre-forward batch for cross-framework debugging")
+    parser.add_argument("--dump-params", action="store_true",
+                        help="Dump trainable parameters after each optimizer step")
+    parser.add_argument("--debug-layer", type=str, default=None,
+                        help="Dump backward input/output gradients for one mapped layer")
     args = parser.parse_args()
 
     os.makedirs(args.dump_dir, exist_ok=True)
@@ -43,6 +49,27 @@ def main():
     print(f"Instantiating model {args.model} on {args.device}...")
     model = get_model(args.model).to(args.device)
     model.train()
+
+    debug_gradients = {}
+    debug_activations = {}
+    if args.debug_layer:
+        for name, module in model.named_modules():
+            mapped_name = map_param_name(name + ".weight").removesuffix(".weight")
+            if mapped_name == args.debug_layer:
+                def capture_backward_gradients(module, grad_input, grad_output):
+                    if grad_input and grad_input[0] is not None:
+                        debug_gradients["input"] = grad_input[0].detach()
+                    if grad_output and grad_output[0] is not None:
+                        debug_gradients["output"] = grad_output[0].detach()
+
+                def capture_forward_output(module, inputs, output):
+                    debug_activations["output"] = output.detach()
+
+                module.register_forward_hook(capture_forward_output)
+                module.register_full_backward_hook(capture_backward_gradients)
+                break
+        else:
+            raise ValueError(f"Unknown mapped debug layer: {args.debug_layer}")
     
     # Dump initial parameters
     print("Dumping initial parameters...")
@@ -112,6 +139,8 @@ def main():
     indices_reshaped = indices.view(args.steps, args.batch_size)
     
     for step in range(args.steps):
+        debug_activations.clear()
+        debug_gradients.clear()
         batch_indices = indices_reshaped[step]
         
         batch_inputs = []
@@ -126,10 +155,20 @@ def main():
             labels = torch.stack(batch_labels).to(args.device)
         else:
             labels = torch.tensor(batch_labels, dtype=torch.long, device=args.device)
+
+        if args.dump_inputs:
+            save_tensor_bin(inputs, os.path.join(args.dump_dir, f"inputs_step_{step + 1}.bin"))
+            save_tensor_bin(labels, os.path.join(args.dump_dir, f"labels_step_{step + 1}.bin"))
         
         optimizer.zero_grad()
         
         outputs = model(inputs)
+        if args.debug_layer:
+            save_tensor_bin(
+                debug_activations["output"],
+                os.path.join(args.dump_dir, f"{args.debug_layer}.output_step_{step + 1}.bin"),
+                name=args.debug_layer,
+            )
         
         # Standard loss computation
         if is_lm:
@@ -144,7 +183,26 @@ def main():
             csv_writer.writerow([step + 1, loss.item(), acc])
             
         loss.backward()
+        if args.debug_layer:
+            for direction, gradient in debug_gradients.items():
+                save_tensor_bin(
+                    gradient,
+                    os.path.join(args.dump_dir,
+                                 f"{args.debug_layer}.grad_{direction}_step_{step + 1}.bin"),
+                    name=args.debug_layer,
+                )
+        if args.dump_params:
+            step_dir = os.path.join(args.dump_dir, f"params_step_{step + 1}")
+            os.makedirs(step_dir, exist_ok=True)
+            for name, param in model.named_parameters():
+                if param.grad is not None:
+                    save_mapped_param(param.grad, name, step_dir, suffix=".grad.bin")
+
         optimizer.step()
+
+        if args.dump_params:
+            for name, param in model.named_parameters():
+                save_mapped_param(param, name, step_dir, suffix=".bin")
         
         if (step + 1) % 100 == 0:
             print(f"Step {step + 1}/{args.steps} | Loss: {loss.item():.4f}")

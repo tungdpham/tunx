@@ -43,10 +43,17 @@ Then, run coordinator after all worker:
 
 ## Running Equivalence Tests
 
+> [!IMPORTANT]
+> **Numerical Precision (TF32 vs FP32)**
+> When running TunX on Ampere-class GPUs (e.g., RTX 30/40 series) with `cuBLAS`/`cuDNN`, NVIDIA drivers enable **TF32** by default. TF32 reduces the mantissa to 10 bits, whereas PyTorch benchmark scripts typically force strict 23-bit FP32 for reproducibility. This precision difference can cause a cascading divergence (up to 40% relative gradient difference after one step, especially in BatchNorm layers). 
+> 
+> To guarantee mathematically identical equivalence with PyTorch, you must disable TF32 in your environment before running TunX:
+> `export NVIDIA_TF32_OVERRIDE=0`
+
 ```bash
 uv run python torch_benchmark/dump_utils.py --model resnet50 --dump-dir dump_pt --batch-size 32
 
-./build/bin/test_equivalence --model resnet50 --pt-dir dump_pt --tunx-dir dump_tunx --batch-size 32
+NVIDIA_TF32_OVERRIDE=0 ./build/bin/test_equivalence --model resnet50 --pt-dir dump_pt --tunx-dir dump_tunx --batch-size 32
 
 uv run python torch_benchmark/compare_equivalence.py --pt_dir dump_pt --tunx_dir dump_tunx > comparison_output.txt 
 ```
@@ -74,7 +81,7 @@ uv run python torch_benchmark/dump_block_utils.py \
 	--batch-size 2 \
 	--seed 42
 
-./build/bin/test_block_equivalence \
+NVIDIA_TF32_OVERRIDE=0 ./build/bin/test_block_equivalence \
 	--block residual \
 	--pt-dir dump_block_pt \
 	--tunx-dir dump_block_tunx \
@@ -96,7 +103,7 @@ for block in residual inception attention gpt2; do
 		--batch-size 2 \
 		--seed 42
 
-	./build/bin/test_block_equivalence \
+	NVIDIA_TF32_OVERRIDE=0 ./build/bin/test_block_equivalence \
 		--block "$block" \
 		--pt-dir "dump_blocks/$block/pt" \
 		--tunx-dir "dump_blocks/$block/tunx" \
@@ -111,6 +118,6 @@ done
 
 ## Running Convergence Tests
 ```bash
-python run_convergence_tests.py --model resnet50 --steps 1000
-python plot_convergence.py --model resnet50 --steps 1000
+NVIDIA_TF32_OVERRIDE=0 uv run python torch_benchmark/run_convergence_tests.py --model resnet50 --steps 1000
+uv run python torch_benchmark/plot_convergence.py --model resnet50 --steps 1000
 ```
