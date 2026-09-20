@@ -66,10 +66,10 @@ void SGD::update_impl_T(Tensor &param, const Tensor &grad, Tensor &velocity, str
     if (momentum_ > 0.0f) {
       create_cpu_task(device, s, cpu::sgd::update_sgd_momentum<T>, param.data_as<T>(),
                       grad.data_as<T>(), velocity.data_as<T>(), size, this->learning_rate_,
-                      momentum_);
+                      momentum_, weight_decay_);
     } else {
       create_cpu_task(device, s, cpu::sgd::update_sgd<T>, param.data_as<T>(), grad.data_as<T>(),
-                      size, this->learning_rate_);
+                      size, this->learning_rate_, weight_decay_);
     }
   }
 #ifdef TUNX_USE_CUDA
@@ -77,10 +77,10 @@ void SGD::update_impl_T(Tensor &param, const Tensor &grad, Tensor &velocity, str
     if (momentum_ > 0.0f) {
       create_cuda_task(device, s, cuda::sgd::update_sgd_momentum<T>, param.data_as<T>(),
                        grad.data_as<T>(), velocity.data_as<T>(), size, this->learning_rate_,
-                       momentum_);
+                       momentum_, weight_decay_);
     } else {
       create_cuda_task(device, s, cuda::sgd::update_sgd<T>, param.data_as<T>(), grad.data_as<T>(),
-                       size, this->learning_rate_);
+                       size, this->learning_rate_, weight_decay_);
     }
   }
 #endif
@@ -103,6 +103,7 @@ OptimizerConfig SGD::get_config() const {
   config.name = "SGD";
   config.set("learning_rate", this->learning_rate_);
   config.set("momentum", momentum_);
+  config.set("weight_decay", weight_decay_);
   return config;
 }
 
@@ -188,8 +189,9 @@ std::unique_ptr<Optimizer> OptimizerFactory::create_from_config(const OptimizerC
   throw std::invalid_argument("Unknown optimizer type: " + config.type);
 }
 
-std::unique_ptr<Optimizer> OptimizerFactory::create_sgd(float learning_rate, float momentum) {
-  return std::make_unique<SGD>(learning_rate, momentum);
+std::unique_ptr<Optimizer> OptimizerFactory::create_sgd(float learning_rate, float momentum,
+                                                         float weight_decay) {
+  return std::make_unique<SGD>(learning_rate, momentum, weight_decay);
 }
 
 std::unique_ptr<Optimizer> OptimizerFactory::create_adam(float learning_rate, float beta1,

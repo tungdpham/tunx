@@ -850,21 +850,23 @@ void GraphExecutor::backward_edge(const Edge &edge) {
   }
   Vec<Tensor> grad_inputs = edge->layer()->backward(grad_outputs, residuals_it->second);
 
+  if (backward_grad_hook_) {
+    // Capture the per-edge gradient contributions BEFORE accumulation so that
+    // producers_snap matches PyTorch's grad_input semantics: it contains only
+    // the gradient contribution from THIS edge, not any partially-accumulated
+    // result at the node (which would incorrectly include contributions from
+    // other edges at shared nodes, e.g. residual connections).
+    std::map<std::string, Tensor> producers_snap;
+    for (size_t index = 0; index < edge->producers().size(); ++index) {
+      const Node &producer = edge->producers()[index];
+      producers_snap[producer->uid()] = grad_inputs[index];
+    }
+    backward_grad_hook_(edge, consumers_snap, producers_snap);
+  }
+
   for (size_t index = 0; index < edge->producers().size(); ++index) {
     const Node &producer = edge->producers()[index];
     accumulate_grad(producer, grad_inputs[index], grad_ref_counts_[producer]);
-  }
-
-  if (backward_grad_hook_) {
-    // Capture producer grads after accumulating — these are d_loss/d_input (PyTorch's grad_input).
-    std::map<std::string, Tensor> producers_snap;
-    for (const auto &producer : edge->producers()) {
-      auto it = grads_.find(producer);
-      if (it != grads_.end() && it->second.ref_count > 0) {
-        producers_snap[producer->uid()] = it->second.tensor;
-      }
-    }
-    backward_grad_hook_(edge, consumers_snap, producers_snap);
   }
 }
 

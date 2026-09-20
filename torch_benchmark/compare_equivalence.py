@@ -8,17 +8,35 @@ import numpy as np
 from pathlib import Path
 from tabulate import tabulate
 
+_topology_order = None
 
+def load_topology_order(pt_dir):
+    global _topology_order
+    topology_file = os.path.join(pt_dir, "topology_order.txt")
+    if os.path.exists(topology_file):
+        with open(topology_file, "r") as f:
+            _topology_order = [line.strip() for line in f if line.strip()]
 def topological_key(name):
     """Return the execution-order key for TunX/PyTorch operator names."""
     base_name = name
+    # Strip dynamic per-step suffixes: .output_step_N.bin, .grad_input_step_N.bin, etc.
+    base_name = re.sub(r"\.(output|grad_input|grad_output)_step_\d+\.bin$", "", base_name)
     for suffix in (".act.grad.bin", ".act.bin", ".batch_mean.bin", ".batch_invar.bin",
-                   ".running_mean.bin", ".running_var.bin", ".weight.grad",
-                   ".bias.grad", ".weight.updated", ".bias.updated",
-                   ".weight", ".bias", ".grad", ".updated"):
+                   ".running_mean.bin", ".running_var.bin",
+                   ".grad", ".updated", ".grad.bin", ".updated.bin"):
         if base_name.endswith(suffix):
             base_name = base_name[:-len(suffix)]
             break
+
+    if _topology_order is not None:
+        try:
+            return (-1, _topology_order.index(base_name), name)
+        except ValueError:
+            # Fallback for batchnorm stats that don't have .weight/.bias, match the prefix
+            for i, order_name in enumerate(_topology_order):
+                if order_name.startswith(base_name):
+                    return (-1, i, name)
+            return (100, len(_topology_order), name)
 
     if base_name == "conv1":
         return (0, 0, 0, name)
@@ -155,6 +173,8 @@ def main():
     parser.add_argument("--tunx_dir", type=str, required=True)
     parser.add_argument("--summary-json", type=str, default=None)
     args = parser.parse_args()
+
+    load_topology_order(args.pt_dir)
 
     results_out = []
     results_loss_grad = []

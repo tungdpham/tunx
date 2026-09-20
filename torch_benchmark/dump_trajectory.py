@@ -25,8 +25,12 @@ def main():
                         help="Dump each pre-forward batch for cross-framework debugging")
     parser.add_argument("--dump-params", action="store_true",
                         help="Dump trainable parameters after each optimizer step")
+    parser.add_argument("--dump-loss-gradients", action="store_true",
+                        help="Dump dLoss/dOutputs for identical-upstream-gradient diagnostics")
     parser.add_argument("--debug-layer", type=str, default=None,
                         help="Dump backward input/output gradients for one mapped layer")
+    parser.add_argument("--dump-activations", action="store_true",
+                        help="Dump intermediate activations and gradients for all layers per step")
     args = parser.parse_args()
 
     os.makedirs(args.dump_dir, exist_ok=True)
@@ -48,6 +52,11 @@ def main():
 
     print(f"Instantiating model {args.model} on {args.device}...")
     model = get_model(args.model).to(args.device)
+    # Match TunX's NHWC storage for image models while keeping NCHW logical shapes.
+    is_lm = "gpt2" in args.model
+    if not is_lm:
+        model = model.to(memory_format=torch.channels_last)
+        print("Using channels-last memory format for model and image inputs")
     model.train()
 
     debug_gradients = {}
@@ -70,11 +79,43 @@ def main():
                 break
         else:
             raise ValueError(f"Unknown mapped debug layer: {args.debug_layer}")
+
+    # All-layer activation/gradient hooks for --dump-activations
+    all_step_activations = {}  # mapped_name -> tensor
+    all_step_grad_inputs = {}  # mapped_name -> tensor
+    all_step_grad_outputs = {}  # mapped_name -> tensor
+    if args.dump_activations:
+        def make_act_hook(mapped_name):
+            def hook(module, inputs, output):
+                if isinstance(output, torch.Tensor):
+                    all_step_activations[mapped_name] = output.detach().clone()
+            return hook
+        def make_grad_hook(mapped_name):
+            def hook(module, grad_input, grad_output):
+                if grad_input and grad_input[0] is not None:
+                    all_step_grad_inputs[mapped_name] = grad_input[0].detach().clone()
+                if grad_output and grad_output[0] is not None:
+                    all_step_grad_outputs[mapped_name] = grad_output[0].detach().clone()
+            return hook
+        for name, module in model.named_modules():
+            if not name:
+                continue
+            mapped_name = map_param_name(name + ".weight").removesuffix(".weight")
+            if mapped_name:
+                module.register_forward_hook(make_act_hook(mapped_name))
+                module.register_full_backward_hook(make_grad_hook(mapped_name))
     
     # Dump initial parameters
     print("Dumping initial parameters...")
+    topology_order = []
     for name, param in model.named_parameters():
-        save_mapped_param(param, name, args.dump_dir, suffix=".bin")
+        saved_names = save_mapped_param(param, name, args.dump_dir, suffix=".bin")
+        if saved_names:
+            topology_order.extend(saved_names)
+            
+    with open(os.path.join(args.dump_dir, "topology_order.txt"), "w") as f:
+        for item in topology_order:
+            f.write(f"{item}\n")
         
     # Generate deterministic inputs for all steps from dataset
     model_name_mapped = args.model
@@ -118,12 +159,13 @@ def main():
     indices_path = os.path.join(args.dump_dir, "indices_trajectory.bin")
     indices_np.tofile(indices_path)
     
-    is_lm = "gpt2" in args.model
-        
     # No need to dump massive inputs/labels binaries anymore
 
     # Optimizer
-    optimizer = optim.Adam(model.parameters(), lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=3e-4)
+    if is_lm:
+        optimizer = optim.Adam(model.parameters(), lr=1e-3, betas=(0.9, 0.999), eps=1e-8, weight_decay=3e-4)
+    else:
+        optimizer = optim.SGD(model.parameters(), lr=1e-3, momentum=0.9, weight_decay=1e-4)
 
     # Prepare CSV logging
     csv_path = os.path.join(args.dump_dir, f"pt_trajectory_seed_{args.seed}.csv")
@@ -151,6 +193,8 @@ def main():
             batch_labels.append(lbl)
             
         inputs = torch.stack(batch_inputs).to(args.device)
+        if not is_lm:
+            inputs = inputs.contiguous(memory_format=torch.channels_last)
         if isinstance(batch_labels[0], torch.Tensor):
             labels = torch.stack(batch_labels).to(args.device)
         else:
@@ -161,8 +205,13 @@ def main():
             save_tensor_bin(labels, os.path.join(args.dump_dir, f"labels_step_{step + 1}.bin"))
         
         optimizer.zero_grad()
+        all_step_activations.clear()
+        all_step_grad_inputs.clear()
+        all_step_grad_outputs.clear()
         
         outputs = model(inputs)
+        if args.dump_loss_gradients:
+            outputs.retain_grad()
         if args.debug_layer:
             save_tensor_bin(
                 debug_activations["output"],
@@ -183,6 +232,29 @@ def main():
             csv_writer.writerow([step + 1, loss.item(), acc])
             
         loss.backward()
+        if args.dump_loss_gradients:
+            save_tensor_bin(outputs.grad, os.path.join(
+                args.dump_dir, f"loss_gradient_step_{step + 1}.bin"))
+        if args.dump_activations:
+            step_str = step + 1
+            for layer_name, tensor in all_step_activations.items():
+                save_tensor_bin(
+                    tensor,
+                    os.path.join(args.dump_dir, f"{layer_name}.output_step_{step_str}.bin"),
+                    name=layer_name,
+                )
+            for layer_name, tensor in all_step_grad_inputs.items():
+                save_tensor_bin(
+                    tensor,
+                    os.path.join(args.dump_dir, f"{layer_name}.grad_input_step_{step_str}.bin"),
+                    name=layer_name,
+                )
+            for layer_name, tensor in all_step_grad_outputs.items():
+                save_tensor_bin(
+                    tensor,
+                    os.path.join(args.dump_dir, f"{layer_name}.grad_output_step_{step_str}.bin"),
+                    name=layer_name,
+                )
         if args.debug_layer:
             for direction, gradient in debug_gradients.items():
                 save_tensor_bin(
@@ -202,7 +274,7 @@ def main():
 
         if args.dump_params:
             for name, param in model.named_parameters():
-                save_mapped_param(param, name, step_dir, suffix=".bin")
+                save_mapped_param(param, name, step_dir, suffix=".updated.bin")
         
         if (step + 1) % 100 == 0:
             print(f"Step {step + 1}/{args.steps} | Loss: {loss.item():.4f}")

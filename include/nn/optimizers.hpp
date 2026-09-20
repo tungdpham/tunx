@@ -46,9 +46,10 @@ protected:
 
 class SGD : public Optimizer {
 public:
-  SGD(float learning_rate = 0.01f, float momentum = 0.0f)
+  SGD(float learning_rate = 0.01f, float momentum = 0.0f, float weight_decay = 0.0f)
       : Optimizer(learning_rate),
-        momentum_(momentum) {}
+        momentum_(momentum),
+        weight_decay_(weight_decay) {}
 
   std::string name() const override { return "SGD"; }
 
@@ -66,6 +67,7 @@ protected:
 
 private:
   float momentum_;
+  float weight_decay_;
   Vec<Tensor> velocities_;
 
   template <typename T>
@@ -121,7 +123,8 @@ private:
 class OptimizerFactory {
 public:
   static std::unique_ptr<Optimizer> create_from_config(const OptimizerConfig &config);
-  static std::unique_ptr<Optimizer> create_sgd(float learning_rate = 0.01f, float momentum = 0.0f);
+  static std::unique_ptr<Optimizer> create_sgd(float learning_rate = 0.01f, float momentum = 0.0f,
+                                               float weight_decay = 0.0f);
   static std::unique_ptr<Optimizer> create_adam(float learning_rate = 0.001f, float beta1 = 0.9f,
                                                 float beta2 = 0.999f, float epsilon = 1e-8f,
                                                 float weight_decay = 0.0f,

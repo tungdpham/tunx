@@ -62,37 +62,37 @@ def main():
     print(f"PyTorch Final {metric_col.capitalize()}: {pt_metric_mean[-1]:.4f} +- {pt_metric_std[-1]:.4f}")
     print(f"TunX Final {metric_col.capitalize()}   : {tunx_metric_mean[-1]:.4f} +- {tunx_metric_std[-1]:.4f}")
 
-    # Plot Loss
-    plt.figure(figsize=(10, 6))
-    plt.plot(pt_steps, pt_loss_mean, label='PyTorch', color='orange')
-    plt.fill_between(pt_steps, pt_loss_mean - pt_loss_std, pt_loss_mean + pt_loss_std, color='orange', alpha=0.3)
-    
-    plt.plot(tunx_steps, tunx_loss_mean, label='TunX', color='blue')
-    plt.fill_between(tunx_steps, tunx_loss_mean - tunx_loss_std, tunx_loss_mean + tunx_loss_std, color='blue', alpha=0.3)
-    
-    plt.xlabel('Steps')
-    plt.ylabel('Loss')
-    plt.title(f'{args.model} Convergence (Loss) over {args.steps} Steps (Mean ± Std)')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.savefig(os.path.join(project_root, f"{args.model}_convergence_loss.png"))
-    
-    # Plot Metric
-    plt.figure(figsize=(10, 6))
-    plt.plot(pt_steps, pt_metric_mean, label='PyTorch', color='orange')
-    plt.fill_between(pt_steps, pt_metric_mean - pt_metric_std, pt_metric_mean + pt_metric_std, color='orange', alpha=0.3)
-    
-    plt.plot(tunx_steps, tunx_metric_mean, label='TunX', color='blue')
-    plt.fill_between(tunx_steps, tunx_metric_mean - tunx_metric_std, tunx_metric_mean + tunx_metric_std, color='blue', alpha=0.3)
-    
-    plt.xlabel('Steps')
-    plt.ylabel(metric_col.capitalize())
-    plt.title(f'{args.model} Convergence ({metric_col.capitalize()}) over {args.steps} Steps (Mean ± Std)')
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
-    plt.tight_layout()
-    plt.savefig(os.path.join(project_root, f"{args.model}_convergence_{metric_col}.png"))
+    for i, seed in enumerate(seeds):
+        if i >= len(pt_dfs) or i >= len(tunx_dfs):
+            continue
+            
+        # Plot Loss for this seed
+        plt.figure(figsize=(10, 6))
+        plt.plot(pt_steps, pt_dfs[i]['loss'].values, label=f'PyTorch (Seed {seed})', color='orange', linestyle='--')
+        plt.plot(tunx_steps, tunx_dfs[i]['loss'].values, label=f'TunX (Seed {seed})', color='blue', linestyle='-')
+        
+        plt.xlabel('Steps')
+        plt.ylabel('Loss')
+        plt.title(f'{args.model} Convergence (Loss) over {args.steps} Steps (Seed {seed})')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.savefig(os.path.join(project_root, f"{args.model}_convergence_loss_seed_{seed}.png"))
+        plt.close()
+        
+        # Plot Metric for this seed
+        plt.figure(figsize=(10, 6))
+        plt.plot(pt_steps, pt_dfs[i][metric_col].values, label=f'PyTorch (Seed {seed})', color='orange', linestyle='--')
+        plt.plot(tunx_steps, tunx_dfs[i][metric_col].values, label=f'TunX (Seed {seed})', color='blue', linestyle='-')
+        
+        plt.xlabel('Steps')
+        plt.ylabel(metric_col.capitalize())
+        plt.title(f'{args.model} Convergence ({metric_col.capitalize()}) over {args.steps} Steps (Seed {seed})')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.savefig(os.path.join(project_root, f"{args.model}_convergence_{metric_col}_seed_{seed}.png"))
+        plt.close()
 
     print(f"Plots saved to {project_root}")
 

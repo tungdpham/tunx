@@ -95,8 +95,11 @@ struct conv2d_fwd_graph {
     ensure_ok(graph->validate(), "conv_fprop validate");
     ensure_ok(graph->build_operation_graph(handle), "conv_fprop build op graph");
     ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
-              "conv_fprop create plans");
-    ensure_ok(graph->check_support(), "conv_fprop check support");
+              "conv_fwd create plans");
+    graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
+                                   fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
+                                   fe::NumericalNote_t::TENSOR_CORE});
+    ensure_ok(graph->check_support(), "conv_fwd check support");
     ensure_ok(graph->build_plans(), "conv_fprop build plans");
 
     int64 ws = 0;
@@ -164,6 +167,9 @@ struct conv2d_dgrad_graph {
     ensure_ok(graph->build_operation_graph(handle), "conv_dgrad build op graph");
     ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
               "conv_dgrad create plans");
+    graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
+                                   fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
+                                   fe::NumericalNote_t::TENSOR_CORE});
     ensure_ok(graph->check_support(), "conv_dgrad check support");
     ensure_ok(graph->build_plans(), "conv_dgrad build plans");
 
@@ -220,7 +226,8 @@ struct conv2d_wgrad_graph {
             .set_pre_padding({static_cast<int64>(stats.pad_h), static_cast<int64>(stats.pad_w)})
             .set_post_padding({static_cast<int64>(stats.pad_h), static_cast<int64>(stats.pad_w)})
             .set_stride({static_cast<int64>(stats.stride_h), static_cast<int64>(stats.stride_w)})
-            .set_dilation({1, 1});
+            .set_dilation({1, 1})
+            .set_compute_data_type(compute_type);
 
     dw = graph->conv_wgrad(dy, x, wgrad_options);
     dw->set_output(true)
@@ -232,6 +239,9 @@ struct conv2d_wgrad_graph {
     ensure_ok(graph->build_operation_graph(handle), "conv_wgrad build op graph");
     ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
               "conv_wgrad create plans");
+    graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
+                                   fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
+                                   fe::NumericalNote_t::TENSOR_CORE});
     ensure_ok(graph->check_support(), "conv_wgrad check support");
     ensure_ok(graph->build_plans(), "conv_wgrad build plans");
 

@@ -137,13 +137,16 @@ def save_mapped_param(tensor, name, dump_dir, suffix=".bin"):
         save_tensor_bin(q, os.path.join(dump_dir, f"{base_name}.q.{param_type}{suffix}"), name=name)
         save_tensor_bin(k, os.path.join(dump_dir, f"{base_name}.k.{param_type}{suffix}"), name=name)
         save_tensor_bin(v, os.path.join(dump_dir, f"{base_name}.v.{param_type}{suffix}"), name=name)
+        return [f"{base_name}.q.{param_type}", f"{base_name}.k.{param_type}", f"{base_name}.v.{param_type}"]
     elif "attn_proj" in mapped_name:
         base_name = mapped_name.replace("attn_proj", "attn")
         param_type = "weight" if "weight" in name else "bias"
         base_name = base_name.replace(f".{param_type}", "")
         save_tensor_bin(tensor, os.path.join(dump_dir, f"{base_name}.out.{param_type}{suffix}"), name=name)
+        return [f"{base_name}.out.{param_type}"]
     else:
         save_tensor_bin(tensor, os.path.join(dump_dir, f"{mapped_name}{suffix}"), name=name)
+        return [mapped_name]
 
 def main():
     parser = argparse.ArgumentParser()

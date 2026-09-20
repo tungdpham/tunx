@@ -31,17 +31,48 @@ void dump_parameters(const Graph& graph, const std::string& directory, bool grad
   mkdir(directory.c_str(), 0777);
   for (const auto& edge : graph.edges()) {
     auto layer = edge->layer();
-    const auto params = layer->params();
+    auto params = layer->params();
     if (params.empty()) continue;
 
-    const std::string& name = layer->name();
-    if (params.size() >= 1 && params[0].requires_grad()) {
-      save_tensor_bin(gradients ? params[0].grad() : params[0].data(),
-                      directory + "/" + name + ".weight" + (gradients ? ".grad.bin" : ".bin"));
-    }
-    if (params.size() >= 2 && params[1].requires_grad()) {
-      save_tensor_bin(gradients ? params[1].grad() : params[1].data(),
-                      directory + "/" + name + ".bias" + (gradients ? ".grad.bin" : ".bin"));
+    std::string name = layer->name();
+
+    bool is_attn = (name.find("attn") != std::string::npos);
+    if (is_attn && (params.size() == 8 || params.size() == 4)) {
+      bool has_bias = (params.size() == 8);
+      const char* suffixes_w_grad[] = {".q.weight.grad.bin", ".k.weight.grad.bin",
+                                       ".v.weight.grad.bin", ".out.weight.grad.bin"};
+      const char* suffixes_b_grad[] = {".q.bias.grad.bin", ".k.bias.grad.bin", ".v.bias.grad.bin",
+                                       ".out.bias.grad.bin"};
+      const char* suffixes_w_upd[] = {".q.weight.updated.bin", ".k.weight.updated.bin",
+                                      ".v.weight.updated.bin", ".out.weight.updated.bin"};
+      const char* suffixes_b_upd[] = {".q.bias.updated.bin", ".k.bias.updated.bin",
+                                      ".v.bias.updated.bin", ".out.bias.updated.bin"};
+
+      const char** suffixes_w = gradients ? suffixes_w_grad : suffixes_w_upd;
+      const char** suffixes_b = gradients ? suffixes_b_grad : suffixes_b_upd;
+
+      for (size_t i = 0; i < 4; ++i) {
+        size_t w_idx = has_bias ? (i * 2) : i;
+        if (params[w_idx].requires_grad()) {
+          save_tensor_bin(gradients ? params[w_idx].grad() : params[w_idx].data(),
+                          directory + "/" + name + suffixes_w[i]);
+        }
+        if (has_bias && params[w_idx + 1].requires_grad()) {
+          save_tensor_bin(gradients ? params[w_idx + 1].grad() : params[w_idx + 1].data(),
+                          directory + "/" + name + suffixes_b[i]);
+        }
+      }
+    } else {
+      if (params.size() >= 1 && params[0].requires_grad()) {
+        save_tensor_bin(
+            gradients ? params[0].grad() : params[0].data(),
+            directory + "/" + name + ".weight" + (gradients ? ".grad.bin" : ".updated.bin"));
+      }
+      if (params.size() >= 2 && params[1].requires_grad()) {
+        save_tensor_bin(
+            gradients ? params[1].grad() : params[1].data(),
+            directory + "/" + name + ".bias" + (gradients ? ".grad.bin" : ".updated.bin"));
+      }
     }
   }
 }
@@ -61,6 +92,8 @@ int main(int argc, char** argv) {
   bool dump_inputs = false;
   bool load_inputs = false;
   bool dump_params = false;
+  bool load_loss_gradients = false;
+  bool dump_activations = false;
   std::string debug_layer = "";
 
   for (int i = 1; i < argc; ++i) {
@@ -85,6 +118,10 @@ int main(int argc, char** argv) {
       load_inputs = true;
     } else if (arg == "--dump-params") {
       dump_params = true;
+    } else if (arg == "--load-loss-gradients") {
+      load_loss_gradients = true;
+    } else if (arg == "--dump-activations") {
+      dump_activations = true;
     } else if (arg == "--debug-layer" && i + 1 < argc) {
       debug_layer = argv[++i];
     } else if (arg == "--executor-mode" && i + 1 < argc) {
@@ -102,6 +139,7 @@ int main(int argc, char** argv) {
               << " --model <name> --pt-dir <dir> --tunx-dir <dir> [--batch-size <N>] [--steps <N>] "
                  "[--seed <N>] [--no-aug] [--dump-inputs] [--load-inputs] [--dump-params]"
                  " [--debug-layer <name>]"
+                 " [--load-loss-gradients]"
               << " [--executor-mode optimized|naive|linear|branching|joining]"
               << " [--engine default|cuda|cudnn]" << std::endl;
     return 1;
@@ -255,33 +293,47 @@ int main(int argc, char** argv) {
   Tensor labels = Tensor(single_label_shape, DType_t::INT32, allocator);
 
   GraphExecutor executor(graph);
+  // Per-layer activations and gradients: keyed by layer name -> (first uid, tensor)
+  std::map<std::string, std::pair<std::string, Tensor>> all_activations;
+  std::map<std::string, std::pair<std::string, Tensor>> all_grad_inputs;
+  std::map<std::string, std::pair<std::string, Tensor>> all_grad_outputs;
+  // Legacy single-layer debug maps (kept for --debug-layer backward compat)
   std::map<std::string, Tensor> debug_activations;
   std::map<std::string, Tensor> debug_grad_inputs;
   std::map<std::string, Tensor> debug_grad_outputs;
-  if (!debug_layer.empty()) {
+  if (!debug_layer.empty() || dump_activations) {
     executor.set_forward_hook(
         [&](const Edge& edge, const std::map<std::string, Tensor>& consumers_data) {
-          if (edge->layer()->name() != debug_layer) return;
+          if (!edge->layer()) return;
+          const std::string& layer_name = edge->layer()->name();
+          bool is_debug = (layer_name == debug_layer);
+          if (!is_debug && !dump_activations) return;
           for (const auto& [uid, tensor] : consumers_data) {
             Tensor copy_tensor(tensor.shape(), tensor.dtype(), allocator);
             copy(tensor, copy_tensor, executor.graph().handle().get_stream());
-            debug_activations[uid] = std::move(copy_tensor);
+            if (is_debug) debug_activations[uid] = copy_tensor;
+            if (dump_activations) all_activations[layer_name] = {uid, std::move(copy_tensor)};
           }
         });
     executor.set_backward_grad_hook([&](const Edge& edge,
                                         const std::map<std::string, Tensor>& consumers_grads,
                                         const std::map<std::string, Tensor>& producers_grads) {
-      if (edge->layer()->name() != debug_layer) return;
+      if (!edge->layer()) return;
+      const std::string& layer_name = edge->layer()->name();
+      bool is_debug = (layer_name == debug_layer);
+      if (!is_debug && !dump_activations) return;
       for (const auto& [uid, tensor] : consumers_grads) {
         Tensor copy_tensor(tensor.shape(), tensor.dtype(), allocator);
         copy(tensor, copy_tensor, executor.graph().handle().get_stream());
-        debug_grad_outputs[uid] = std::move(copy_tensor);
+        if (is_debug) debug_grad_outputs[uid] = copy_tensor;
+        if (dump_activations) all_grad_outputs[layer_name] = {uid, std::move(copy_tensor)};
       }
       if (!producers_grads.empty()) {
         for (const auto& [uid, tensor] : producers_grads) {
           Tensor copy_tensor(tensor.shape(), tensor.dtype(), allocator);
           copy(tensor, copy_tensor, executor.graph().handle().get_stream());
-          debug_grad_inputs[uid] = std::move(copy_tensor);
+          if (is_debug) debug_grad_inputs[uid] = copy_tensor;
+          if (dump_activations) all_grad_inputs[layer_name] = {uid, std::move(copy_tensor)};
         }
       }
     });
@@ -304,7 +356,12 @@ int main(int argc, char** argv) {
   executor.build_plans(input_tensors, solver_options);
 
   std::shared_ptr<Loss> criterion = std::make_shared<CrossEntropyLoss>();
-  std::shared_ptr<Optimizer> optimizer = std::make_shared<Adam>(1e-3, 0.9, 0.999, 1e-8, 3e-4);
+  std::shared_ptr<Optimizer> optimizer;
+  if (is_lm) {
+    optimizer = std::make_shared<Adam>(1e-3, 0.9, 0.999, 1e-8, 3e-4);
+  } else {
+    optimizer = std::make_shared<SGD>(1e-3, 0.9, 1e-4);
+  }
   optimizer->attach(graph);
 
   std::string csv_path = tunx_dir + "/tunx_trajectory_seed_" + std::to_string(seed) + ".csv";
@@ -326,13 +383,27 @@ int main(int argc, char** argv) {
     debug_activations.clear();
     debug_grad_inputs.clear();
     debug_grad_outputs.clear();
+    all_activations.clear();
+    all_grad_inputs.clear();
+    all_grad_outputs.clear();
 
     Tensor inputs_host, labels_host;
     const std::string step_suffix = "_step_" + std::to_string(step + 1) + ".bin";
     if (load_inputs) {
-      load_tensor_bin(inputs, pt_dir + "/inputs" + step_suffix);
-      load_tensor_bin(labels, pt_dir + "/labels" + step_suffix);
-      input_tensors.set("input", inputs);
+      Tensor host_inputs(inputs.shape(), inputs.dtype(), getHost());
+      Tensor host_labels(labels.shape(), labels.dtype(), getHost());
+      load_tensor_bin(host_inputs, pt_dir + "/inputs" + step_suffix);
+      load_tensor_bin(host_labels, pt_dir + "/labels" + step_suffix);
+
+      if (device.device_type() == DeviceType::CUDA) {
+        cudaMemcpy(inputs.data_as<void>(), host_inputs.data_as<void>(), input_bytes,
+                   cudaMemcpyHostToDevice);
+        cudaMemcpy(labels.data_as<void>(), host_labels.data_as<void>(), label_bytes,
+                   cudaMemcpyHostToDevice);
+      } else {
+        memcpy(inputs.data_as<void>(), host_inputs.data_as<void>(), input_bytes);
+        memcpy(labels.data_as<void>(), host_labels.data_as<void>(), label_bytes);
+      }
     } else {
       Vec<size_t> step_indices;
       for (size_t i = 0; i < batch_size; ++i) {
@@ -412,6 +483,14 @@ int main(int argc, char** argv) {
 
     Tensor loss_gradient = Tensor(predictions.shape(), predictions.dtype(), allocator);
     criterion->compute_gradient(predictions, labels, loss_gradient);
+    if (load_loss_gradients) {
+      // Keep the native gradient for comparison, then bypass the loss backward
+      // with the exact upstream gradient used by the PyTorch model backward.
+      const std::string suffix = "_step_" + std::to_string(step + 1) + ".bin";
+      save_tensor_bin(loss_gradient, tunx_dir + "/native_loss_gradient" + suffix);
+      load_tensor_bin(loss_gradient, pt_dir + "/loss_gradient" + suffix);
+      save_tensor_bin(loss_gradient, tunx_dir + "/loss_gradient" + suffix);
+    }
 
     TensorBundle output_grads{{"output", loss_gradient}};
     executor.backward(output_grads);
@@ -431,6 +510,22 @@ int main(int argc, char** argv) {
       save_tensor_bin(
           debug_grad_outputs.begin()->second,
           tunx_dir + "/" + debug_layer + ".grad_output_step_" + std::to_string(step + 1) + ".bin");
+    }
+
+    if (dump_activations) {
+      const std::string step_str = std::to_string(step + 1);
+      for (const auto& [name, uid_tensor] : all_activations) {
+        save_tensor_bin(uid_tensor.second,
+                        tunx_dir + "/" + name + ".output_step_" + step_str + ".bin");
+      }
+      for (const auto& [name, uid_tensor] : all_grad_inputs) {
+        save_tensor_bin(uid_tensor.second,
+                        tunx_dir + "/" + name + ".grad_input_step_" + step_str + ".bin");
+      }
+      for (const auto& [name, uid_tensor] : all_grad_outputs) {
+        save_tensor_bin(uid_tensor.second,
+                        tunx_dir + "/" + name + ".grad_output_step_" + step_str + ".bin");
+      }
     }
 
     const std::string parameter_dir = tunx_dir + "/params_step_" + std::to_string(step + 1);
