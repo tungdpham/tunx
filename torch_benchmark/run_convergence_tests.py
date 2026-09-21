@@ -72,7 +72,6 @@ def compare_step_parameters(pt_dir, tunx_dir, steps, *, start_step=1):
                 else:
                     results_upd.append(res)
                     
-        print(f"\n=================== Step {step} Parameters ===================")
         if results_grad:
             print_table(f"Gradients (Step {step})", results_grad)
         if results_upd:
@@ -114,7 +113,7 @@ def compare_step_debug_layer(pt_dir, tunx_dir, steps, debug_layer, *, start_step
                         results_act.append(res)
         
         if results_act or results_grad:
-            print(f"\n=================== Step {step} Debug Layer '{debug_layer}' ===================")
+            print(f"\n=================== Debug Layer '{debug_layer}' ===================")
             if results_act: print_table("Intermediate Activations", results_act)
             if results_grad: print_table("Intermediate Gradients", results_grad)
 
@@ -149,7 +148,6 @@ def compare_step_activations(pt_dir, tunx_dir, steps, *, start_step=1):
                         else:
                             results_act.append(res)
         if results_act or results_grad:
-            print(f"\n=================== Step {step} Intermediate Tensors ===================")
             if results_act:
                 print_table(f"Intermediate Activations (Step {step})", results_act)
             if results_grad:
@@ -206,8 +204,16 @@ def main():
                         help="Engine to run the tunx convergence test (e.g., cuda, cudnn)")
     parser.add_argument("--fp64", action="store_true",
                         help="Run model and tensors in double precision (FP64)")
+    parser.add_argument("--output-root", default=None, help="Separate root for trajectory artifacts")
+    parser.add_argument("--preload-images", action="store_true",
+                        help="Preload all compressed ImageNet100 images into RAM before shuffling")
+    parser.add_argument("--preload-image-budget-gib", type=float, default=20)
     args = parser.parse_args()
+    if args.preload_images and (args.model != "resnet50" or args.preload_image_budget_gib <= 0):
+        parser.error("--preload-images requires resnet50 and a positive memory budget")
 
+    compact_inputs = args.model == "resnet50" and not args.fp64 and not args.debug_compare
+    dump_inputs = args.debug_compare or (args.model != "resnet50" and "gpt2" not in args.model) or args.fp64
     seeds = [42]
     base_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.abspath(os.path.join(base_dir, ".."))
@@ -228,8 +234,8 @@ def main():
         print(f"Running convergence test for {args.model} with seed {seed}")
         print(f"==================================================")
         
-        dump_dir = os.path.join(project_root, "dump", f"trajectory_{args.model}_{seed}")
-        tunx_dir = os.path.join(project_root, "dump", f"tunx_trajectory_{args.model}_{seed}")
+        dump_dir = os.path.join(args.output_root or os.path.join(project_root, "dump"), f"trajectory_{args.model}_{seed}")
+        tunx_dir = os.path.join(args.output_root or os.path.join(project_root, "dump"), f"tunx_trajectory_{args.model}_{seed}")
         
         # 1. Run PyTorch generator
         print(">>> Running PyTorch generator...")
@@ -241,8 +247,15 @@ def main():
             "--seed", str(seed),
             "--dump-dir", dump_dir,
             "--no-aug",
-            "--dump-inputs",
+
         ]
+        if compact_inputs:
+            cmd_pt.append("--compact-inputs")
+        if args.preload_images:
+            cmd_pt.extend(["--preload-images", "--preload-image-budget-gib",
+                           str(args.preload_image_budget_gib)])
+        if dump_inputs:
+            cmd_pt.append("--dump-inputs")
         if args.debug_compare:
             cmd_pt.extend(["--dump-params"])
         if args.shared_loss_gradient:
@@ -267,8 +280,12 @@ def main():
             "--tunx-dir", tunx_dir,
             "--no-aug",
             "--engine", args.engine,
-            "--load-inputs",
+
         ]
+        if compact_inputs:
+            cmd_tunx.append("--compact-inputs")
+        if dump_inputs:
+            cmd_tunx.append("--load-inputs")
         if args.debug_compare:
             cmd_tunx.extend(["--dump-inputs", "--dump-params"])
         if args.shared_loss_gradient:

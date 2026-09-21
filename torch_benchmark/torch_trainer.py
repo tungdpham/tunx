@@ -16,6 +16,7 @@ Environment variables can override defaults (see .env or shell):
 import argparse
 import csv
 import datetime
+import io
 import math
 import os
 import time
@@ -265,9 +266,39 @@ class ImageNet100Dataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
+    def preload_images(self, max_bytes):
+        """Load compressed source images into RAM without creating a disk cache.
+
+        Sample indices and transforms stay unchanged. Call before constructing a
+        shuffled sampler; decoding remains lazy to avoid a full float32 corpus.
+        The budget covers encoded image bytes, not Python or decoder overhead.
+        """
+        if not math.isfinite(max_bytes) or max_bytes <= 0:
+            raise ValueError("Image preload budget must be finite and positive")
+        if hasattr(self, "_encoded_images"):
+            return
+        required = sum(os.path.getsize(path) for path, _ in self.samples)
+        if required > max_bytes:
+            raise ValueError(
+                f"Image preload needs {required / 2**30:.2f} GiB of encoded bytes; "
+                f"budget is {max_bytes / 2**30:.2f} GiB")
+        encoded = []
+        loaded = 0
+        for path, _ in self.samples:
+            payload = Path(path).read_bytes()
+            loaded += len(payload)
+            if loaded > max_bytes:
+                raise ValueError("Image files grew beyond the preload budget")
+            encoded.append(payload)
+        self._encoded_images = encoded
+        print(f"Preloaded {len(encoded)} compressed images ({loaded / 2**30:.2f} GiB) into RAM")
+
     def __getitem__(self, idx):
         img_path, label = self.samples[idx]
-        img = Image.open(img_path).convert("RGB")
+        encoded = getattr(self, "_encoded_images", None)
+        source = io.BytesIO(encoded[idx]) if encoded is not None else img_path
+        with Image.open(source) as original:
+            img = original.convert("RGB")
         if self.transform:
             img = self.transform(img)
         return img, label
@@ -474,6 +505,11 @@ class BottleneckBlock(nn.Module):
         self.conv3 = nn.Conv2d(mid_channels, out_channels, 1, bias=False)
         self.bn3 = nn.BatchNorm2d(out_channels, eps=1e-5, momentum=0.1)
 
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+        self.relu3 = nn.ReLU()
+        self.relu4 = nn.ReLU()
+
         self.shortcut = None
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
@@ -484,11 +520,11 @@ class BottleneckBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         sc = self.shortcut(x) if self.shortcut is not None else x
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = F.relu(self.bn2(self.conv2(out)))
-        out = F.relu(self.bn3(self.conv3(out)))
+        out = self.relu1(self.bn1(self.conv1(x)))
+        out = self.relu2(self.bn2(self.conv2(out)))
+        out = self.relu3(self.bn3(self.conv3(out)))
         out = out + sc
-        out = F.relu(out)
+        out = self.relu4(out)
         return out
 
 
@@ -559,6 +595,7 @@ class ResNet50ImageNet100(nn.Module):
 
         self.conv1 = nn.Conv2d(3, 64, 7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.relu = nn.ReLU()
         self.maxpool = nn.MaxPool2d(3, stride=2, padding=1)
 
         self.layer1 = nn.Sequential(
@@ -594,7 +631,7 @@ class ResNet50ImageNet100(nn.Module):
         self.fc = nn.Linear(2048, num_classes, bias=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.relu(self.bn1(self.conv1(x)))
+        x = self.relu(self.bn1(self.conv1(x)))
         x = self.maxpool(x)
         x = self.layer1(x)
         x = self.layer2(x)

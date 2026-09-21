@@ -33,7 +33,16 @@ def main():
                         help="Dump intermediate activations and gradients for all layers per step")
     parser.add_argument("--fp64", action="store_true",
                         help="Run model and tensors in double precision (FP64)")
+    parser.add_argument("--compact-inputs", action="store_true", help="Cache sampled ResNet50 images once as uint8")
+    parser.add_argument("--preload-images", action="store_true",
+                        help="Load all ResNet50 source images into RAM before shuffling; no extra disk copy")
+    parser.add_argument("--preload-image-budget-gib", type=float, default=20,
+                        help="Maximum compressed image bytes to preload in GiB (default: 20)")
     args = parser.parse_args()
+    if args.preload_images and (args.model != "resnet50" or args.preload_image_budget_gib <= 0):
+        parser.error("--preload-images requires resnet50 and a positive memory budget")
+    if args.compact_inputs and (args.model != "resnet50" or not args.no_aug or args.fp64):
+        parser.error("--compact-inputs requires FP32 resnet50 with --no-aug")
 
     os.makedirs(args.dump_dir, exist_ok=True)
     
@@ -88,6 +97,7 @@ def main():
             raise ValueError(f"Unknown mapped debug layer: {args.debug_layer}")
 
     # All-layer activation/gradient hooks for --dump-activations
+    execution_order = []
     all_step_activations = {}  # mapped_name -> tensor
     all_step_grad_inputs = {}  # mapped_name -> tensor
     all_step_grad_outputs = {}  # mapped_name -> tensor
@@ -95,6 +105,8 @@ def main():
         def make_act_hook(mapped_name):
             def hook(module, inputs, output):
                 if isinstance(output, torch.Tensor):
+                    if not any(module.children()) and mapped_name not in execution_order:
+                        execution_order.append(mapped_name)
                     all_step_activations[mapped_name] = output.detach().clone()
             return hook
         def make_grad_hook(mapped_name):
@@ -153,6 +165,9 @@ def main():
     else:
         train_set = cfg["train_dataset"]()
     
+    if args.preload_images:
+        train_set.preload_images(args.preload_image_budget_gib * 2**30)
+
     g = torch.Generator()
     g.manual_seed(args.seed)
 
@@ -160,11 +175,24 @@ def main():
     dataset_len = len(train_set)
     total_samples = args.steps * args.batch_size
     
-    indices = torch.randint(0, dataset_len, (total_samples,), generator=g, dtype=torch.int32)
+    if args.model == "resnet50":
+        # Shuffle without replacement, then reshuffle after each complete dataset pass.
+        indices = torch.cat([torch.randperm(dataset_len, generator=g, dtype=torch.int32)
+                             for _ in range((total_samples + dataset_len - 1) // dataset_len)])[:total_samples]
+    else:
+        indices = torch.randint(0, dataset_len, (total_samples,), generator=g, dtype=torch.int32)
     
     indices_np = indices.numpy().astype(np.int32)
     indices_path = os.path.join(args.dump_dir, "indices_trajectory.bin")
     indices_np.tofile(indices_path)
+    if is_lm:
+        # Python indexes sequences; TunX indexes raw token offsets. Use int64 to
+        # support corpora with more than 2**31 tokens without wrapping offsets.
+        (indices_np.astype(np.int64) * train_set.seq_len).tofile(
+            os.path.join(args.dump_dir, "indices_trajectory_i64.bin"))
+    if args.compact_inputs:
+        from compact_image_cache import CompactImageCache
+        train_set = CompactImageCache(train_set, os.path.join(args.dump_dir, "image_cache"))
     
     # No need to dump massive inputs/labels binaries anymore
 
@@ -283,8 +311,13 @@ def main():
             for name, param in model.named_parameters():
                 save_mapped_param(param, name, step_dir, suffix=".updated.bin")
         
-        if (step + 1) % 100 == 0:
-            print(f"Step {step + 1}/{args.steps} | Loss: {loss.item():.4f}")
+        csv_file.flush()
+        if (step + 1) % 10 == 0:
+            print(f"Step {step + 1}/{args.steps} | Loss: {loss.item():.4f}", flush=True)
+
+    if args.dump_activations:
+        with open(os.path.join(args.dump_dir, "topology_order.txt"), "w") as f:
+            f.write("".join(f"{name}\n" for name in execution_order))
 
     csv_file.close()
     print(f"Dump trajectory complete for {args.model} in {args.dump_dir}")

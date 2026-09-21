@@ -12,6 +12,7 @@ _topology_order = None
 
 def load_topology_order(pt_dir):
     global _topology_order
+    _topology_order = None
     topology_file = os.path.join(pt_dir, "topology_order.txt")
     if os.path.exists(topology_file):
         with open(topology_file, "r") as f:
@@ -28,36 +29,38 @@ def topological_key(name):
             base_name = base_name[:-len(suffix)]
             break
 
-    if _topology_order is not None:
-        try:
-            return (-1, _topology_order.index(base_name), name)
-        except ValueError:
-            # Fallback for batchnorm stats that don't have .weight/.bias, match the prefix
-            for i, order_name in enumerate(_topology_order):
-                if order_name.startswith(base_name):
-                    return (-1, i, name)
-            return (100, len(_topology_order), name)
+    # Parameter tensors and intermediate tensors share their operator's position.
+    operator_name = re.sub(r"\.(weight|bias)$", "", base_name)
+    legacy_order = _topology_order is not None and all(
+        item.endswith((".weight", ".bias")) for item in _topology_order)
+    if _topology_order is not None and not legacy_order:
+        for i, order_name in enumerate(_topology_order):
+            if base_name == order_name or base_name.startswith(order_name + "."):
+                return (0, i, name)
 
-    if base_name == "conv1":
-        return (0, 0, 0, name)
-    if base_name == "bn1":
-        return (0, 1, 0, name)
-    if base_name == "maxpool":
-        return (0, 2, 0, name)
-
-    match = re.fullmatch(r"layer(\d+)_block(\d+)_(conv|bn)(\d+)", base_name)
+    # Older dumps listed only parameters. Include parameter-free ResNet operators
+    # instead of putting them after fc. Both residual branches precede relu4.
+    stem_order = {"conv1": 0, "bn1": 1, "relu": 2, "maxpool": 3}
+    if operator_name in stem_order:
+        return (1, 0, 0, 0, stem_order[operator_name], name)
+    match = re.fullmatch(r"layer(\d+)_block(\d+)_(conv|bn|relu)(\d+)", operator_name)
     if match:
         stage, block, operator, index = match.groups()
-        operator_order = {"conv1": 0, "bn0": 1, "conv2": 2, "bn1": 3,
-                          "conv3": 4, "bn2": 5, "conv0": 6, "bn3": 7}
-        return (1, int(stage), int(block), operator_order[f"{operator}{index}"], name)
-
+        operator_order = {"conv1": 0, "bn0": 1, "relu1": 2,
+                          "conv2": 3, "bn1": 4, "relu2": 5,
+                          "conv3": 6, "bn2": 7, "relu3": 8,
+                          "conv0": 9, "bn3": 10, "relu4": 11}
+        if operator + index in operator_order:
+            return (1, 1, int(stage), int(block), operator_order[operator + index], name)
     tail_order = {"avgpool": 0, "flatten": 1, "fc": 2}
-    if base_name in tail_order:
-        return (2, tail_order[base_name], 0, 0, name)
+    if operator_name in tail_order:
+        return (1, 2, 0, 0, tail_order[operator_name], name)
 
-    numbers = tuple(int(value) for value in re.findall(r"\d+", base_name))
-    return (3, base_name, numbers, name)
+    if _topology_order is not None:
+        for i, order_name in enumerate(_topology_order):
+            if base_name == order_name or order_name.startswith(base_name + "."):
+                return (2, i, name)
+    return (3, operator_name, name)
 
 
 def sort_results(results):

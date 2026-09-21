@@ -95,6 +95,7 @@ int main(int argc, char** argv) {
   bool load_loss_gradients = false;
   bool dump_activations = false;
   bool fp64 = false;
+  bool compact_inputs = false;
   std::string debug_layer = "";
 
   for (int i = 1; i < argc; ++i) {
@@ -115,6 +116,8 @@ int main(int argc, char** argv) {
       no_aug = true;
     } else if (arg == "--dump-inputs") {
       dump_inputs = true;
+    } else if (arg == "--compact-inputs") {
+      compact_inputs = true;
     } else if (arg == "--load-inputs") {
       load_inputs = true;
     } else if (arg == "--dump-params") {
@@ -271,7 +274,14 @@ int main(int argc, char** argv) {
   // Load indices
   std::string indices_path = pt_dir + "/indices_trajectory.bin";
   Vec<size_t> all_indices;
-  {
+  if (is_lm && file_exists(pt_dir + "/indices_trajectory_i64.bin")) {
+    std::ifstream is(pt_dir + "/indices_trajectory_i64.bin", std::ios::binary);
+    int64_t idx;
+    while (is.read(reinterpret_cast<char*>(&idx), sizeof(idx))) {
+      if (idx < 0) throw std::runtime_error("Negative token offset");
+      all_indices.push_back(static_cast<size_t>(idx));
+    }
+  } else {
     std::ifstream is(indices_path, std::ios::binary);
     if (!is) {
       std::cerr << "Cannot open " << indices_path << std::endl;
@@ -284,6 +294,15 @@ int main(int argc, char** argv) {
     std::vector<int32_t> temp_indices(num_indices);
     is.read((char*)temp_indices.data(), size);
     for (int32_t idx : temp_indices) all_indices.push_back(idx);
+  }
+
+  std::vector<float> input_lut(3 * 256);
+  if (compact_inputs) {
+    if (is_lm || fp64 || model_name != "resnet50")
+      throw std::runtime_error("Compact inputs require FP32 ResNet50");
+    std::ifstream lut(pt_dir + "/image_cache/normalization.bin", std::ios::binary);
+    if (!lut.read(reinterpret_cast<char*>(input_lut.data()), input_lut.size() * sizeof(float)))
+      throw std::runtime_error("Missing or truncated normalization table");
   }
 
   if (all_indices.size() < steps * batch_size) {
@@ -397,11 +416,27 @@ int main(int argc, char** argv) {
 
     Tensor inputs_host, labels_host;
     const std::string step_suffix = "_step_" + std::to_string(step + 1) + ".bin";
-    if (load_inputs) {
+    if (load_inputs || compact_inputs) {
       Tensor host_inputs(inputs.shape(), inputs.dtype(), getHost());
       Tensor host_labels(labels.shape(), labels.dtype(), getHost());
-      load_tensor_bin(host_inputs, pt_dir + "/inputs" + step_suffix);
-      load_tensor_bin(host_labels, pt_dir + "/labels" + step_suffix);
+      if (compact_inputs) {
+        constexpr size_t image_size = 224 * 224 * 3;
+        std::vector<uint8_t> pixels(image_size);
+        for (size_t b = 0; b < batch_size; ++b) {
+          auto index = all_indices[step * batch_size + b];
+          std::ifstream sample(pt_dir + "/image_cache/" + std::to_string(index) + ".bin", std::ios::binary);
+          int32_t label;
+          if (!sample.read(reinterpret_cast<char*>(&label), sizeof(label)) ||
+              !sample.read(reinterpret_cast<char*>(pixels.data()), pixels.size()))
+            throw std::runtime_error("Missing or truncated cached image " + std::to_string(index));
+          host_labels.data_as<int32_t>()[b] = label;
+          for (size_t j = 0; j < image_size; ++j)
+            host_inputs.data_as<float>()[b * image_size + j] = input_lut[(j % 3) * 256 + pixels[j]];
+        }
+      } else {
+        load_tensor_bin(host_inputs, pt_dir + "/inputs" + step_suffix);
+        load_tensor_bin(host_labels, pt_dir + "/labels" + step_suffix);
+      }
 
       if (device.device_type() == DeviceType::CUDA) {
         cudaMemcpy(inputs.data_as<void>(), host_inputs.data_as<void>(), input_bytes,
@@ -553,6 +588,8 @@ int main(int argc, char** argv) {
     const std::string parameter_dir = tunx_dir + "/params_step_" + std::to_string(step + 1);
     if (dump_params) dump_parameters(graph, parameter_dir, true);
     optimizer->update();
+    csv_file.flush();
+    if ((step + 1) % 10 == 0) std::cout << "Completed step " << step + 1 << "/" << steps << std::endl;
     if (dump_params) {
       dump_parameters(graph, parameter_dir, false);
     }
