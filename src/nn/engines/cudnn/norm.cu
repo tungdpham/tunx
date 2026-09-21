@@ -90,13 +90,13 @@ struct batchnorm_fwd_graph {
                                   .set_name("prev_running_mean")
                                   .set_dim({1, c, 1, 1})
                                   .set_stride({c, 1, c, c})
-                                  .set_data_type(fe::DataType_t::FLOAT));
+                                  .set_data_type(compute_type));
 
     prev_var = graph->tensor(fe::graph::Tensor_attributes()
                                  .set_name("prev_running_var")
                                  .set_dim({1, c, 1, 1})
                                  .set_stride({c, 1, c, c})
-                                 .set_data_type(fe::DataType_t::FLOAT));
+                                 .set_data_type(compute_type));
 
     auto epsilon = graph->tensor(stats.epsilon);
     auto momentum = graph->tensor(stats.momentum);

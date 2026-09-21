@@ -1,159 +1,137 @@
-"""
-Plot convergence curves comparing tunx vs PyTorch training runs.
+#!/usr/bin/env python3
+"""Plot convergence comparison between PyTorch and TunX for ResNet50 FP64 1000-step run."""
 
-Usage:
-    python visualizers/plot_convergence.py --experiment cifar10_resnet9
-    python visualizers/plot_convergence.py --experiment cifar100_wrn16_8
-    python visualizers/plot_convergence.py --experiment tiny_imagenet_resnet50
-    python visualizers/plot_convergence.py --experiment cifar10_resnet9 --log-dir logs --out output_images/convergence_cifar10.png
-
-The script searches logs/ for the most recent epoch CSV matching each run:
-  tunx:     {experiment}_epoch_{timestamp}.csv
-  PyTorch: torch_{experiment}_epoch_{timestamp}.csv
-"""
-
-import matplotlib.gridspec as gridspec
-import matplotlib.pyplot as plt
-import argparse
-import csv
-import glob
-import os
-import sys
-
+import re
+import numpy as np
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
+from pathlib import Path
 
+DATA_FILE = "convergence_1000_fp64.txt"
+OUT_FILE = "convergence_plot.png"
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+steps, pt_losses, tunx_losses = [], [], []
+with open(DATA_FILE) as f:
+    for line in f:
+        m = re.match(r'\s*(\d+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|', line)
+        if m:
+            steps.append(int(m.group(1)))
+            pt_losses.append(float(m.group(2)))
+            tunx_losses.append(float(m.group(3)))
 
-def find_latest_csv(log_dir: str, pattern: str) -> str | None:
-    """Return the path of the most-recently-timestamped file matching glob pattern."""
-    matches = sorted(glob.glob(os.path.join(log_dir, pattern)))
-    return matches[-1] if matches else None
+steps = np.array(steps)
+pt_losses = np.array(pt_losses)
+tunx_losses = np.array(tunx_losses)
+abs_diff = np.abs(pt_losses - tunx_losses)
 
+# Smoothed losses (moving average)
+def moving_avg(x, w=30):
+    return np.convolve(x, np.ones(w)/w, mode='valid')
 
-def read_epoch_csv(path: str) -> dict[str, list]:
-    """
-    Read an epoch CSV with columns:
-      epoch, train_loss, train_accuracy_pct, val_loss, val_accuracy_pct
-    Returns a dict of lists keyed by column name.
-    """
-    data: dict[str, list] = {
-        "epoch": [],
-        "train_loss": [],
-        "train_accuracy_pct": [],
-        "val_loss": [],
-        "val_accuracy_pct": [],
-    }
-    with open(path, newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            data["epoch"].append(int(row["epoch"]))
-            data["train_loss"].append(float(row["train_loss"]))
-            data["train_accuracy_pct"].append(float(row["train_accuracy_pct"]))
-            data["val_loss"].append(float(row["val_loss"]))
-            data["val_accuracy_pct"].append(float(row["val_accuracy_pct"]))
-    return data
+w = 30
+s_smooth = steps[w-1:]
+pt_smooth = moving_avg(pt_losses, w)
+tunx_smooth = moving_avg(tunx_losses, w)
+diff_smooth = moving_avg(abs_diff, w)
 
+# --- Dark-mode figure ---
+BG     = "#0d1117"
+PANEL  = "#161b22"
+PT_C   = "#58a6ff"   # blue
+TUNX_C = "#3fb950"   # green
+DIFF_C = "#f78166"   # orange-red
+GRID   = "#30363d"
+TEXT   = "#e6edf3"
+MUTED  = "#8b949e"
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+fig = plt.figure(figsize=(14, 9), facecolor=BG)
+fig.suptitle(
+    "ResNet50 Convergence  ·  PyTorch vs TunX  ·  FP64  ·  LR=1e-3 (After Weight Fix)",
+    fontsize=16, fontweight='bold', color=TEXT, y=0.97
+)
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Plot tunx vs PyTorch convergence curves.")
-    parser.add_argument(
-        "--experiment", "-e",
-        required=True,
-        choices=["cifar10_resnet9", "cifar100_wrn16_8",
-                 "tiny_imagenet_resnet50"],
-        help="Experiment name (used to find CSV files).",
-    )
-    parser.add_argument(
-        "--log-dir", default="logs",
-        help="Directory containing CSV log files (default: logs).",
-    )
-    parser.add_argument(
-        "--out", default=None,
-        help="Output image path. Defaults to output_images/convergence_{experiment}.png",
-    )
-    parser.add_argument(
-        "--tunx-label", default="tunx",
-        help="Legend label for the tunx run (default: tunx).",
-    )
-    parser.add_argument(
-        "--torch-label", default="PyTorch",
-        help="Legend label for the PyTorch run (default: PyTorch).",
-    )
-    args = parser.parse_args()
+gs = fig.add_gridspec(2, 1, height_ratios=[3, 1], hspace=0.08)
 
-    experiment = args.experiment
-    log_dir = args.log_dir
-    out_path = args.out or os.path.join(
-        "output_images", f"convergence_{experiment}.png")
+# ---- Top panel: raw + smoothed losses ----
+ax1 = fig.add_subplot(gs[0])
+ax1.set_facecolor(PANEL)
 
-    os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
+ax1.plot(steps, pt_losses,   color=PT_C,   alpha=0.15, linewidth=0.6)
+ax1.plot(steps, tunx_losses, color=TUNX_C, alpha=0.15, linewidth=0.6)
+ax1.plot(s_smooth, pt_smooth,   color=PT_C,   linewidth=2.2, label="PyTorch (FP64)")
+ax1.plot(s_smooth, tunx_smooth, color=TUNX_C, linewidth=2.2, label="TunX   (FP64)")
 
-    # ---- Find epoch CSVs ----
-    tunx_path = find_latest_csv(log_dir, f"{experiment}_epoch_*.csv")
-    torch_path = find_latest_csv(log_dir, f"torch_{experiment}_epoch_*.csv")
+ax1.set_ylabel("Cross-Entropy Loss", color=TEXT, fontsize=12)
+ax1.tick_params(colors=TEXT, which='both')
+ax1.spines[:].set_color(GRID)
+ax1.tick_params(labelbottom=False)
+ax1.set_xlim(1, 1000)
+ax1.grid(True, color=GRID, linewidth=0.5, linestyle='--', alpha=0.6)
 
-    if tunx_path is None and torch_path is None:
-        print(
-            f"ERROR: No epoch CSV files found for experiment '{experiment}' in '{log_dir}'.")
-        sys.exit(1)
+# Stats annotations
+final_pt   = pt_losses[-1]
+final_tunx = tunx_losses[-1]
+final_diff = abs(final_pt - final_tunx)
+ax1.annotate(
+    f"Step 1000  PyTorch={final_pt:.4f}  TunX={final_tunx:.4f}  Δ={final_diff:.4f}",
+    xy=(0.5, 0.04), xycoords='axes fraction',
+    ha='center', fontsize=10, color=MUTED,
+    bbox=dict(boxstyle='round,pad=0.3', facecolor=BG, edgecolor=GRID, alpha=0.8)
+)
 
-    print(f"Experiment : {experiment}")
-    print(f"tunx log    : {tunx_path or '(none found)'}")
-    print(f"PyTorch log: {torch_path or '(none found)'}")
+leg = ax1.legend(loc='upper right', fontsize=11,
+                 facecolor=PANEL, edgecolor=GRID, labelcolor=TEXT)
+ax1.set_title("Loss Trajectory  (faint = per-step, solid = 30-step moving avg)",
+              color=MUTED, fontsize=10, pad=6)
 
-    tunx_data = read_epoch_csv(tunx_path) if tunx_path else None
-    torch_data = read_epoch_csv(torch_path) if torch_path else None
+# ---- Bottom panel: absolute difference ----
+ax2 = fig.add_subplot(gs[1], sharex=ax1)
+ax2.set_facecolor(PANEL)
 
-    # ---- Plot ----
-    fig = plt.figure(figsize=(14, 10))
-    fig.suptitle(
-        f"Convergence: {experiment.replace('_', ' ').title()}", fontsize=15, fontweight="bold")
-    gs = gridspec.GridSpec(2, 2, figure=fig, hspace=0.38, wspace=0.30)
+ax2.fill_between(steps, abs_diff, color=DIFF_C, alpha=0.15)
+ax2.plot(steps, abs_diff, color=DIFF_C, alpha=0.3, linewidth=0.6)
+ax2.plot(s_smooth, diff_smooth, color=DIFF_C, linewidth=2.0, label="|PyTorch − TunX|")
 
-    ax_train_loss = fig.add_subplot(gs[0, 0])
-    ax_val_loss = fig.add_subplot(gs[0, 1])
-    ax_train_acc = fig.add_subplot(gs[1, 0])
-    ax_val_acc = fig.add_subplot(gs[1, 1])
+# Avg lines per quartile to visualise trend
+q_size = len(steps) // 4
+for q in range(4):
+    sl = slice(q*q_size, (q+1)*q_size)
+    avg = abs_diff[sl].mean()
+    ax2.hlines(avg, steps[sl][0], steps[sl][-1],
+               colors=MUTED, linestyles='dashed', linewidth=1.0, alpha=0.6)
 
-    COLOR_tunx = "#1f77b4"   # matplotlib blue
-    COLOR_TORCH = "#ff7f0e"   # matplotlib orange
+ax2.set_xlabel("Training Step", color=TEXT, fontsize=12)
+ax2.set_ylabel("|Δ Loss|", color=TEXT, fontsize=11)
+ax2.tick_params(colors=TEXT, which='both')
+ax2.spines[:].set_color(GRID)
+ax2.grid(True, color=GRID, linewidth=0.5, linestyle='--', alpha=0.6)
+ax2.set_ylim(bottom=0)
+ax2.legend(loc='upper right', fontsize=10,
+           facecolor=PANEL, edgecolor=GRID, labelcolor=TEXT)
 
-    def _plot(ax, data, col, color, label, linestyle="-"):
-        ax.plot(data["epoch"], data[col], color=color, label=label,
-                linestyle=linestyle, linewidth=1.8, marker="o", markersize=3)
+# Trailing avg annotation
+trail_avg = abs_diff[-100:].mean()
+ax2.annotate(f"last-100 avg Δ = {trail_avg:.4f}",
+             xy=(900, trail_avg), xytext=(700, trail_avg * 2.5 + 0.05),
+             color=MUTED, fontsize=9,
+             arrowprops=dict(arrowstyle='->', color=MUTED, lw=1),
+             bbox=dict(boxstyle='round,pad=0.25', facecolor=BG, edgecolor=GRID))
 
-    for ax, col, title, ylabel in [
-        (ax_train_loss, "train_loss",         "Training Loss",          "Loss"),
-        (ax_val_loss,   "val_loss",            "Validation Loss",        "Loss"),
-        (ax_train_acc,  "train_accuracy_pct",
-         "Training Accuracy",      "Accuracy (%)"),
-        (ax_val_acc,    "val_accuracy_pct",
-         "Validation Accuracy",    "Accuracy (%)"),
-    ]:
-        if tunx_data is not None:
-            _plot(ax, tunx_data, col, COLOR_tunx, args.tunx_label)
-        if torch_data is not None:
-            _plot(ax, torch_data, col, COLOR_TORCH,
-                  args.torch_label, linestyle="--")
+for ax in [ax1, ax2]:
+    ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, _: f'{int(x)}'))
+    for spine in ax.spines.values():
+        spine.set_linewidth(0.8)
 
-        ax.set_title(title, fontsize=12)
-        ax.set_xlabel("Epoch")
-        ax.set_ylabel(ylabel)
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=10)
+plt.savefig(OUT_FILE, dpi=160, bbox_inches='tight', facecolor=BG)
+print(f"Saved to {OUT_FILE}")
 
-    plt.savefig(out_path, dpi=150, bbox_inches="tight")
-    print(f"\nPlot saved to: {out_path}")
-
-
-if __name__ == "__main__":
-    main()
+# Print summary stats
+print(f"\n{'Step Range':<20} {'Avg |Δ Loss|':>14}")
+print("-" * 36)
+for i in range(0, 1000, 100):
+    sl = slice(i, i+100)
+    print(f"{i+1:>4}-{i+100:<12}   {abs_diff[sl].mean():>10.4f}")
+print(f"\nOverall avg |Δ|: {abs_diff.mean():.4f}")
+print(f"Max    |Δ|:      {abs_diff.max():.4f} (step {steps[abs_diff.argmax()]})")

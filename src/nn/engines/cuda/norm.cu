@@ -274,17 +274,16 @@ __global__ void batchnorm_wgrad_bgrad_reduce_kernel(
 
   size_t count = N * S;
   COMPUTE_T sum_dy = COMPUTE_T(0);
-  float sum_dy_x_norm = 0.0f;
+  COMPUTE_T sum_dy_x_norm = COMPUTE_T(0);
 
   for (size_t i = threadIdx.x; i < count; i += blockDim.x) {
     size_t idx = i * C + c;
 
     COMPUTE_T dy = static_cast<COMPUTE_T>(grad_output[idx]);
-    float x_hat = (static_cast<float>(input[idx]) - static_cast<float>(batch_mean[c])) *
-                  static_cast<float>(batch_invar[c]);
+    COMPUTE_T x_hat = (static_cast<COMPUTE_T>(input[idx]) - batch_mean[c]) * batch_invar[c];
 
     sum_dy += dy;
-    sum_dy_x_norm += static_cast<float>(dy) * x_hat;
+    sum_dy_x_norm += dy * x_hat;
   }
 
   sum_dy = blockReduceSum(sum_dy);
@@ -312,16 +311,15 @@ __global__ void batchnorm_dgrad_kernel(
     COMPUTE_T g = (affine && gamma) ? static_cast<COMPUTE_T>(gamma[c]) : COMPUTE_T(1);
     COMPUTE_T istd = batch_invar[c];
 
-    float sum_dy = static_cast<float>(d_beta[c]);
-    float sum_dy_x_norm = static_cast<float>(d_gamma[c]);
-    float M = static_cast<float>(N * S);
+    COMPUTE_T sum_dy = d_beta[c];
+    COMPUTE_T sum_dy_x_norm = d_gamma[c];
+    COMPUTE_T M = static_cast<COMPUTE_T>(N * S);
 
     COMPUTE_T dy = static_cast<COMPUTE_T>(grad_output[idx]);
-    float x_hat = (static_cast<float>(input[idx]) - static_cast<float>(batch_mean[c])) *
-                  static_cast<float>(batch_invar[c]);
+    COMPUTE_T x_hat = (static_cast<COMPUTE_T>(input[idx]) - batch_mean[c]) * batch_invar[c];
 
-    float term1 = static_cast<float>(g * istd) / M;
-    float term2 = M * static_cast<float>(dy) - sum_dy - (x_hat * sum_dy_x_norm);
+    COMPUTE_T term1 = (g * istd) / M;
+    COMPUTE_T term2 = M * dy - sum_dy - (x_hat * sum_dy_x_norm);
 
     grad_input[idx] = static_cast<IO_T>(term1 * term2);
   }
@@ -343,7 +341,7 @@ __global__ void batchnorm_dgrad_kernel_vec(
   if (idx < total_vectors) {
     size_t scalar_idx = idx * vec_size;
     int c_start = scalar_idx % C;
-    float M = static_cast<float>(N * S);
+    COMPUTE_T M = static_cast<COMPUTE_T>(N * S);
 
     VecT dy_vec = reinterpret_cast<const VecT*>(grad_output)[idx];
     const IO_T* dy_arr = reinterpret_cast<const IO_T*>(&dy_vec);
@@ -356,15 +354,13 @@ __global__ void batchnorm_dgrad_kernel_vec(
       int c = c_start + k;
       COMPUTE_T g = (affine && gamma) ? static_cast<COMPUTE_T>(gamma[c]) : COMPUTE_T(1);
       COMPUTE_T istd = batch_invar[c];
-      float sum_dy = static_cast<float>(d_beta[c]);
-      float sum_dy_x_norm = static_cast<float>(d_gamma[c]);
-      float term1 = static_cast<float>(g * istd) / M;
+      COMPUTE_T sum_dy = d_beta[c];
+      COMPUTE_T sum_dy_x_norm = d_gamma[c];
+      COMPUTE_T term1 = (g * istd) / M;
 
       COMPUTE_T dy = static_cast<COMPUTE_T>(dy_arr[k]);
-      float x_hat =
-          (static_cast<float>(input[scalar_idx + k]) - static_cast<float>(batch_mean[c])) *
-          static_cast<float>(batch_invar[c]);
-      float term2 = M * static_cast<float>(dy) - sum_dy - (x_hat * sum_dy_x_norm);
+      COMPUTE_T x_hat = (static_cast<COMPUTE_T>(input[scalar_idx + k]) - batch_mean[c]) * batch_invar[c];
+      COMPUTE_T term2 = M * dy - sum_dy - (x_hat * sum_dy_x_norm);
       dx_arr[k] = static_cast<IO_T>(term1 * term2);
     }
 

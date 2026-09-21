@@ -90,8 +90,8 @@ Tensor BatchNormOp::forward(OpContext &ctx, const Tensor &input, const Param &ga
   if (ctx.is_training) {
     ctx.residuals["input"] = input;
 
-    Tensor batch_mean = ctx.make_tensor({C}, DType_t::FP32);
-    Tensor batch_invar = ctx.make_tensor({C}, DType_t::FP32);
+    Tensor batch_mean = ctx.make_tensor({C}, ctx.compute_dtype);
+    Tensor batch_invar = ctx.make_tensor({C}, ctx.compute_dtype);
     ctx.residuals["batch_mean"] = batch_mean;
     ctx.residuals["batch_invar"] = batch_invar;
 

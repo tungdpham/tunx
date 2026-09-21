@@ -8,7 +8,10 @@ import numpy as np
 from compare_equivalence import compare_tensors, print_table, load_tensor_bin, load_topology_order
 
 def compare_step_tensor(pt_path, tunx_path, step, tensor_name):
-    dtype = np.float32 if tensor_name == "inputs" else np.int32
+    if tensor_name == "inputs":
+        dtype = np.float64 if os.environ.get("TUNX_COMPARE_FP64") == "1" else np.float32
+    else:
+        dtype = np.int32
     pt_values = np.fromfile(pt_path, dtype=dtype)
     tunx_values = np.fromfile(tunx_path, dtype=dtype)
     if pt_values.shape != tunx_values.shape:
@@ -30,9 +33,9 @@ def compare_step_tensor(pt_path, tunx_path, step, tensor_name):
         f"l2_rel={np.linalg.norm(differences) / max(np.linalg.norm(pt_values), 1e-12):.3e}")
 
 
-def compare_step_inputs(pt_dir, tunx_dir, steps):
+def compare_step_inputs(pt_dir, tunx_dir, steps, *, start_step=1):
     print("--- Per-step input comparison ---")
-    for step in range(1, steps + 1):
+    for step in range(start_step, steps + 1):
         compare_step_tensor(
             os.path.join(pt_dir, f"inputs_step_{step}.bin"),
             os.path.join(tunx_dir, f"inputs_step_{step}.bin"), step, "inputs")
@@ -41,9 +44,9 @@ def compare_step_inputs(pt_dir, tunx_dir, steps):
             os.path.join(tunx_dir, f"labels_step_{step}.bin"), step, "labels")
 
 
-def compare_step_parameters(pt_dir, tunx_dir, steps):
+def compare_step_parameters(pt_dir, tunx_dir, steps, *, start_step=1):
     print("--- Per-step parameter comparison ---")
-    for step in range(1, steps + 1):
+    for step in range(start_step, steps + 1):
         pt_step_dir = os.path.join(pt_dir, f"params_step_{step}")
         tunx_step_dir = os.path.join(tunx_dir, f"params_step_{step}")
         if not os.path.exists(pt_step_dir):
@@ -76,9 +79,9 @@ def compare_step_parameters(pt_dir, tunx_dir, steps):
             print_table(f"Updated Parameters (Step {step})", results_upd)
 
 
-def compare_shared_loss_gradients(pt_dir, tunx_dir, steps):
+def compare_shared_loss_gradients(pt_dir, tunx_dir, steps, *, start_step=1):
     print("--- Shared loss-gradient verification ---")
-    for step in range(1, steps + 1):
+    for step in range(start_step, steps + 1):
         filename = f"loss_gradient_step_{step}.bin"
         pt = np.fromfile(os.path.join(pt_dir, filename), dtype=np.uint8)
         tunx = np.fromfile(os.path.join(tunx_dir, filename), dtype=np.uint8)
@@ -87,11 +90,11 @@ def compare_shared_loss_gradients(pt_dir, tunx_dir, steps):
         print(f"Step {step}: dLoss/dOutputs is bit-for-bit identical")
 
 
-def compare_step_debug_layer(pt_dir, tunx_dir, steps, debug_layer):
+def compare_step_debug_layer(pt_dir, tunx_dir, steps, debug_layer, *, start_step=1):
     if not debug_layer:
         return
     print(f"--- Per-step debug layer '{debug_layer}' comparison ---")
-    for step in range(1, steps + 1):
+    for step in range(start_step, steps + 1):
         results_act = []
         results_grad = []
         for suffix, is_grad in [
@@ -116,11 +119,11 @@ def compare_step_debug_layer(pt_dir, tunx_dir, steps, debug_layer):
             if results_grad: print_table("Intermediate Gradients", results_grad)
 
 
-def compare_step_activations(pt_dir, tunx_dir, steps):
+def compare_step_activations(pt_dir, tunx_dir, steps, *, start_step=1):
     """Compare all-layer intermediate activations and gradients dumped with --dump-activations."""
     import glob
     print("--- Per-step intermediate activations/gradients comparison ---")
-    for step in range(1, steps + 1):
+    for step in range(start_step, steps + 1):
         results_act = []
         results_grad = []
         pt_outputs = glob.glob(os.path.join(pt_dir, f"*.output_step_{step}.bin"))
@@ -153,7 +156,7 @@ def compare_step_activations(pt_dir, tunx_dir, steps):
                 print_table(f"Intermediate Gradients (Step {step})", results_grad)
 
 
-def compare_step_metrics(pt_csv, tunx_csv, seed, abs_tolerance, rel_tolerance):
+def compare_step_metrics(pt_csv, tunx_csv, seed, abs_tolerance, rel_tolerance, *, step=None):
 
     with open(pt_csv, newline="") as pt_file, open(tunx_csv, newline="") as tunx_file:
         pt_rows = list(csv.DictReader(pt_file))
@@ -168,6 +171,9 @@ def compare_step_metrics(pt_csv, tunx_csv, seed, abs_tolerance, rel_tolerance):
         if pt_row["step"] != tunx_row["step"]:
             raise RuntimeError(
                 f"Seed {seed}: step mismatch: PyTorch={pt_row['step']}, TunX={tunx_row['step']}")
+
+        if step is not None and int(pt_row["step"]) != step:
+            continue
 
         pt_loss = float(pt_row["loss"])
         tunx_loss = float(tunx_row["loss"])
@@ -198,6 +204,8 @@ def main():
                         help="Dump backward input/output gradients for one mapped layer")
     parser.add_argument("--engine", type=str, default="default",
                         help="Engine to run the tunx convergence test (e.g., cuda, cudnn)")
+    parser.add_argument("--fp64", action="store_true",
+                        help="Run model and tensors in double precision (FP64)")
     args = parser.parse_args()
 
     seeds = [42]
@@ -211,6 +219,9 @@ def main():
     if "OPENWEBTEXT_PATH" not in env:
         env["OPENWEBTEXT_PATH"] = os.path.join(project_root, "data", "open-web-text", "train.bin")
     env["NVIDIA_TF32_OVERRIDE"] = "0"
+    if args.fp64:
+        env["TUNX_COMPARE_FP64"] = "1"
+        os.environ["TUNX_COMPARE_FP64"] = "1"
     
     for seed in seeds:
         print(f"==================================================")
@@ -240,6 +251,8 @@ def main():
             cmd_pt.extend(["--debug-layer", args.debug_layer])
         if args.debug_compare:
             cmd_pt.append("--dump-activations")
+        if args.fp64:
+            cmd_pt.append("--fp64")
         subprocess.run(cmd_pt, check=True, env=env)
         
         # 2. Run TunX convergence test
@@ -264,26 +277,35 @@ def main():
             cmd_tunx.extend(["--debug-layer", args.debug_layer])
         if args.debug_compare:
             cmd_tunx.append("--dump-activations")
+        if args.engine != "default":
+            cmd_tunx.extend(["--engine", args.engine])
+        if args.fp64:
+            cmd_tunx.append("--fp64")
         subprocess.run(cmd_tunx, check=True, env=env)
-
-        if args.shared_loss_gradient:
-            compare_shared_loss_gradients(dump_dir, tunx_dir, args.steps)
 
         if args.debug_compare:
             load_topology_order(dump_dir)
-            compare_step_inputs(dump_dir, tunx_dir, args.steps)
-            if args.debug_layer:
-                compare_step_debug_layer(dump_dir, tunx_dir, args.steps, args.debug_layer)
-            if args.debug_compare:
-                compare_step_activations(dump_dir, tunx_dir, args.steps)
-            compare_step_parameters(dump_dir, tunx_dir, args.steps)
-            compare_step_metrics(
-                os.path.join(dump_dir, f"pt_trajectory_seed_{seed}.csv"),
-                os.path.join(tunx_dir, f"tunx_trajectory_seed_{seed}.csv"),
-                seed,
-                args.loss_abs_tolerance,
-                args.loss_rel_tolerance,
-            )
+
+        if args.debug_compare or args.shared_loss_gradient:
+            for step in range(1, args.steps + 1):
+                print(f"\n=================== Step {step} ===================")
+                if args.shared_loss_gradient:
+                    compare_shared_loss_gradients(dump_dir, tunx_dir, step, start_step=step)
+                if args.debug_compare:
+                    compare_step_inputs(dump_dir, tunx_dir, step, start_step=step)
+                    if args.debug_layer:
+                        compare_step_debug_layer(
+                            dump_dir, tunx_dir, step, args.debug_layer, start_step=step)
+                    compare_step_activations(dump_dir, tunx_dir, step, start_step=step)
+                    compare_step_parameters(dump_dir, tunx_dir, step, start_step=step)
+                    compare_step_metrics(
+                        os.path.join(dump_dir, f"pt_trajectory_seed_{seed}.csv"),
+                        os.path.join(tunx_dir, f"tunx_trajectory_seed_{seed}.csv"),
+                        seed,
+                        args.loss_abs_tolerance,
+                        args.loss_rel_tolerance,
+                        step=step,
+                    )
 
     print("All convergence tests completed.")
 

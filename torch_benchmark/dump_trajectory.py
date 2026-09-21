@@ -31,9 +31,14 @@ def main():
                         help="Dump backward input/output gradients for one mapped layer")
     parser.add_argument("--dump-activations", action="store_true",
                         help="Dump intermediate activations and gradients for all layers per step")
+    parser.add_argument("--fp64", action="store_true",
+                        help="Run model and tensors in double precision (FP64)")
     args = parser.parse_args()
 
     os.makedirs(args.dump_dir, exist_ok=True)
+    
+    if args.fp64:
+        torch.set_default_dtype(torch.float64)
     
     # Set deterministic seeds and algorithms
     torch.manual_seed(args.seed)
@@ -52,6 +57,8 @@ def main():
 
     print(f"Instantiating model {args.model} on {args.device}...")
     model = get_model(args.model).to(args.device)
+    if args.fp64:
+        model = model.double()
     # Match TunX's NHWC storage for image models while keeping NCHW logical shapes.
     is_lm = "gpt2" in args.model
     if not is_lm:

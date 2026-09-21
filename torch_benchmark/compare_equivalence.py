@@ -64,9 +64,11 @@ def sort_results(results):
     results.sort(key=lambda result: topological_key(result["name"]))
     return results
 
-def load_tensor_bin(path, dtype=np.float32):
+def load_tensor_bin(path, dtype=None):
     if not os.path.exists(path):
         return None
+    if dtype is None:
+        dtype = np.float64 if os.environ.get("TUNX_COMPARE_FP64") == "1" else np.float32
     with open(path, "rb") as f:
         data = np.frombuffer(f.read(), dtype=dtype)
     return data

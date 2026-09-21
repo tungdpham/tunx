@@ -94,6 +94,7 @@ int main(int argc, char** argv) {
   bool dump_params = false;
   bool load_loss_gradients = false;
   bool dump_activations = false;
+  bool fp64 = false;
   std::string debug_layer = "";
 
   for (int i = 1; i < argc; ++i) {
@@ -128,6 +129,8 @@ int main(int argc, char** argv) {
       executor_mode = argv[++i];
     } else if (arg == "--engine" && i + 1 < argc) {
       engine_mode = argv[++i];
+    } else if (arg == "--fp64") {
+      fp64 = true;
     } else {
       std::cerr << "Unknown argument: " << arg << std::endl;
       return 1;
@@ -170,6 +173,11 @@ int main(int argc, char** argv) {
 
   GraphOpts opts;
   opts.seed = seed;
+  if (fp64) {
+    opts.io_dtype = DType_t::FP64;
+    opts.param_dtype = DType_t::FP64;
+    opts.compute_dtype = DType_t::FP64;
+  }
   if (engine_mode == "cuda") {
     opts.engine = make_engine<CUDAEngine>();
   } else if (engine_mode == "cudnn") {
@@ -246,7 +254,7 @@ int main(int argc, char** argv) {
     }
     dataset = std::move(ds);
   } else {
-    auto ds = std::make_unique<ImageNet100>(DType_t::FP32);
+    auto ds = std::make_unique<ImageNet100>(fp64 ? DType_t::FP64 : DType_t::FP32);
     const char* path = std::getenv("IMAGENET100_ROOT");
     std::string root = path ? path : "data/imagenet-100";
     if (!ds->load_data(root, true)) {
@@ -287,7 +295,7 @@ int main(int argc, char** argv) {
   if (is_lm) {
     inputs = Tensor(single_input_shape, DType_t::INT32, allocator);
   } else {
-    inputs = Tensor(single_input_shape, DType_t::FP32, allocator);
+    inputs = Tensor(single_input_shape, fp64 ? DType_t::FP64 : DType_t::FP32, allocator);
   }
 
   Tensor labels = Tensor(single_label_shape, DType_t::INT32, allocator);
@@ -454,23 +462,37 @@ int main(int argc, char** argv) {
       // Calculate accuracy
       Tensor preds_host = to_host(predictions);
       Tensor labels_host = to_host(labels);
-      const float* p_data = preds_host.data_as<float>();
       const int* l_data = labels_host.data_as<int>();
 
       int correct = 0;
       int num_classes = predictions.shape()[1];
-      for (size_t b = 0; b < batch_size; ++b) {
-        int best_class = 0;
-        float best_val = -1e9f;
-        for (int c = 0; c < num_classes; ++c) {
-          float val = p_data[b * num_classes + c];
-          if (val > best_val) {
-            best_val = val;
-            best_class = c;
+      if (fp64) {
+        const double* p_data = preds_host.data_as<double>();
+        for (size_t b = 0; b < batch_size; ++b) {
+          int best_class = 0;
+          double best_val = -1e9;
+          for (int c = 0; c < num_classes; ++c) {
+            double val = p_data[b * num_classes + c];
+            if (val > best_val) {
+              best_val = val;
+              best_class = c;
+            }
           }
+          if (best_class == l_data[b]) correct++;
         }
-        if (best_class == l_data[b]) {
-          correct++;
+      } else {
+        const float* p_data = preds_host.data_as<float>();
+        for (size_t b = 0; b < batch_size; ++b) {
+          int best_class = 0;
+          float best_val = -1e9f;
+          for (int c = 0; c < num_classes; ++c) {
+            float val = p_data[b * num_classes + c];
+            if (val > best_val) {
+              best_val = val;
+              best_class = c;
+            }
+          }
+          if (best_class == l_data[b]) correct++;
         }
       }
       float acc = 100.0f * correct / batch_size;
