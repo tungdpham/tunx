@@ -13,7 +13,6 @@
 #include <stdexcept>
 #include <unordered_map>
 
-
 #include "internal.cuh"
 #include "nn/engines/cudnn_engine.hpp"
 #include "nn/engines/engine_handle.hpp"
@@ -72,7 +71,8 @@ struct avgpool2d_fwd_graph {
 
     ensure_ok(graph->validate(), "avgpool2d_fwd validate");
     ensure_ok(graph->build_operation_graph(handle), "avgpool2d_fwd build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "avgpool2d_fwd create plans");
     ensure_ok(graph->check_support(), "avgpool2d_fwd check support");
     ensure_ok(graph->build_plans(handle, fe::BuildPlanPolicy_t::HEURISTICS_CHOICE, false),
@@ -143,7 +143,8 @@ struct maxpool2d_inf_graph {
 
     ensure_ok(graph->validate(), "maxpool2d_inf validate");
     ensure_ok(graph->build_operation_graph(handle), "maxpool2d_inf build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "maxpool2d_inf create plans");
     ensure_ok(graph->check_support(), "maxpool2d_inf check support");
     ensure_ok(graph->build_plans(handle, fe::BuildPlanPolicy_t::HEURISTICS_CHOICE, false),
@@ -214,7 +215,8 @@ struct maxpool2d_fwd_graph {
 
     ensure_ok(graph->validate(), "maxpool2d_fwd validate");
     ensure_ok(graph->build_operation_graph(handle), "maxpool2d_fwd build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "maxpool2d_fwd create plans");
     ensure_ok(graph->check_support(), "maxpool2d_fwd check support");
     ensure_ok(graph->build_plans(handle, fe::BuildPlanPolicy_t::HEURISTICS_CHOICE, false),
@@ -314,7 +316,7 @@ void CuDNNEngine::maxpool2d_infer(engine_handle backend_handle, const MaxPool2DS
         "cuDNN Graph not found for maxpool2d infer. Please call query_maxpool2d_graph first.");
   }
   auto& graph_struct = std::any_cast<maxpool2d_inf_graph&>(it->second);
-  
+
   void* mask_ptr = nullptr;
   if (graph_struct.mask_size > 0 && workspace != nullptr) {
     size_t base_ws = graph_struct.workspace_size - graph_struct.mask_size;
@@ -333,7 +335,8 @@ void CuDNNEngine::maxpool2d_infer(engine_handle backend_handle, const MaxPool2DS
 void CuDNNEngine::maxpool2d_bwd(engine_handle backend_handle, const MaxPool2DStats& stats,
                                 const void* grad_output, void* grad_input, const void* mask,
                                 void* workspace, DTypeDesc type_desc) {
-  cuda_engine_.maxpool2d_bwd(backend_handle, stats, grad_output, grad_input, mask, workspace, type_desc);
+  cuda_engine_.maxpool2d_bwd(backend_handle, stats, grad_output, grad_input, mask, workspace,
+                             type_desc);
 }
 
 }  // namespace tunx

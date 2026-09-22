@@ -27,15 +27,18 @@ struct BatchNormDescriptors {
   BatchNormDescriptors(const BatchNormStats& s) {
     check_bn_status(cudnnCreateTensorDescriptor(&x));
     check_bn_status(cudnnCreateTensorDescriptor(&param));
-    check_bn_status(cudnnSetTensor4dDescriptor(x, CUDNN_TENSOR_NHWC, CUDNN_DATA_FLOAT,
-        s.batch_size, s.channels, s.height, s.width));
+    check_bn_status(cudnnSetTensor4dDescriptor(x, CUDNN_TENSOR_NHWC, CUDNN_DATA_FLOAT, s.batch_size,
+                                               s.channels, s.height, s.width));
     check_bn_status(cudnnDeriveBNTensorDescriptor(param, x, CUDNN_BATCHNORM_SPATIAL));
   }
-  ~BatchNormDescriptors() { cudnnDestroyTensorDescriptor(param); cudnnDestroyTensorDescriptor(x); }
+  ~BatchNormDescriptors() {
+    cudnnDestroyTensorDescriptor(param);
+    cudnnDestroyTensorDescriptor(x);
+  }
 };
 bool legacy_bn(const BatchNormStats& s, const DTypeDesc& d) {
-  return !s.use_relu && d.io_dtype == DType_t::FP32 &&
-      d.param_dtype == DType_t::FP32 && d.compute_dtype == DType_t::FP32;
+  return !s.use_relu && d.io_dtype == DType_t::FP32 && d.param_dtype == DType_t::FP32 &&
+         d.compute_dtype == DType_t::FP32;
 }
 }  // namespace
 
@@ -133,7 +136,8 @@ struct batchnorm_fwd_graph {
 
     ensure_ok(graph->validate(), "batchnorm forward validate");
     ensure_ok(graph->build_operation_graph(handle), "batchnorm forward build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "batchnorm forward create plans");
     graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
                                    fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
@@ -227,7 +231,8 @@ struct batchnorm_inf_graph {
 
     ensure_ok(graph->validate(), "batchnorm inference validate");
     ensure_ok(graph->build_operation_graph(handle), "batchnorm inference build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "batchnorm inference create plans");
     graph->deselect_numeric_notes(
         {fe::NumericalNote_t::NONDETERMINISTIC, fe::NumericalNote_t::DOWN_CONVERT_INPUTS});
@@ -322,7 +327,8 @@ struct batchnorm_bwd_graph {
 
     ensure_ok(graph->validate(), "batchnorm backward validate");
     ensure_ok(graph->build_operation_graph(handle), "batchnorm backward build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "batchnorm backward create plans");
     graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
                                    fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
@@ -396,7 +402,8 @@ struct layernorm_fwd_graph {
 
     ensure_ok(graph->validate(), "layernorm_fwd validate");
     ensure_ok(graph->build_operation_graph(handle), "layernorm_fwd build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "layernorm_fwd create plans");
     graph->deselect_numeric_notes(
         {fe::NumericalNote_t::NONDETERMINISTIC, fe::NumericalNote_t::DOWN_CONVERT_INPUTS});
@@ -462,7 +469,8 @@ struct layernorm_inf_graph {
 
     ensure_ok(graph->validate(), "layernorm_inf validate");
     ensure_ok(graph->build_operation_graph(handle), "layernorm_inf build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "layernorm_inf create plans");
     graph->deselect_numeric_notes(
         {fe::NumericalNote_t::NONDETERMINISTIC, fe::NumericalNote_t::DOWN_CONVERT_INPUTS});
@@ -546,7 +554,8 @@ struct layernorm_bwd_graph {
 
     ensure_ok(graph->validate(), "layernorm_bwd validate");
     ensure_ok(graph->build_operation_graph(handle), "layernorm_bwd build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "layernorm_bwd create plans");
     graph->deselect_numeric_notes(
         {fe::NumericalNote_t::NONDETERMINISTIC, fe::NumericalNote_t::DOWN_CONVERT_INPUTS});
@@ -666,12 +675,15 @@ void CuDNNEngine::batchnorm_fwd(engine_handle backend_handle, const BatchNormSta
     BatchNormDescriptors desc(stats);
     cudaStream_t stream;
     check_bn_status(cudnnGetStream(handle, &stream));
-    cudaMemcpyAsync(next_running_mean, prev_running_mean, stats.channels * sizeof(float), cudaMemcpyDeviceToDevice, stream);
-    cudaMemcpyAsync(next_running_var, prev_running_var, stats.channels * sizeof(float), cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyAsync(next_running_mean, prev_running_mean, stats.channels * sizeof(float),
+                    cudaMemcpyDeviceToDevice, stream);
+    cudaMemcpyAsync(next_running_var, prev_running_var, stats.channels * sizeof(float),
+                    cudaMemcpyDeviceToDevice, stream);
     const float one = 1, zero = 0;
-    check_bn_status(cudnnBatchNormalizationForwardTraining(handle, CUDNN_BATCHNORM_SPATIAL,
-        &one, &zero, desc.x, input, desc.x, output, desc.param, gamma, beta,
-        stats.momentum, next_running_mean, next_running_var, stats.epsilon, batch_mean, batch_invar));
+    check_bn_status(cudnnBatchNormalizationForwardTraining(
+        handle, CUDNN_BATCHNORM_SPATIAL, &one, &zero, desc.x, input, desc.x, output, desc.param,
+        gamma, beta, stats.momentum, next_running_mean, next_running_var, stats.epsilon, batch_mean,
+        batch_invar));
     return;
   }
   GraphCacheKey key{
@@ -755,9 +767,10 @@ void CuDNNEngine::batchnorm_bwd(engine_handle backend_handle, const BatchNormSta
   if (legacy_bn(stats, type_desc)) {
     BatchNormDescriptors desc(stats);
     const float one = 1, zero = 0;
-    check_bn_status(cudnnBatchNormalizationBackward(handle, CUDNN_BATCHNORM_SPATIAL,
-        &one, &zero, &one, &one, desc.x, input, desc.x, grad_output, desc.x, grad_input,
-        desc.param, gamma, grad_gamma, grad_beta, stats.epsilon, batch_mean, batch_invar));
+    check_bn_status(cudnnBatchNormalizationBackward(
+        handle, CUDNN_BATCHNORM_SPATIAL, &one, &zero, &one, &one, desc.x, input, desc.x,
+        grad_output, desc.x, grad_input, desc.param, gamma, grad_gamma, grad_beta, stats.epsilon,
+        batch_mean, batch_invar));
     return;
   }
   GraphCacheKey key{

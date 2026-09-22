@@ -94,7 +94,8 @@ struct conv2d_fwd_graph {
 
     ensure_ok(graph->validate(), "conv_fprop validate");
     ensure_ok(graph->build_operation_graph(handle), "conv_fprop build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "conv_fwd create plans");
     graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
                                    fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
@@ -165,7 +166,8 @@ struct conv2d_dgrad_graph {
 
     ensure_ok(graph->validate(), "conv_dgrad validate");
     ensure_ok(graph->build_operation_graph(handle), "conv_dgrad build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "conv_dgrad create plans");
     graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
                                    fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
@@ -237,7 +239,8 @@ struct conv2d_wgrad_graph {
 
     ensure_ok(graph->validate(), "conv_wgrad validate");
     ensure_ok(graph->build_operation_graph(handle), "conv_wgrad build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "conv_wgrad create plans");
     graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
                                    fe::NumericalNote_t::DOWN_CONVERT_INPUTS,

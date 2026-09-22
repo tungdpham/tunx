@@ -78,7 +78,8 @@ struct dense_fwd_graph {
 
     ensure_ok(graph->validate(), "dense_fwd validate");
     ensure_ok(graph->build_operation_graph(handle), "dense_fwd build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "dense_fwd create plans");
     ensure_ok(graph->check_support(), "dense_fwd check support");
     ensure_ok(graph->build_plans(), "dense_fwd build plans");
@@ -133,7 +134,8 @@ struct dense_dgrad_graph {
 
     ensure_ok(graph->validate(), "dense_dgrad validate");
     ensure_ok(graph->build_operation_graph(handle), "dense_dgrad build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::FALLBACK}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "dense_dgrad create plans");
     ensure_ok(graph->check_support(), "dense_dgrad check support");
     ensure_ok(graph->build_plans(), "dense_dgrad build plans");
