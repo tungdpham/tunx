@@ -115,3 +115,133 @@ at the cost of decoding. Neither requires retaining activations or checkpoints.
 
 GPT-2 keeps OpenWebText memory-mapped and shares sampled int64 token offsets with
 TunX; it does not preload or duplicate the corpus.
+
+## DeepSpeed ZeRO and PyTorch FSDP benchmarks (V1–V4)
+
+`train_deepspeed.py` and `train_fsdp.py` reuse the models in `torch_trainer.py`
+through `distributed_benchmark.py`. Both perform forward, cross-entropy backward,
+and Adam/AdamW updates on a cached, GPU-resident global batch. Defaults are 50
+warmup updates and 2,000 measured updates. These are throughput benchmarks, not
+convergence training: the cached batch repeats and learning rate stays constant.
+
+Use the project environment (`uv sync`); it includes PyTorch, torchvision and
+DeepSpeed. Launch from the repository root with one process per CUDA GPU:
+
+```bash
+.venv/bin/torchrun --standalone --nproc-per-node=2 torch_benchmark/train_deepspeed.py \
+  --config sample_configs/distributed_v1.json --micro-batch-size 8 \
+  --precision bf16 --zero-stage 3 --output benchmark_results/deepspeed_v1.json
+
+.venv/bin/torchrun --standalone --nproc-per-node=2 torch_benchmark/train_fsdp.py \
+  --config sample_configs/distributed_v1.json --micro-batch-size 8 \
+  --precision bf16 --output benchmark_results/fsdp_v1.json
+```
+
+Change `distributed_v1.json` to v2, v3 or v4 and give each run a distinct output
+path (existing results at that path are overwritten). ImageNet100 is read from
+`--data-root`, then `IMAGENET100_ROOT`, then the config's `dataset_path` resolved
+relative to its directory. Each rank caches a disjoint portion of the same seeded
+sample permutation. Add `--synthetic` for a dataset-free benchmark with random
+224×224 images and 100-class labels; report synthetic results separately.
+
+For two machines with one GPU each, run the following on **both** machines,
+setting `NODE_RANK=0` on the first and `NODE_RANK=1` on the second. Set
+`MASTER_ADDR` to the reachable address of the first machine:
+
+```bash
+export MASTER_ADDR=10.10.0.2
+export NODE_RANK=0  # use 1 on the second machine
+.venv/bin/torchrun --nnodes=2 --nproc-per-node=1 --node-rank="$NODE_RANK" \
+  --master-addr="$MASTER_ADDR" --master-port=29500 \
+  torch_benchmark/train_deepspeed.py --config sample_configs/distributed_v1.json \
+  --micro-batch-size 8 --precision bf16 --output benchmark_results/deepspeed_v1.json
+```
+
+Replace the script with `train_fsdp.py` for FSDP. Install the same environment and
+code on each machine; real data must be available on each. NCCL handles GPU
+communication; if necessary set `NCCL_SOCKET_IFNAME` to the connected interface.
+The TunX JSON worker endpoints and partition policies are not used by torchrun.
+
+Global batch defaults to the JSON `batch_size` (128 for V1–V3; 64 for V4).
+`global_batch = world_size × micro_batch_size × accumulation_steps`; accumulation
+is derived and non-divisible values are rejected. `--global-batch-size` overrides
+it. TunX's `num_microbatches` describes pipeline scheduling and is not interpreted
+as data-parallel accumulation. To match a TunX microbatch of 32 at global batch
+128 on two GPUs, use `--micro-batch-size 32` (two accumulation steps per rank).
+Reduce the microbatch if activation memory exceeds GPU capacity.
+
+Benchmark details and limits:
+
+- DeepSpeed defaults to ZeRO stage 3; `--zero-stage 1` or `2` is also supported.
+  FSDP uses FULL_SHARD with size-based wrapping at 100,000 parameters. FSDP
+  synchronizes gradients on every microbatch to avoid retaining full gradients.
+- Both use the config's optimizer hyperparameters, no clipping, no scheduler,
+  no activation checkpointing, no offload and no compilation. BatchNorm uses
+  local microbatch statistics, so differing microbatch sizes affect training.
+- FP32 is the default, with TF32 disabled. BF16 uses each framework's mixed
+  precision implementation, FP32 gradient communication, and cross-entropy on
+  FP32 logits. These do not reproduce TunX's BF16 storage/FP32 compute contract;
+  optimizer-state and BatchNorm precision can differ across backends.
+- Timing excludes input loading, initialization, warmup and result collection.
+  CUDA is synchronized before/after the measured loop; throughput uses the
+  slowest rank's elapsed time and counts global samples once per optimizer update.
+- Rank 0 writes JSON with throughput, time per update, versions, configuration,
+  final losses and each rank's peak allocated/reserved CUDA bytes. Allocator
+  peaks exclude some NCCL/driver memory and are not process VRAM measurements.
+- These are sharded data-parallel baselines for TunX's pipeline benchmark, not
+  identical parallelization strategies. Each rank initially constructs the full
+  model, and activation memory remains local. Heterogeneous GPUs wait for the
+  slowest rank. Keep batch, precision, input mode and hardware fixed for comparisons.
+
+A short CUDA smoke test (repeat with either script):
+
+```bash
+.venv/bin/torchrun --standalone --nproc-per-node=1 torch_benchmark/train_fsdp.py \
+  --synthetic --global-batch-size 2 --micro-batch-size 1 \
+  --warmup-steps 1 --steps 2 --output /tmp/fsdp_smoke.json
+```
+
+API references: [PyTorch FSDP](https://docs.pytorch.org/docs/stable/fsdp.html)
+and [DeepSpeed initialization](https://deepspeed.readthedocs.io/en/stable/initialize.html).
+
+### Run all eight distributed benchmarks
+
+Run `run_distributed_benchmarks.sh` on **both machines**. It runs DeepSpeed
+V1–V4, then FSDP V1–V4, sequentially, with one GPU per machine by default.
+Both nodes use **10.10.0.2** as `MASTER_ADDR`; **10.10.0.1** is the worker node,
+not a second rendezvous master.
+
+On machine 1 (`10.10.0.2`):
+
+```bash
+RUN_ID=all_bf16 PRECISION=bf16 bash torch_benchmark/run_distributed_benchmarks.sh 0
+```
+
+On machine 2 (`10.10.0.1`):
+
+```bash
+RUN_ID=all_bf16 PRECISION=bf16 bash torch_benchmark/run_distributed_benchmarks.sh 1
+```
+
+Use identical settings on both machines, except node rank and local data paths.
+The launcher defaults to FP32 when `PRECISION` is unset. Each job uses a distinct
+rendezvous port, 29500–29507 by default; these must be reachable on machine 1.
+NCCL must also be able to communicate between machines. Set
+`NCCL_SOCKET_IFNAME` on each node if interface selection is needed.
+
+Results appear on machine 1 under `benchmark_results/all_bf16/`, with one JSON
+per backend/model. Each machine saves its own logs under `logs/node0/` or
+`logs/node1/`. Use a fresh `RUN_ID` to retain previous results. Failures stop the
+local suite; stop the peer launcher before restarting both machines.
+
+For a short dataset-free run, execute this on both machines, replacing `0` with
+`1` on machine 2:
+
+```bash
+RUN_ID=smoke SYNTHETIC=1 WARMUP_STEPS=1 STEPS=2 \
+  bash torch_benchmark/run_distributed_benchmarks.sh 0
+```
+
+Use `--dry-run` after the rank to inspect all eight commands without launching.
+`--help` lists overrides including `DATA_ROOT`, `GPUS_PER_NODE`,
+`MICRO_BATCH_SIZE`, `ZERO_STAGE`, and `TORCHRUN`.
