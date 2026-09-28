@@ -245,3 +245,86 @@ RUN_ID=smoke SYNTHETIC=1 WARMUP_STEPS=1 STEPS=2 \
 Use `--dry-run` after the rank to inspect all eight commands without launching.
 `--help` lists overrides including `DATA_ROOT`, `GPUS_PER_NODE`,
 `MICRO_BATCH_SIZE`, `ZERO_STAGE`, and `TORCHRUN`.
+
+### Five-seed TunX / ZeRO / FSDP campaign
+
+`run_distributed_multiseed.py` runs all **60 trials** (V1–V4 × TunX, DeepSpeed
+ZeRO, FSDP × seeds 1–5), then produces `summary.md`, `summary.csv`, and
+`summary.json`. Each row reports throughput (samples/s) and time per optimizer
+update (ms) as **mean ± sample standard deviation**, using `ddof=1` over the
+five trials. It does not average away missing or failed runs.
+
+Run this controller **only on machine 1 (10.10.0.2)**. It launches jobs on
+machine 2 (10.10.0.1) through noninteractive SSH. Unlike the earlier shell
+launcher, you do not start a second copy manually. Requirements:
+
+- Same updated repository and Python environment on both machines, with one
+  available CUDA GPU per machine. Install dependencies with `uv sync`.
+- Rebuild the TunX binaries on both machines:
+  `cmake --build build --target tcp_coordinator tcp_worker -j 2`.
+  The updated coordinator supports `--seed` for initialization and sampling.
+- Working key-based SSH from machine 1 to machine 2. Verify
+  `ssh -o BatchMode=yes 10.10.0.1 true`; use `--remote user@10.10.0.1` if needed.
+- ImageNet100 on both machines. This suite requires real data; TunX does not
+  use the Python synthetic-input mode.
+- Reachable TunX ports from the configs (9000/9001 on machine 1 and 8001 on
+  machine 2), torchrun ports 29500–29539 on machine 1, and NCCL connectivity.
+  Stop standalone TunX workers before launching; this script owns its workers.
+
+From machine 1, with the repository at the same absolute path on both machines:
+
+```bash
+python3 torch_benchmark/run_distributed_multiseed.py \
+  --precision bf16 \
+  --output benchmark_results/distributed_bf16_5seeds
+```
+
+If paths or SSH usernames differ:
+
+```bash
+python3 torch_benchmark/run_distributed_multiseed.py \
+  --remote user@10.10.0.1 \
+  --remote-repo /home/user/tunx \
+  --data-root /datasets/imagenet-100 \
+  --remote-data-root /datasets/imagenet-100 \
+  --precision bf16 \
+  --output benchmark_results/distributed_bf16_5seeds
+```
+
+Defaults are FP32, DeepSpeed ZeRO stage 3, microbatch 8 per GPU for ZeRO/FSDP,
+50 warmup updates, and 2,000 measured updates. TunX retains each config's
+pipeline microbatch count and `compute_bandwidth` partition policy. Use
+`--seeds 11 12 13 14 15` to choose five other positive seeds, `--zero-stage 2`
+for ZeRO-2, or `--models 1` for a smaller 15-trial campaign. The default timeout
+is two hours per trial; override with `--timeout SECONDS`. The remote helper
+requires Linux `/proc` to detect when the TunX worker is listening.
+
+Use `--dry-run` to inspect commands without creating results or contacting the
+remote machine. Local output directories must be new to prevent mixing runs.
+Each trial saves its config, result JSON and coordinator/rank-0 log locally.
+Rank-1 and worker logs go to `REMOTE_REPO/benchmark_results/OUTPUT_NAME/`;
+override with `--remote-output /absolute/path`. Use a unique output name on both
+machines to preserve previous logs. Progress names print locally; detailed
+training output is in the log files. Failures stop the suite and clean up the
+processes it launched; there is no automatic retry or resume.
+
+Regenerate summaries from a completed campaign without GPUs or SSH:
+
+```bash
+python3 torch_benchmark/run_distributed_multiseed.py \
+  --output benchmark_results/distributed_bf16_5seeds --summarize-only
+```
+
+The runner disables random augmentation and seeds model initialization and
+sample ordering. The same seed does **not** imply identical parameters, crops,
+or input tensors across frameworks; GPU execution is not guaranteed bitwise
+reproducible. TunX's ImageNet100 shuffling now respects `Dataset::set_seed()`.
+
+Measurement scope matters: TunX streams new batches and subtracts its recorded
+data-loading time, whereas ZeRO/FSDP repeat a cached GPU-resident batch. TunX
+uses pipeline parallelism and its configured BF16-storage/FP32-compute policy
+when BF16 is selected; the Python backends use their respective mixed-precision
+policies. FP32 selects FP32 storage and compute for all three. Summaries report
+these existing protocols and do not claim numerically equivalent training.
+The campaign reports throughput and step time only: CUDA allocator peaks from
+the Python backends are not comparable to whole-process TunX VRAM measurements.

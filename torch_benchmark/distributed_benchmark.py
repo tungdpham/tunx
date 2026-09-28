@@ -17,6 +17,7 @@ def parse_args(backend):
     parser.add_argument('--steps', type=int, default=2000, help='Measured optimizer updates')
     parser.add_argument('--precision', choices=['fp32', 'bf16'], default='fp32')
     parser.add_argument('--synthetic', action='store_true', help='Use random images instead of ImageNet100')
+    parser.add_argument('--no-augmentation', action='store_true', help='Use deterministic center crops')
     parser.add_argument('--data-root', type=Path, help='Overrides IMAGENET100_ROOT and config dataset_path')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--output', type=Path, default=Path(f'benchmark_results/{backend}.json'))
@@ -126,6 +127,11 @@ def main(backend):
             targets = torch.randint(100, (local_batch,))
         else:
             dataset = cfg['train_dataset']()
+            if args.no_augmentation:
+                import torchvision.transforms as T
+                dataset.transform = T.Compose([T.Resize(256), T.CenterCrop(224), T.ToTensor(),
+                                               T.Normalize([.485, .456, .406], [.229, .224, .225])])
+            dataset.samples.sort()
             if len(dataset) < args.global_batch_size:
                 raise ValueError('Dataset must contain at least one complete global batch')
             generator = torch.Generator().manual_seed(args.seed)
@@ -190,6 +196,7 @@ def main(backend):
                                  'min_num_params': 100_000, 'use_orig_params': True}
                                 if backend == 'fsdp' else None),
                 'seed': args.seed, 'parameters': parameter_count, 'optimizer': opt,
+                'augmentation': not args.no_augmentation,
                 'scheduler': 'constant_lr', 'torch_version': torch.__version__,
                 'cuda_version': torch.version.cuda, 'deepspeed_version': ds_version,
                 'deepspeed_config': ds_config, 'source_config': config,

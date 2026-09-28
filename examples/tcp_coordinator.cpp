@@ -28,11 +28,14 @@ using namespace std;
 
 int main(int argc, char *argv[]) {
   std::string config_path;
+  unsigned int seed = 0;
+  bool seeded = false;
   static struct option long_options[] = {
-      {"config", required_argument, 0, 'c'}, {"help", no_argument, 0, 'h'}, {0, 0, 0, 0}};
+      {"config", required_argument, 0, 'c'}, {"seed", required_argument, 0, 's'},
+      {"help", no_argument, 0, 'h'}, {0, 0, 0, 0}};
 
   int opt;
-  while ((opt = getopt_long(argc, argv, "c:h", long_options, nullptr)) != -1) {
+  while ((opt = getopt_long(argc, argv, "c:s:h", long_options, nullptr)) != -1) {
     switch (opt) {
       case 'c':
         config_path = optarg;
@@ -41,8 +44,24 @@ int main(int argc, char *argv[]) {
         cout << "Usage: " << argv[0] << " [options]" << endl;
         cout << "Options:" << endl;
         cout << "  --config <path>    Path to the JSON configuration file" << endl;
+        cout << "  --seed <N>         Positive seed for model initialization and dataset shuffling" << endl;
         cout << "  -h, --help         Show this help message" << endl;
         return 0;
+      case 's': {
+        try {
+          std::string value(optarg);
+          size_t parsed = 0;
+          auto number = std::stoull(value, &parsed);
+          if (value.empty() || value[0] == '-' || parsed != value.size() || number == 0 ||
+              number > 4294967295ULL) throw std::invalid_argument("seed");
+          seed = static_cast<unsigned int>(number);
+          seeded = true;
+        } catch (...) {
+          cerr << "Seed must be an integer in [1, 4294967295]" << endl;
+          return 1;
+        }
+        break;
+      }
       default:
         return 1;
     }
@@ -69,6 +88,7 @@ int main(int argc, char *argv[]) {
 
   GraphOpts opts{
       .s = device.default_stream(),
+      .seed = seed,
       .io_dtype = train_config.io_dtype,
       .param_dtype = train_config.param_dtype,
       .compute_dtype = train_config.compute_dtype,
@@ -86,6 +106,12 @@ int main(int argc, char *argv[]) {
     cerr << "Failed to create data loaders for model: " << train_config.model_name << endl;
     return 1;
   }
+  if (seeded) {
+    train_dataset->set_seed(seed);
+    val_dataset->set_seed(seed);
+    cout << "Benchmark seed: " << seed << endl;
+  }
+  train_dataset->set_disable_augmentation(!train_config.augmentation);
 
   auto criterion = LossFactory::create_from_config(train_config.loss_config);
 

@@ -483,16 +483,19 @@ public:
 
   void reset() override { this->current_index_ = 0; }
 
+  void set_seed(unsigned int seed) override {
+    Dataset::set_seed(seed);
+    // Filesystem iteration order is not stable across runs or machines.
+    std::sort(sample_list_.begin(), sample_list_.end());
+  }
+
   /**
    * Shuffle the sample list data array directly to retain serial caching.
    */
   void shuffle() override {
     if (sample_list_.empty()) return;
 
-    // Explicit, localized isolated engine setup for the shuffling phase
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(sample_list_.begin(), sample_list_.end(), g);
+    std::shuffle(sample_list_.begin(), sample_list_.end(), this->rng_);
 
     this->current_index_ = 0;
   }
