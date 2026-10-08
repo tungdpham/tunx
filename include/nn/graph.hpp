@@ -4,10 +4,11 @@
 #include <initializer_list>
 #include <iosfwd>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <set>
-#include <map>
 #include <string>
+#include <type_traits>
 
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
@@ -81,7 +82,9 @@ public:
                 std::initializer_list<Node> consumers);
 
   void sort();
-  void save_dot(const std::string &filename, const std::map<Edge, EdgeProfile> *edge_profiles = nullptr, const std::map<Node, size_t> *node_profiles = nullptr) const;
+  void save_dot(const std::string &filename,
+                const std::map<Edge, EdgeProfile> *edge_profiles = nullptr,
+                const std::map<Node, size_t> *node_profiles = nullptr) const;
 
   Node make_node(std::string uid = "");
 
@@ -95,7 +98,9 @@ public:
 
   Node input(const std::string &uid = "input");
 
-  template <typename... Args>
+  // Requires at least one uid; otherwise the zero-arg call would hijack inputs() on non-const
+  // Graph.
+  template <typename... Args, typename = std::enable_if_t<(sizeof...(Args) > 0)>>
   std::array<Node, sizeof...(Args)> inputs(Args... uids) {
     return {make_node(uids)...};
   }
