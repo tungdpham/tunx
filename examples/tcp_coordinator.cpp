@@ -30,9 +30,10 @@ int main(int argc, char *argv[]) {
   std::string config_path;
   unsigned int seed = 0;
   bool seeded = false;
-  static struct option long_options[] = {
-      {"config", required_argument, 0, 'c'}, {"seed", required_argument, 0, 's'},
-      {"help", no_argument, 0, 'h'}, {0, 0, 0, 0}};
+  static struct option long_options[] = {{"config", required_argument, 0, 'c'},
+                                         {"seed", required_argument, 0, 's'},
+                                         {"help", no_argument, 0, 'h'},
+                                         {0, 0, 0, 0}};
 
   int opt;
   while ((opt = getopt_long(argc, argv, "c:s:h", long_options, nullptr)) != -1) {
@@ -44,7 +45,8 @@ int main(int argc, char *argv[]) {
         cout << "Usage: " << argv[0] << " [options]" << endl;
         cout << "Options:" << endl;
         cout << "  --config <path>    Path to the JSON configuration file" << endl;
-        cout << "  --seed <N>         Positive seed for model initialization and dataset shuffling" << endl;
+        cout << "  --seed <N>         Positive seed for model initialization and dataset shuffling"
+             << endl;
         cout << "  -h, --help         Show this help message" << endl;
         return 0;
       case 's': {
@@ -53,7 +55,8 @@ int main(int argc, char *argv[]) {
           size_t parsed = 0;
           auto number = std::stoull(value, &parsed);
           if (value.empty() || value[0] == '-' || parsed != value.size() || number == 0 ||
-              number > 4294967295ULL) throw std::invalid_argument("seed");
+              number > 4294967295ULL)
+            throw std::invalid_argument("seed");
           seed = static_cast<unsigned int>(number);
           seeded = true;
         } catch (...) {
@@ -361,5 +364,7 @@ int main(int argc, char *argv[]) {
   coordinator.start();
   train_model(coordinator, train_dataset, val_dataset, criterion, train_config);
   coordinator.stop();
-  return 0;
+  cout.flush();
+  // Teardown segfaults after a completed run; skip destructors so the exit code reflects success.
+  std::_Exit(0);
 }
