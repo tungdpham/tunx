@@ -97,9 +97,9 @@ struct conv2d_fwd_graph {
     ensure_ok(graph->create_execution_plans(
                   {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "conv_fwd create plans");
-    graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
-                                   fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
-                                   fe::NumericalNote_t::TENSOR_CORE});
+    // graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
+    //                                fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
+    //                                fe::NumericalNote_t::TENSOR_CORE});
     ensure_ok(graph->check_support(), "conv_fwd check support");
     ensure_ok(graph->build_plans(), "conv_fprop build plans");
 
@@ -169,9 +169,9 @@ struct conv2d_dgrad_graph {
     ensure_ok(graph->create_execution_plans(
                   {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "conv_dgrad create plans");
-    graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
-                                   fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
-                                   fe::NumericalNote_t::TENSOR_CORE});
+    // graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
+    //                                fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
+    //                                fe::NumericalNote_t::TENSOR_CORE});
     ensure_ok(graph->check_support(), "conv_dgrad check support");
     ensure_ok(graph->build_plans(), "conv_dgrad build plans");
 
@@ -242,9 +242,9 @@ struct conv2d_wgrad_graph {
     ensure_ok(graph->create_execution_plans(
                   {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "conv_wgrad create plans");
-    graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
-                                   fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
-                                   fe::NumericalNote_t::TENSOR_CORE});
+    // graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
+    //                                fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
+    //                                fe::NumericalNote_t::TENSOR_CORE});
     ensure_ok(graph->check_support(), "conv_wgrad check support");
     ensure_ok(graph->build_plans(), "conv_wgrad build plans");
 
