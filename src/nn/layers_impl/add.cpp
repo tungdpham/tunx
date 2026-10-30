@@ -36,8 +36,8 @@ Tensor AddOp::forward(OpContext &ctx, const Vec<Tensor> &inputs) {
   }
 
   if (ctx.is_training) {
-    Tensor num_inputs_tensor({inputs.size()}, dptr(nullptr), DType_t::SIZE_T);
-    ctx.residuals["num_inputs"] = num_inputs_tensor;
+    Vec<size_t> num_inputs = {inputs.size()};
+    ctx.residuals["num_inputs"] = num_inputs;
   }
 
   Tensor output = ctx.make_tensor(inputs[0].shape(), inputs[0].dtype());
@@ -49,8 +49,8 @@ Tensor AddOp::forward(OpContext &ctx, const Vec<Tensor> &inputs) {
 }
 
 Vec<Tensor> AddOp::backward(OpContext &ctx, const Tensor &grad_out) {
-  const Tensor &num_inputs_tensor = ctx.residuals["num_inputs"];
-  size_t num_inputs = num_inputs_tensor.shape()[0];
+  const Vec<size_t> &num_inputs_vec = ctx.residuals["num_inputs"];
+  size_t num_inputs = num_inputs_vec[0];
 
   Vec<Tensor> grad_inputs;
   grad_inputs.reserve(num_inputs);

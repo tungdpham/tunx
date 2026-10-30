@@ -4,10 +4,11 @@
 #include <initializer_list>
 #include <iosfwd>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <set>
-#include <map>
 #include <string>
+#include <type_traits>
 
 #include "device/iallocator.hpp"
 #include "device/stream.hpp"
@@ -62,6 +63,13 @@ public:
   Vec<std::string> input_uids() const;
   Vec<std::string> output_uids() const;
 
+  DType_t get_io_dtype() const { return io_dtype_; }
+  DType_t get_param_dtype() const { return param_dtype_; }
+  DType_t get_compute_dtype() const { return compute_dtype_; }
+  void set_io_dtype(DType_t dtype) { io_dtype_ = dtype; }
+  void set_param_dtype(DType_t dtype) { param_dtype_ = dtype; }
+  void set_compute_dtype(DType_t dtype) { compute_dtype_ = dtype; }
+
   Device &device() const { return param_allocator_->device(); }
 
   IAllocator *workspace_allocator() { return workspace_allocator_; }
@@ -74,11 +82,14 @@ public:
                 std::initializer_list<Node> consumers);
 
   void sort();
-  void save_dot(const std::string &filename, const std::map<Edge, EdgeProfile> *edge_profiles = nullptr, const std::map<Node, size_t> *node_profiles = nullptr) const;
+  void save_dot(const std::string &filename,
+                const std::map<Edge, EdgeProfile> *edge_profiles = nullptr,
+                const std::map<Node, size_t> *node_profiles = nullptr) const;
 
   Node make_node(std::string uid = "");
 
   void set_mode(ExecutionMode mode);
+  ExecutionMode mode() const { return mode_; }
 
   void set_input(Node node);
   void set_output(Node node);
@@ -87,7 +98,9 @@ public:
 
   Node input(const std::string &uid = "input");
 
-  template <typename... Args>
+  // Requires at least one uid; otherwise the zero-arg call would hijack inputs() on non-const
+  // Graph.
+  template <typename... Args, typename = std::enable_if_t<(sizeof...(Args) > 0)>>
   std::array<Node, sizeof...(Args)> inputs(Args... uids) {
     return {make_node(uids)...};
   }
@@ -111,6 +124,10 @@ private:
   size_t edge_count_ = 0;
   std::set<std::string> used_node_uids_;
   std::set<std::string> used_edge_uids_;
+
+  DType_t io_dtype_ = DType_t::FP32;
+  DType_t param_dtype_ = DType_t::FP32;
+  DType_t compute_dtype_ = DType_t::FP32;
 
   std::string generate_node_uid();
   std::string generate_edge_uid();

@@ -334,12 +334,117 @@ inline void train_semi_async_step(Coordinator &coordinator, std::unique_ptr<Data
   std::cout << "\nTraining completed in " << train_duration.count() << " milliseconds" << std::endl;
 }
 
+inline void run_distributed_benchmark(Coordinator &coordinator, std::unique_ptr<Dataset> &train_dataset,
+                                      const std::unique_ptr<Loss> &criterion,
+                                      const TrainingConfig &config) {
+  std::cout << "\n>>> Starting Distributed Benchmark Mode (50 warmup steps + 2000 measured steps)..." << std::endl;
+  coordinator.set_training(true);
+  train_dataset->shuffle();
+  train_dataset->reset();
+
+  Tensor batch_data, batch_labels;
+  int accumulation_steps = 0;
+
+  std::unique_ptr<BatchPrefetcher> prefetcher;
+  auto start_prefetcher = [&]() {
+    prefetcher.reset();
+    if (config.prefetch_data) {
+      prefetcher = std::make_unique<BatchPrefetcher>(*train_dataset, config.batch_size, config.prefetch_depth);
+      prefetcher->start();
+    }
+  };
+  start_prefetcher();
+
+  double total_data_time = 0;
+  double total_misc_time = 0;
+  double total_gpu_time = 0;
+
+  auto step = [&]() {
+    auto t0 = std::chrono::high_resolution_clock::now();
+    if (!get_next_batch(*train_dataset, prefetcher.get(), config.batch_size, batch_data, batch_labels)) {
+      if (prefetcher) prefetcher->stop();
+      train_dataset->shuffle();
+      train_dataset->reset();
+      start_prefetcher();
+      get_next_batch(*train_dataset, prefetcher.get(), config.batch_size, batch_data, batch_labels);
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    Vec<Tensor> splitted_inputs;
+    split(batch_data, splitted_inputs, config.num_microbatches);
+    Vec<TensorBundle> micro_batch_inputs;
+    for (size_t i = 0; i < splitted_inputs.size(); ++i) {
+      micro_batch_inputs.push_back(TensorBundle{{{"input", splitted_inputs[i]}}});
+    }
+    Vec<Tensor> micro_batch_labels;
+    split(batch_labels, micro_batch_labels, config.num_microbatches);
+    auto t2 = std::chrono::high_resolution_clock::now();
+
+    if (config.async_pipeline) {
+      coordinator.async_train_batch(micro_batch_inputs, micro_batch_labels, criterion, config.gradient_accumulation_steps);
+    } else {
+      coordinator.sync_train_batch(micro_batch_inputs, micro_batch_labels, criterion, config.gradient_accumulation_steps);
+    }
+
+    accumulation_steps++;
+    if (accumulation_steps == config.gradient_accumulation_steps) {
+      coordinator.update_parameters();
+      accumulation_steps = 0;
+    }
+    auto t3 = std::chrono::high_resolution_clock::now();
+
+    total_data_time += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() / 1000.0;
+    total_misc_time += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count() / 1000.0;
+    total_gpu_time += std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count() / 1000.0;
+  };
+
+  std::cout << "Running 50 warmup steps..." << std::endl;
+  for (int i = 0; i < 50; ++i) {
+    step();
+  }
+
+  std::cout << "Warmup complete. Running 2000 measured steps..." << std::endl;
+  total_data_time = 0;
+  total_misc_time = 0;
+  total_gpu_time = 0;
+  auto start_time = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < 2000; ++i) {
+    step();
+  }
+  
+  auto end_time = std::chrono::high_resolution_clock::now();
+  double elapsed_sec = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count() / 1000000.0;
+  elapsed_sec -= (total_data_time / 1000.0); // Exclude data loading time
+
+  bool is_lm = (config.dataset_name == "openwebtext");
+  if (is_lm) {
+    double throughput = (2000.0 * config.batch_size * 1024) / elapsed_sec;
+    std::cout << "Throughput: " << std::fixed << std::setprecision(2) << throughput << " tokens/s" << std::endl;
+  } else {
+    double throughput = (2000.0 * config.batch_size) / elapsed_sec;
+    std::cout << "Throughput: " << std::fixed << std::setprecision(2) << throughput << " samples/s" << std::endl;
+  }
+  std::cout << "Elapsed time for 2000 steps: " << std::fixed << std::setprecision(3) << elapsed_sec << " s" << std::endl;
+  std::cout << "Average Data Loading Time: " << std::fixed << std::setprecision(3) << (total_data_time / 2000.0) << " ms/batch" << std::endl;
+  std::cout << "Average Misc Time (e.g. split): " << std::fixed << std::setprecision(3) << (total_misc_time / 2000.0) << " ms/batch" << std::endl;
+  std::cout << "Average GPU Processing Time: " << std::fixed << std::setprecision(3) << (total_gpu_time / 2000.0) << " ms/batch" << std::endl;
+
+  if (prefetcher) prefetcher->stop();
+}
+
 inline void train_model(Coordinator &coordinator, std::unique_ptr<Dataset> &train_dataset,
                         std::unique_ptr<Dataset> &val_dataset,
                         const std::unique_ptr<Loss> &criterion,
                         TrainingConfig config = TrainingConfig()) {
   coordinator.start_profiling();
   ThreadWrapper thread_wrapper({config.num_threads});
+
+  if (config.benchmark_mode) {
+    thread_wrapper.execute([&]() -> void {
+      run_distributed_benchmark(coordinator, train_dataset, criterion, config);
+    });
+    return;
+  }
   
   std::string ts = csv_timestamp();
   std::string batch_path = config.log_dir + "/" + config.model_name + "_" + ts + "_batch.csv";

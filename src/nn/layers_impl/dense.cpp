@@ -32,8 +32,6 @@ void DenseOp::init(OpContext &ctx, const Config &config) {
   if (config.use_bias) {
     Param bias = ctx.make_param({output_features});
     fill_normal(bias.data(), 0, stddev, seed);
-  } else {
-    ctx.make_param({0});
   }
 }
 

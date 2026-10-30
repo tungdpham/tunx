@@ -41,9 +41,7 @@ Vec<Vec<size_t>> FlattenOp::output_shapes(const Vec<Vec<size_t>> &input_shapes,
 
 Tensor FlattenOp::forward(OpContext &ctx, const Tensor &input, const Config &config) {
   if (ctx.is_training) {
-    Tensor shape_tensor({input.shape().size()}, DType_t::SIZE_T);
-    std::copy(input.shape().begin(), input.shape().end(), shape_tensor.data_as<size_t>());
-    ctx.residuals["original_shape"] = shape_tensor;
+    ctx.residuals["original_shape"] = input.shape();
   }
   Vec<size_t> output_shape = output_shapes({input.shape()}, config)[0];
   Tensor output = ctx.make_tensor(output_shape, ctx.io_dtype);
@@ -52,13 +50,7 @@ Tensor FlattenOp::forward(OpContext &ctx, const Tensor &input, const Config &con
 }
 
 Tensor FlattenOp::backward(OpContext &ctx, const Tensor &grad_output, const Config &config) {
-  const Tensor &shape_tensor = ctx.residuals["original_shape"];
-  if (!shape_tensor) {
-    throw std::runtime_error("No cached original shape found for backward pass in FlattenOp");
-  }
-  Vec<size_t> original_shape(shape_tensor.size());
-  std::copy(shape_tensor.data_as<size_t>(), shape_tensor.data_as<size_t>() + shape_tensor.size(),
-            original_shape.begin());
+  const Vec<size_t> &original_shape = ctx.residuals["original_shape"];
   Tensor grad_input = ctx.make_tensor(original_shape, ctx.io_dtype);
   copy(grad_output, grad_input, ctx.handle.get_stream());
   return grad_input;

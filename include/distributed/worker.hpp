@@ -44,7 +44,7 @@ namespace tunx {
 class Worker {
 public:
   explicit Worker(Sequential model, std::unique_ptr<Communicator> communicator,
-                  Device &device = getHost())
+                  Device &device = getHost(), bool bootstrap_offload = false)
       : communicator_(std::move(communicator)),
         should_stop_(true) {
     graph_ = std::make_unique<Graph>();
@@ -58,8 +58,9 @@ public:
   virtual ~Worker() { stop(); }
 
 protected:
-  Worker(DeviceID device_id)
+  Worker(DeviceID device_id, bool bootstrap_offload = false)
       : device_id_(device_id),
+        bootstrap_offload_(bootstrap_offload),
         should_stop_(true),
         is_configured_(false) {}
 
@@ -99,6 +100,7 @@ public:
   bool is_configured() const { return is_configured_; }
 
   void set_config(const StageConfig &config) {
+    executors_.clear();
     auto &device = DeviceManager::instance().get(device_id_);
     auto &allocator = PoolAllocator::instance(device, nullptr);
     std::istringstream graph_stream(config.graph_state, std::ios::binary);
@@ -326,7 +328,7 @@ protected:
 
   GraphExecutor &get_executor(size_t pid) {
     if (executors_.find(pid) == executors_.end()) {
-      executors_[pid] = std::make_unique<GraphExecutor>(*graph_);
+      executors_[pid] = std::make_unique<GraphExecutor>(*graph_, bootstrap_offload_);
     }
     return *executors_[pid];
   }
@@ -337,6 +339,7 @@ protected:
   std::unique_ptr<Optimizer> optimizer_;
   std::unique_ptr<Scheduler> scheduler_;
   std::unique_ptr<Communicator> communicator_;
+  bool bootstrap_offload_;
 
   std::string id_;
   int forward_step_ = 0;

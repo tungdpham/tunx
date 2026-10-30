@@ -72,7 +72,8 @@ struct sdpa_fwd_graph {
 
     ensure_ok(graph->validate(), "sdpa validate");
     ensure_ok(graph->build_operation_graph(handle), "sdpa build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "sdpa create plans");
     ensure_ok(graph->check_support(), "sdpa check support");
     ensure_ok(graph->build_plans(), "sdpa build plans");
@@ -154,7 +155,8 @@ struct sdpa_bwd_graph {
 
     ensure_ok(graph->validate(), "sdpa_backward validate");
     ensure_ok(graph->build_operation_graph(handle), "sdpa_backward build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "sdpa_backward create plans");
     ensure_ok(graph->check_support(), "sdpa_backward check support");
     ensure_ok(graph->build_plans(), "sdpa_backward build plans");
@@ -168,6 +170,10 @@ WorkspaceReq CuDNNEngine::query_dropout_graph(engine_handle backend_handle,
 
 WorkspaceReq CuDNNEngine::query_sdpa_graph(engine_handle backend_handle,
                                            const AttentionStats& stats, DTypeDesc type_desc) {
+  if (type_desc.io_dtype == DType_t::FP32) {
+    return cuda_engine_.query_sdpa_graph(backend_handle, stats, type_desc);
+  }
+
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey fwd_key{
@@ -208,6 +214,12 @@ WorkspaceReq CuDNNEngine::query_sdpa_graph(engine_handle backend_handle,
 void CuDNNEngine::sdpa_fwd(engine_handle backend_handle, const AttentionStats& stats,
                            const void* q_data, const void* k_data, const void* v_data, void* o_data,
                            void* stats_data, void* workspace, DTypeDesc type_desc) {
+  if (type_desc.io_dtype == DType_t::FP32) {
+    cuda_engine_.sdpa_fwd(backend_handle, stats, q_data, k_data, v_data, o_data, stats_data,
+                          workspace, type_desc);
+    return;
+  }
+
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey key{
@@ -239,6 +251,12 @@ void CuDNNEngine::sdpa_bwd(engine_handle backend_handle, const AttentionStats& s
                            const void* o_data, const void* dO_data, const void* stats_data,
                            void* dQ_data, void* dK_data, void* dV_data, void* workspace,
                            DTypeDesc type_desc) {
+  if (type_desc.io_dtype == DType_t::FP32) {
+    cuda_engine_.sdpa_bwd(backend_handle, stats, q_data, k_data, v_data, o_data, dO_data,
+                          stats_data, dQ_data, dK_data, dV_data, workspace, type_desc);
+    return;
+  }
+
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey key{
@@ -278,7 +296,8 @@ void CuDNNEngine::dropout_fwd(engine_handle backend_handle, const DropoutStats& 
 void CuDNNEngine::dropout_bwd(engine_handle backend_handle, const DropoutStats& stats,
                               const void* grad_output, void* grad_input, const bool* mask,
                               double scale, void* workspace, DTypeDesc type_desc) {
-  cuda_engine_.dropout_bwd(backend_handle, stats, grad_output, grad_input, mask, scale, workspace, type_desc);
+  cuda_engine_.dropout_bwd(backend_handle, stats, grad_output, grad_input, mask, scale, workspace,
+                           type_desc);
 }
 
 WorkspaceReq CuDNNEngine::query_transpose_graph(engine_handle backend_handle,
@@ -291,8 +310,8 @@ void CuDNNEngine::transpose(engine_handle backend_handle, const TransposeStats& 
   cuda_engine_.transpose(backend_handle, stats, input, output, workspace, type_desc);
 }
 
-WorkspaceReq CuDNNEngine::query_slice_graph(engine_handle backend_handle,
-                                            const SliceStats& stats, DTypeDesc type_desc) {
+WorkspaceReq CuDNNEngine::query_slice_graph(engine_handle backend_handle, const SliceStats& stats,
+                                            DTypeDesc type_desc) {
   return cuda_engine_.query_slice_graph(backend_handle, stats, type_desc);
 }
 

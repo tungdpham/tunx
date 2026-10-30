@@ -42,6 +42,14 @@ public:
   virtual bool get_batch(size_t batch_size, Tensor &batch_data, Tensor &batch_labels) = 0;
 
   /**
+   * Get a batch using specific indices
+   */
+  virtual bool get_batch_by_indices(const Vec<size_t> &indices, Tensor &batch_data, Tensor &batch_labels) {
+    throw std::runtime_error("get_batch_by_indices not implemented for this dataset");
+    return false;
+  }
+
+  /**
    * Reset iterator to beginning of dataset
    */
   virtual void reset() = 0;
@@ -91,10 +99,13 @@ public:
    */
   bool has_augmentation() const { return augmentation_ != nullptr; }
 
+  virtual void set_disable_augmentation(bool disable) { disable_augmentation_ = disable; }
+
 protected:
   size_t current_index_ = 0;
   mutable std::mt19937 rng_{std::random_device{}()};
   std::unique_ptr<AugmentationStrategy> augmentation_;
+  bool disable_augmentation_ = false;
 
   /**
    * Apply augmentation to batch if augmentation strategy is set

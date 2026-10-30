@@ -258,7 +258,7 @@ TEST_F(FlashAttentionBlockTest, CompareAgainstReferenceForward) {
     for (size_t i = 0; i < host_t.size(); ++i) {
       data[i] = static_cast<bf16>(dist(gen));
     }
-    cd_copy(host_t, p.data());
+    copy(host_t, p.data());
   };
 
   auto params = block.params();

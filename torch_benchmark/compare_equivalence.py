@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+import os
+import sys
+import argparse
+import json
+import re
+import numpy as np
+from pathlib import Path
+from tabulate import tabulate
+
+_topology_order = None
+
+def load_topology_order(pt_dir):
+    global _topology_order
+    _topology_order = None
+    topology_file = os.path.join(pt_dir, "topology_order.txt")
+    if os.path.exists(topology_file):
+        with open(topology_file, "r") as f:
+            _topology_order = [line.strip() for line in f if line.strip()]
+def topological_key(name):
+    """Return the execution-order key for TunX/PyTorch operator names."""
+    base_name = name
+    # Strip dynamic per-step suffixes: .output_step_N.bin, .grad_input_step_N.bin, etc.
+    base_name = re.sub(r"\.(output|grad_input|grad_output)_step_\d+\.bin$", "", base_name)
+    for suffix in (".act.grad.bin", ".act.bin", ".batch_mean.bin", ".batch_invar.bin",
+                   ".running_mean.bin", ".running_var.bin",
+                   ".grad", ".updated", ".grad.bin", ".updated.bin"):
+        if base_name.endswith(suffix):
+            base_name = base_name[:-len(suffix)]
+            break
+
+    # Parameter tensors and intermediate tensors share their operator's position.
+    operator_name = re.sub(r"\.(weight|bias)$", "", base_name)
+    legacy_order = _topology_order is not None and all(
+        item.endswith((".weight", ".bias")) for item in _topology_order)
+    if _topology_order is not None and not legacy_order:
+        for i, order_name in enumerate(_topology_order):
+            if base_name == order_name or base_name.startswith(order_name + "."):
+                return (0, i, name)
+
+    # Older dumps listed only parameters. Include parameter-free ResNet operators
+    # instead of putting them after fc. Both residual branches precede relu4.
+    stem_order = {"conv1": 0, "bn1": 1, "relu": 2, "maxpool": 3}
+    if operator_name in stem_order:
+        return (1, 0, 0, 0, stem_order[operator_name], name)
+    match = re.fullmatch(r"layer(\d+)_block(\d+)_(conv|bn|relu)(\d+)", operator_name)
+    if match:
+        stage, block, operator, index = match.groups()
+        operator_order = {"conv1": 0, "bn0": 1, "relu1": 2,
+                          "conv2": 3, "bn1": 4, "relu2": 5,
+                          "conv3": 6, "bn2": 7, "relu3": 8,
+                          "conv0": 9, "bn3": 10, "relu4": 11}
+        if operator + index in operator_order:
+            return (1, 1, int(stage), int(block), operator_order[operator + index], name)
+    tail_order = {"avgpool": 0, "flatten": 1, "fc": 2}
+    if operator_name in tail_order:
+        return (1, 2, 0, 0, tail_order[operator_name], name)
+
+    if _topology_order is not None:
+        for i, order_name in enumerate(_topology_order):
+            if base_name == order_name or order_name.startswith(base_name + "."):
+                return (2, i, name)
+    return (3, operator_name, name)
+
+
+def sort_results(results):
+    results.sort(key=lambda result: topological_key(result["name"]))
+    return results
+
+def load_tensor_bin(path, dtype=None):
+    if not os.path.exists(path):
+        return None
+    if dtype is None:
+        dtype = np.float64 if os.environ.get("TUNX_COMPARE_FP64") == "1" else np.float32
+    with open(path, "rb") as f:
+        data = np.frombuffer(f.read(), dtype=dtype)
+    return data
+
+def compare_tensors(t1, t2, name, rtol=1e-4, atol=1e-4):
+    if t1 is None or t2 is None:
+        return None
+        
+    if t1.shape != t2.shape:
+        print(f"Shape mismatch for {name}: {t1.shape} vs {t2.shape}")
+        # Try to flatten
+        t1 = t1.flatten()
+        t2 = t2.flatten()
+        
+        if t1.shape != t2.shape:
+            return None
+            
+    abs_diff = np.abs(t1 - t2)
+    max_abs = np.max(abs_diff)
+    p99_abs = np.percentile(abs_diff, 99)
+
+    # Element-wise max relative error is dominated by outliers where t2 is
+    # near zero (division blows up even for a tiny absolute difference), so
+    # report it alongside the normalized-L2 relative error, which is a much
+    # more stable aggregate measure of relative discrepancy.
+    t2_safe = np.where(np.abs(t2) < 1e-12, 1e-12, t2)
+    rel_diff = np.abs(t1 - t2) / np.abs(t2_safe)
+    max_rel = np.max(rel_diff)
+
+    norm1 = np.linalg.norm(t1)
+    norm2 = np.linalg.norm(t2)
+    normalized_l2 = np.linalg.norm(abs_diff) / norm2 if norm2 > 1e-12 else float("nan")
+
+    # Cosine similarity
+    if norm1 < 1e-12 or norm2 < 1e-12:
+        cos_sim = 1.0 if max_abs < 1e-6 else 0.0
+    else:
+        cos_sim = np.dot(t1.flatten(), t2.flatten()) / (norm1 * norm2)
+        
+    is_allclose_mask = np.isclose(t1, t2, rtol=rtol, atol=atol)
+    is_allclose = np.all(is_allclose_mask)
+    elements_passed = np.sum(is_allclose_mask)
+    total_elements = t1.size
+    
+    return {
+        'name': name,
+        'max_abs': float(max_abs),
+        'p99_abs': float(p99_abs),
+        'max_rel': float(max_rel),
+        'normalized_l2': float(normalized_l2),
+        'cos_sim': float(cos_sim),
+        'allclose': bool(is_allclose),
+        'elements_passed': int(elements_passed),
+        'total_elements': int(total_elements),
+        'sq_diff': float(np.sum(abs_diff**2)),
+        'sq_norm1': float(np.sum(t1.astype(np.float64)**2)),
+        'sq_norm2': float(np.sum(t2.astype(np.float64)**2)),
+        'dot_product': float(np.dot(t1.flatten().astype(np.float64), t2.flatten().astype(np.float64))),
+    }
+
+def print_table(title, results):
+    if not results:
+        return
+    sort_results(results)
+    print(f"\n--- {title} ---")
+    table_data = [[r['name'], f"{r['max_abs']:.2e}", f"{r['p99_abs']:.2e}", f"{r['max_rel']:.2e}",
+                   f"{r['normalized_l2']:.2e}", f"{r['cos_sim']:.6f}", r['allclose'],
+                   f"{r['elements_passed']}/{r['total_elements']} ({(r['elements_passed']/r['total_elements'])*100:.2f}%)"]
+                  for r in results]
+    print(tabulate(table_data, headers=["Tensor", "Max Abs Err", "P99 Abs Err", "Max Rel Err",
+                                        "Normalized L2 Rel Err", "Cosine Sim", "Allclose (1e-3)",
+                                        "Elements Passed"]))
+
+def summarize_section(results):
+    finite_l2 = [r['normalized_l2'] for r in results if np.isfinite(r['normalized_l2'])]
+    
+    total_sq_diff = sum(r['sq_diff'] for r in results)
+    total_sq_norm1 = sum(r['sq_norm1'] for r in results)
+    total_sq_norm2 = sum(r['sq_norm2'] for r in results)
+    total_dot = sum(r['dot_product'] for r in results)
+    
+    eps = 1e-12
+    global_l2 = np.sqrt(total_sq_diff) / (np.sqrt(total_sq_norm2) + eps)
+    global_cos = total_dot / (np.sqrt(total_sq_norm1) * np.sqrt(total_sq_norm2) + eps)
+    
+    total_elements = sum(r['total_elements'] for r in results)
+    total_passed = sum(r['elements_passed'] for r in results)
+    element_allclose_pct = float(100 * total_passed / total_elements) if total_elements > 0 else 0.0
+
+    return {
+        'tensor_count': len(results),
+        'max_normalized_l2': float(max(finite_l2)) if finite_l2 else float('nan'),
+        'mean_normalized_l2': float(np.mean(finite_l2)) if finite_l2 else float('nan'),
+        'global_l2': float(global_l2),
+        'min_cosine': float(min(r['cos_sim'] for r in results)),
+        'global_cosine': float(global_cos),
+        'tensor_allclose_pct': float(100 * sum(r['allclose'] for r in results) / len(results)),
+        'element_allclose_pct': element_allclose_pct,
+    }
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pt_dir", type=str, required=True)
+    parser.add_argument("--tunx_dir", type=str, required=True)
+    parser.add_argument("--summary-json", type=str, default=None)
+    args = parser.parse_args()
+
+    load_topology_order(args.pt_dir)
+
+    results_out = []
+    results_loss_grad = []
+    results_act = []
+    results_act_grad = []
+    results_bn_stats = []
+    results_grad = []
+    results_upd = []
+    
+    # 1. Compare outputs
+    pt_out = load_tensor_bin(os.path.join(args.pt_dir, "outputs.bin"))
+    tunx_out = load_tensor_bin(os.path.join(args.tunx_dir, "outputs.bin"))
+    
+    if pt_out is None or tunx_out is None:
+        print("Error: Missing outputs.bin in one of the directories.")
+        sys.exit(1)
+        
+    res = compare_tensors(pt_out, tunx_out, "Forward Outputs")
+    if res:
+        results_out.append(res)
+
+    # Compare the loss gradient entering model backward before any layer-specific
+    # backward implementation can amplify a discrepancy.
+    pt_loss_grad = load_tensor_bin(os.path.join(args.pt_dir, "grad_output.bin"))
+    tunx_loss_grad = load_tensor_bin(os.path.join(args.tunx_dir, "grad_output.bin"))
+    if pt_loss_grad is not None and tunx_loss_grad is not None:
+        res = compare_tensors(pt_loss_grad, tunx_loss_grad, "Loss Gradient")
+        if res:
+            results_loss_grad.append(res)
+        
+    # 2. Compare gradients and updated parameters
+    pt_files = os.listdir(args.pt_dir)
+    param_names = set()
+    
+    for filename in pt_files:
+        if filename.endswith((".batch_mean.bin", ".batch_invar.bin", ".running_mean.bin", ".running_var.bin")):
+            pt_path = os.path.join(args.pt_dir, filename)
+            tunx_path = os.path.join(args.tunx_dir, filename)
+            if os.path.exists(tunx_path):
+                metrics = compare_tensors(load_tensor_bin(pt_path), load_tensor_bin(tunx_path), filename)
+                if metrics: results_bn_stats.append(metrics)
+            continue
+
+        # Check for intermediate activations
+        if filename.endswith(".act.bin"):
+            pt_path = os.path.join(args.pt_dir, filename)
+            tunx_path = os.path.join(args.tunx_dir, filename)
+            if os.path.exists(tunx_path):
+                metrics = compare_tensors(load_tensor_bin(pt_path), load_tensor_bin(tunx_path), filename)
+                if metrics: results_act.append(metrics)
+            continue
+            
+        # Check for intermediate gradients
+        if filename.endswith(".act.grad.bin"):
+            pt_path = os.path.join(args.pt_dir, filename)
+            tunx_path = os.path.join(args.tunx_dir, filename)
+            if os.path.exists(tunx_path):
+                metrics = compare_tensors(load_tensor_bin(pt_path), load_tensor_bin(tunx_path), filename)
+                if metrics: results_act_grad.append(metrics)
+            continue
+
+        # Extract base parameter names
+        if filename.endswith(".bin") and not (filename.endswith(".act.bin") or filename.endswith(".grad.bin") or filename.endswith(".updated.bin") or filename.endswith((".batch_mean.bin", ".batch_invar.bin", ".running_mean.bin", ".running_var.bin")) or filename in ["inputs.bin", "labels.bin", "outputs.bin", "grad_output.bin"]):
+            param_names.add(filename[:-4])
+            
+    if not param_names:
+        print("Error: No parameters found in PyTorch dump directory.")
+        sys.exit(1)
+        
+    missing_files = False
+    
+    for name in sorted(param_names, key=topological_key):
+        # Compare gradients
+        pt_grad = load_tensor_bin(os.path.join(args.pt_dir, f"{name}.grad.bin"))
+        tunx_grad = load_tensor_bin(os.path.join(args.tunx_dir, f"{name}.grad.bin"))
+        if pt_grad is None or tunx_grad is None:
+            print(f"Error: Missing gradient dump for {name}")
+            missing_files = True
+        else:
+            res = compare_tensors(pt_grad, tunx_grad, f"{name}.grad")
+            if res: results_grad.append(res)
+            
+        # Compare updated params
+        pt_upd = load_tensor_bin(os.path.join(args.pt_dir, f"{name}.updated.bin"))
+        tunx_upd = load_tensor_bin(os.path.join(args.tunx_dir, f"{name}.updated.bin"))
+        if pt_upd is None or tunx_upd is None:
+            print(f"Error: Missing updated param dump for {name}")
+            missing_files = True
+        else:
+            res = compare_tensors(pt_upd, tunx_upd, f"{name}.updated")
+            if res: results_upd.append(res)
+
+    if missing_files:
+        print("Error: Failed due to missing expected dumps.")
+        sys.exit(1)
+        
+    print_table("Outputs", results_out)
+    if results_loss_grad: print_table("Loss Gradient", results_loss_grad)
+    if results_act: print_table("Intermediate Activations", results_act)
+    if results_act_grad: print_table("Intermediate Gradients", results_act_grad)
+    if results_bn_stats: print_table("BatchNorm Statistics", results_bn_stats)
+    print_table("Gradients", results_grad)
+    print_table("Updated Parameters", results_upd)
+
+    sections = {
+        "forward_outputs": results_out,
+        "loss_gradient": results_loss_grad,
+        "activations": results_act,
+        "activation_gradients": results_act_grad,
+        "batchnorm_statistics": results_bn_stats,
+        "parameter_gradients": results_grad,
+        "updated_parameters": results_upd,
+    }
+    section_summary = {name: summarize_section(items) for name, items in sections.items() if items}
+    print("\n--- Section Aggregates ---")
+    print(tabulate(
+        [[name, values['tensor_count'], f"{values['max_normalized_l2']:.2e}",
+          f"{values['global_l2']:.2e}", f"{values['min_cosine']:.6f}", f"{values['global_cosine']:.6f}",
+          f"{values['tensor_allclose_pct']:.2f}%", f"{values['element_allclose_pct']:.2f}%"]
+         for name, values in section_summary.items()],
+        headers=["Section", "Tensors", "Max Norm L2", "Global L2", "Min Cosine", "Global Cosine", "Tensor Allclose", "Element Allclose"]
+    ))
+
+    all_results = results_out + results_loss_grad + results_act + results_act_grad + results_bn_stats + results_grad + results_upd
+    if not all_results:
+        print("No comparison results found.")
+        return
+
+    # Calculate aggregates across all tensors
+    overall_max_abs = max(r['max_abs'] for r in all_results)
+    overall_p99_abs = max(r['p99_abs'] for r in all_results)
+    overall_max_rel = max(r['max_rel'] for r in all_results)
+    finite_l2 = [r['normalized_l2'] for r in all_results if np.isfinite(r['normalized_l2'])]
+    overall_max_l2 = max(finite_l2) if finite_l2 else float("nan")
+    overall_mean_l2 = float(np.mean(finite_l2)) if finite_l2 else float("nan")
+    overall_min_cos = min(r['cos_sim'] for r in all_results)
+    
+    total_sq_diff = sum(r['sq_diff'] for r in all_results)
+    total_sq_norm1 = sum(r['sq_norm1'] for r in all_results)
+    total_sq_norm2 = sum(r['sq_norm2'] for r in all_results)
+    total_dot = sum(r['dot_product'] for r in all_results)
+    
+    def safe_min(items):
+        return min((r['cos_sim'] for r in items), default=float("nan"))
+    
+    min_cosine_fwd = safe_min(results_out + results_act + results_bn_stats)
+    min_cosine_act_grads = safe_min(results_loss_grad + results_act_grad)
+    min_cosine_param_grads = safe_min(results_grad)
+    min_cosine_updated_params = safe_min(results_upd)
+    
+    eps = 1e-12
+    overall_global_l2 = np.sqrt(total_sq_diff) / (np.sqrt(total_sq_norm2) + eps)
+    overall_global_cos = total_dot / (np.sqrt(total_sq_norm1) * np.sqrt(total_sq_norm2) + eps)
+    
+    total_tensors = len(all_results)
+    allclose_passes = sum(1 for r in all_results if r['allclose'])
+    allclose_pct = (allclose_passes / total_tensors) * 100
+    
+    total_elements = sum(r['total_elements'] for r in all_results)
+    total_passed_elements = sum(r['elements_passed'] for r in all_results)
+    element_pass_pct = (total_passed_elements / total_elements) * 100 if total_elements > 0 else 0
+    
+    print("\n--- Aggregate Metrics (RQ4) ---")
+    agg_data = [
+        ["Max absolute error", f"{overall_max_abs:.2e}"],
+        ["P99 absolute error", f"{overall_p99_abs:.2e}"],
+        ["Max element-wise relative error", f"{overall_max_rel:.2e}"],
+        ["Max normalized L2 relative error", f"{overall_max_l2:.2e}"],
+        ["Mean normalized L2 relative error", f"{overall_mean_l2:.2e}"],
+        ["Global normalized L2 relative error", f"{overall_global_l2:.2e}"],
+        ["Min cosine similarity", f"{overall_min_cos:.6f}"],
+        ["Global cosine similarity", f"{overall_global_cos:.6f}"],
+        ["Tensor-level allclose passes (%)", f"{allclose_pct:.2f}% ({allclose_passes}/{total_tensors})"],
+        ["Element-level allclose passes (%)", f"{element_pass_pct:.2f}% ({total_passed_elements}/{total_elements})"]
+    ]
+    print(tabulate(agg_data, headers=["Metric", "Value"]))
+
+    if args.summary_json:
+        summary = {
+            "outputs": results_out,
+            "loss_gradient": results_loss_grad,
+            "activations": results_act,
+            "activation_gradients": results_act_grad,
+            "batchnorm_statistics": results_bn_stats,
+            "gradients": results_grad,
+            "updated_parameters": results_upd,
+            "sections": section_summary,
+            "aggregate": {
+                "max_abs": float(overall_max_abs),
+                "p99_abs": float(overall_p99_abs),
+                "max_rel": float(overall_max_rel),
+                "max_normalized_l2": float(overall_max_l2),
+                "mean_normalized_l2": float(overall_mean_l2),
+                "global_l2": float(overall_global_l2),
+                "min_cosine": float(overall_min_cos),
+                "global_cosine": float(overall_global_cos),
+                "tensor_allclose_pct": float(allclose_pct),
+                "element_allclose_pct": float(element_pass_pct),
+                "tensor_count": total_tensors,
+                "min_cosine_fwd": float(min_cosine_fwd),
+                "min_cosine_act_grads": float(min_cosine_act_grads),
+                "min_cosine_param_grads": float(min_cosine_param_grads),
+                "min_cosine_updated_params": float(min_cosine_updated_params),
+            },
+        }
+        with open(args.summary_json, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2, allow_nan=True,
+                      default=lambda value: value.item() if hasattr(value, "item") else str(value))
+
+if __name__ == "__main__":
+    main()
+

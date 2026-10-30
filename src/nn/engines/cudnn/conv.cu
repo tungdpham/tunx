@@ -9,6 +9,7 @@
 #include <cudnn_graph.h>
 #include <fmt/core.h>
 
+#include <cstdlib>
 #include <memory>
 #include <stdexcept>
 #include <unordered_map>
@@ -21,6 +22,13 @@
 #include "type/type.hpp"
 
 namespace tunx {
+
+namespace {
+bool use_naive_conv2d() {
+  const char* value = std::getenv("TUNX_NAIVE_CONV2D");
+  return value && value[0] != '\0' && value[0] != '0';
+}
+}  // namespace
 
 struct conv2d_fwd_graph {
   std::shared_ptr<fe::graph::Graph> graph;
@@ -86,9 +94,13 @@ struct conv2d_fwd_graph {
 
     ensure_ok(graph->validate(), "conv_fprop validate");
     ensure_ok(graph->build_operation_graph(handle), "conv_fprop build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
-              "conv_fprop create plans");
-    ensure_ok(graph->check_support(), "conv_fprop check support");
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
+              "conv_fwd create plans");
+    // graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
+    //                                fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
+    //                                fe::NumericalNote_t::TENSOR_CORE});
+    ensure_ok(graph->check_support(), "conv_fwd check support");
     ensure_ok(graph->build_plans(), "conv_fprop build plans");
 
     int64 ws = 0;
@@ -154,8 +166,12 @@ struct conv2d_dgrad_graph {
 
     ensure_ok(graph->validate(), "conv_dgrad validate");
     ensure_ok(graph->build_operation_graph(handle), "conv_dgrad build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "conv_dgrad create plans");
+    // graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
+    //                                fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
+    //                                fe::NumericalNote_t::TENSOR_CORE});
     ensure_ok(graph->check_support(), "conv_dgrad check support");
     ensure_ok(graph->build_plans(), "conv_dgrad build plans");
 
@@ -212,7 +228,8 @@ struct conv2d_wgrad_graph {
             .set_pre_padding({static_cast<int64>(stats.pad_h), static_cast<int64>(stats.pad_w)})
             .set_post_padding({static_cast<int64>(stats.pad_h), static_cast<int64>(stats.pad_w)})
             .set_stride({static_cast<int64>(stats.stride_h), static_cast<int64>(stats.stride_w)})
-            .set_dilation({1, 1});
+            .set_dilation({1, 1})
+            .set_compute_data_type(compute_type);
 
     dw = graph->conv_wgrad(dy, x, wgrad_options);
     dw->set_output(true)
@@ -222,8 +239,12 @@ struct conv2d_wgrad_graph {
 
     ensure_ok(graph->validate(), "conv_wgrad validate");
     ensure_ok(graph->build_operation_graph(handle), "conv_wgrad build op graph");
-    ensure_ok(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+    ensure_ok(graph->create_execution_plans(
+                  {fe::HeurMode_t::A, fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
               "conv_wgrad create plans");
+    // graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC,
+    //                                fe::NumericalNote_t::DOWN_CONVERT_INPUTS,
+    //                                fe::NumericalNote_t::TENSOR_CORE});
     ensure_ok(graph->check_support(), "conv_wgrad check support");
     ensure_ok(graph->build_plans(), "conv_wgrad build plans");
 
@@ -237,6 +258,7 @@ struct conv2d_wgrad_graph {
 
 WorkspaceReq CuDNNEngine::query_conv2d_graph(engine_handle backend_handle, const Conv2DStats& stats,
                                              DTypeDesc type_desc) {
+  if (use_naive_conv2d()) return {0, 0, 0};
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
 
   GraphCacheKey fwd_key{
@@ -310,6 +332,11 @@ WorkspaceReq CuDNNEngine::query_conv2d_graph(engine_handle backend_handle, const
 void CuDNNEngine::conv2d_fwd(engine_handle backend_handle, const Conv2DStats& stats,
                              const void* input, const void* weight, const void* bias, void* output,
                              void* workspace, DTypeDesc type_desc) {
+  if (use_naive_conv2d()) {
+    cuda_engine_.conv2d_fwd(backend_handle, stats, input, weight, bias, output, workspace,
+                            type_desc);
+    return;
+  }
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::CONV2D_FWD,
@@ -346,6 +373,11 @@ void CuDNNEngine::conv2d_fwd(engine_handle backend_handle, const Conv2DStats& st
 void CuDNNEngine::conv2d_dgrad(engine_handle backend_handle, const Conv2DStats& stats,
                                const void* grad_output, const void* weight, void* grad_input,
                                void* workspace, DTypeDesc type_desc) {
+  if (use_naive_conv2d()) {
+    cuda_engine_.conv2d_dgrad(backend_handle, stats, grad_output, weight, grad_input, workspace,
+                              type_desc);
+    return;
+  }
   cudnnHandle_t handle = backend_handle.as<CuDNNEngineHandle>()->handle();
   GraphCacheKey key{
       .op_type = OpType::CONV2D_DGRAD,
@@ -377,6 +409,11 @@ void CuDNNEngine::conv2d_dgrad(engine_handle backend_handle, const Conv2DStats& 
 void CuDNNEngine::conv2d_wgrad(engine_handle backend_handle, const Conv2DStats& stats,
                                const void* grad_output, const void* input, void* grad_weight,
                                void* workspace, DTypeDesc type_desc) {
+  if (use_naive_conv2d()) {
+    cuda_engine_.conv2d_wgrad(backend_handle, stats, grad_output, input, grad_weight, workspace,
+                              type_desc);
+    return;
+  }
   size_t grad_weight_temp_size = stats.out_channels * stats.kernel_h * stats.kernel_w *
                                  stats.in_channels * get_dtype_size(type_desc.param_dtype);
   void* grad_weight_temp = workspace;

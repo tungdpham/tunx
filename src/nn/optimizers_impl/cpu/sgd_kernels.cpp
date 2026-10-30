@@ -14,28 +14,37 @@ namespace cpu {
 namespace sgd {
 
 template <typename T>
-void update_sgd(T *params_data, const T *grads_data, size_t size, const float learning_rate) {
+void update_sgd(T *params_data, const T *grads_data, size_t size, const float learning_rate,
+                const float weight_decay) {
   parallel_for<size_t>(0, size, [&](size_t i) {
-    params_data[i] -= learning_rate * static_cast<float>(grads_data[i]);
+    float grad = static_cast<float>(grads_data[i]);
+    if (weight_decay > 0.0f) {
+      grad += weight_decay * static_cast<float>(params_data[i]);
+    }
+    params_data[i] -= learning_rate * grad;
   });
 }
 
 template <typename T>
 void update_sgd_momentum(T *params_data, const T *grads_data, T *velocity_data, size_t size,
-                         const float learning_rate, const float momentum) {
+                         const float learning_rate, const float momentum,
+                         const float weight_decay) {
   parallel_for<size_t>(0, size, [&](size_t i) {
-    velocity_data[i] = momentum * static_cast<float>(velocity_data[i]) -
-                       learning_rate * static_cast<float>(grads_data[i]);
+    float grad = static_cast<float>(grads_data[i]);
+    if (weight_decay > 0.0f) {
+      grad += weight_decay * static_cast<float>(params_data[i]);
+    }
+    velocity_data[i] = momentum * static_cast<float>(velocity_data[i]) - learning_rate * grad;
     params_data[i] += velocity_data[i];
   });
 }
 
 #define INSTANTIATE(T)                                                                         \
   template void update_sgd<T>(T * params_data, const T *grads_data, size_t size,               \
-                              const float learning_rate);                                      \
+                              const float learning_rate, const float weight_decay);            \
   template void update_sgd_momentum<T>(T * params_data, const T *grads_data, T *velocity_data, \
                                        size_t size, const float learning_rate,                 \
-                                       const float momentum);
+                                       const float momentum, const float weight_decay);
 INSTANTIATE(fp16)
 INSTANTIATE(bf16)
 INSTANTIATE(float)

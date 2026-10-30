@@ -1,4 +1,7 @@
 {
+  "prefetch_data": true,
+  "prefetch_depth": 4,
+  "benchmark_mode": true,
   "epochs": 1,
   "batch_size": 64,
   "max_steps": -1,
@@ -7,7 +10,9 @@
   "num_threads": 8,
   "profiler_type": "NONE",
   "print_layer_profiling": true,
-  "print_layer_memory_usage": true,
+  "print_memory_usage": true,
+  "print_ablation": false,
+  "bootstrap_offload": true,
   "device": "CUDA:0",
   "model_name": "tunx_v1",
   "model_path": "",
@@ -18,7 +23,7 @@
   "compute_dtype": "FP32",
   "optimizer": {
     "type": "adam",
-    "learning_rate": 0.001,
+    "learning_rate": 0.00015,
     "beta1": 0.9,
     "beta2": 0.999,
     "epsilon": 1e-8,

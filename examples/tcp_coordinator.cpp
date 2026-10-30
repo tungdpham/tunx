@@ -19,6 +19,7 @@
 #include "distributed/tcp_worker.hpp"
 #include "distributed/train.hpp"
 #include "nn/example_graphs.hpp"
+#include "nn/graph.hpp"
 #include "nn/graph_executor.hpp"
 #include "partitioner/graph_partitioner.hpp"
 
@@ -27,11 +28,15 @@ using namespace std;
 
 int main(int argc, char *argv[]) {
   std::string config_path;
-  static struct option long_options[] = {
-      {"config", required_argument, 0, 'c'}, {"help", no_argument, 0, 'h'}, {0, 0, 0, 0}};
+  unsigned int seed = 0;
+  bool seeded = false;
+  static struct option long_options[] = {{"config", required_argument, 0, 'c'},
+                                         {"seed", required_argument, 0, 's'},
+                                         {"help", no_argument, 0, 'h'},
+                                         {0, 0, 0, 0}};
 
   int opt;
-  while ((opt = getopt_long(argc, argv, "c:h", long_options, nullptr)) != -1) {
+  while ((opt = getopt_long(argc, argv, "c:s:h", long_options, nullptr)) != -1) {
     switch (opt) {
       case 'c':
         config_path = optarg;
@@ -40,8 +45,26 @@ int main(int argc, char *argv[]) {
         cout << "Usage: " << argv[0] << " [options]" << endl;
         cout << "Options:" << endl;
         cout << "  --config <path>    Path to the JSON configuration file" << endl;
+        cout << "  --seed <N>         Positive seed for model initialization and dataset shuffling"
+             << endl;
         cout << "  -h, --help         Show this help message" << endl;
         return 0;
+      case 's': {
+        try {
+          std::string value(optarg);
+          size_t parsed = 0;
+          auto number = std::stoull(value, &parsed);
+          if (value.empty() || value[0] == '-' || parsed != value.size() || number == 0 ||
+              number > 4294967295ULL)
+            throw std::invalid_argument("seed");
+          seed = static_cast<unsigned int>(number);
+          seeded = true;
+        } catch (...) {
+          cerr << "Seed must be an integer in [1, 4294967295]" << endl;
+          return 1;
+        }
+        break;
+      }
       default:
         return 1;
     }
@@ -66,17 +89,32 @@ int main(int argc, char *argv[]) {
   Device &device = DeviceManager::instance().get(train_config.device_id);
   auto &allocator = PoolAllocator::instance(device, device.default_stream());
 
-  Graph graph = load_or_create_graph(train_config.model_name, train_config.model_path, allocator);
+  GraphOpts opts{
+      .s = device.default_stream(),
+      .seed = seed,
+      .io_dtype = train_config.io_dtype,
+      .param_dtype = train_config.param_dtype,
+      .compute_dtype = train_config.compute_dtype,
+  };
+
+  Graph graph =
+      load_or_create_graph(train_config.model_name, train_config.model_path, allocator, opts);
 
   if (train_config.dataset_name.empty()) {
     throw std::runtime_error("dataset_name variable is not set!");
   }
-  auto [train_dataset, val_dataset] =
-      DatasetFactory::create(train_config.dataset_name, train_config.dataset_path);
+  auto [train_dataset, val_dataset] = DatasetFactory::create(
+      train_config.dataset_name, train_config.dataset_path, train_config.io_dtype);
   if (!train_dataset || !val_dataset) {
     cerr << "Failed to create data loaders for model: " << train_config.model_name << endl;
     return 1;
   }
+  if (seeded) {
+    train_dataset->set_seed(seed);
+    val_dataset->set_seed(seed);
+    cout << "Benchmark seed: " << seed << endl;
+  }
+  train_dataset->set_disable_augmentation(!train_config.augmentation);
 
   auto criterion = LossFactory::create_from_config(train_config.loss_config);
 
@@ -103,57 +141,125 @@ int main(int argc, char *argv[]) {
   cout << "Local worker endpoint: " << local_worker_endpoint.to_json().dump(4) << endl;
 
   // hard-coded for now
-  auto worker = std::make_unique<TCPWorker>(local_worker_endpoint, train_config.device_id);
+  auto worker = std::make_unique<TCPWorker>(local_worker_endpoint, train_config.device_id,
+                                            train_config.bootstrap_offload);
 
   // Sample compute times for ComputeBandwidthPartitioner
   std::unique_ptr<PartitionerBase> partitioner;
 
   Tensor batch_data, batch_labels;
+  std::unordered_map<std::string, size_t> global_node_profiles;
+  std::unordered_map<std::shared_ptr<LayerImpl>, double> global_edge_costs;
+  double optimizer_step_time = 0.0;
+  double zero_grads_time = 0.0;
+  DeviceMesh mesh;
+
+  for (size_t i = 0; i < tcp_config.workers.size(); ++i) {
+    mesh.compute_powers.push_back(tcp_config.workers[i].compute_power);
+    if (i < tcp_config.workers.size() - 1) {
+      if (!tcp_config.workers[i].interconnect_speeds.empty()) {
+        mesh.link_speeds.push_back(tcp_config.workers[i].interconnect_speeds[0]);
+      } else {
+        mesh.link_speeds.push_back(3000000.0);  // fallback 3GB/s
+      }
+    }
+  }
+
   if (train_dataset->get_batch(train_config.batch_size, batch_data, batch_labels)) {
-    cout << "Profiling graph edges for ComputeBandwidthPartitioner..." << endl;
-    GraphExecutor executor(graph);
+    cout << "Profiling graph edges for partitioner..." << endl;
+    GraphExecutor executor(graph, train_config.bootstrap_offload);
     TensorBundle input_map({{"input", batch_data}});
 
     // Warmup
     for (int i = 0; i < 5; ++i) {
       executor.forward(input_map);
+      executor.clear_residuals();
     }
     // Measured step
-    auto [output_map, edge_profiles, node_profiles] = executor.profile_edges_forward(input_map);
+    auto [output_map, edge_profiles, node_profiles] =
+        executor.profile_edges_forward(input_map, false);
 
-    DeviceMesh mesh;
-    for (size_t i = 0; i < tcp_config.workers.size(); ++i) {
-      mesh.compute_powers.push_back(tcp_config.workers[i].compute_power);
-      if (i < tcp_config.workers.size() - 1) {
-        if (!tcp_config.workers[i].interconnect_speeds.empty()) {
-          mesh.link_speeds.push_back(tcp_config.workers[i].interconnect_speeds[0]);
-        } else {
-          mesh.link_speeds.push_back(3000000.0);  // fallback 3GB/s
-        }
-      }
+    auto &mem_pool = PoolAllocator::instance(graph.device(), graph.device().default_stream());
+    TensorBundle output_grad_map;
+    for (const auto &[name, tensor] : output_map) {
+      output_grad_map.set(name, Tensor(tensor.shape(), tensor.dtype(), mem_pool));
     }
+    auto [backward_output_map, backward_edge_profiles] =
+        executor.profile_edges_backward(output_grad_map, false);
+
+    for (const auto &pair : node_profiles) {
+      global_node_profiles[pair.first->uid()] = pair.second;
+    }
+
+    optimizer->attach(graph);
+    for (int i = 0; i < 5; ++i) {
+      optimizer->zero_grads();
+      optimizer->update();
+    }
+    graph.device().default_stream().sync();
+
+    auto zero_start = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < 10; ++i) {
+      optimizer->zero_grads();
+    }
+    graph.device().default_stream().sync();
+    auto zero_end = std::chrono::high_resolution_clock::now();
+    zero_grads_time =
+        std::chrono::duration_cast<std::chrono::microseconds>(zero_end - zero_start).count() /
+        1000.0 / 10.0;
+
+    auto opt_start = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < 10; ++i) {
+      optimizer->update();
+    }
+    graph.device().default_stream().sync();
+    auto opt_end = std::chrono::high_resolution_clock::now();
+    optimizer_step_time =
+        std::chrono::duration_cast<std::chrono::microseconds>(opt_end - opt_start).count() /
+        1000.0 / 10.0;
 
     // Use the first compute power as the baseline multiplier
     double baseline_power = mesh.compute_powers.empty() ? 1.0 : mesh.compute_powers[0];
 
-    auto compute_cost_fn = [edge_profiles, baseline_power](const Edge &edge) -> double {
-      auto it = edge_profiles.find(edge);
-      if (it != edge_profiles.end()) {
-        return it->second.exec_time * baseline_power;
+    for (const auto &pair : edge_profiles) {
+      global_edge_costs[pair.first->layer()] += pair.second.exec_time;
+    }
+    for (const auto &pair : backward_edge_profiles) {
+      global_edge_costs[pair.first->layer()] += pair.second.exec_time;
+    }
+
+    auto compute_cost_fn = [&global_edge_costs, baseline_power](const Edge &edge) -> double {
+      double cost = 0.0;
+      auto it = global_edge_costs.find(edge->layer());
+      if (it != global_edge_costs.end()) {
+        cost = it->second;
       }
-      return 1.0;
+      return cost > 0.0 ? cost * baseline_power : 1.0;
     };
 
-    auto activation_size_fn = [node_profiles](const Node &node) -> double {
-      auto it = node_profiles.find(node);
-      if (it != node_profiles.end()) {
-        return static_cast<double>(it->second);
-      }
-      return 1048576.0;  // fallback to 1MB if unknown
-    };
-
-    partitioner =
-        std::make_unique<ComputeBandwidthPartitioner>(mesh, compute_cost_fn, activation_size_fn);
+    if (tcp_config.partition_policy == "equal") {
+      cout << "Using equal edge count GraphPartitioner..." << endl;
+      std::vector<size_t> equal_ratios(tcp_config.workers.size(), 1);
+      partitioner = std::make_unique<GraphPartitioner>(equal_ratios);
+    } else if (tcp_config.partition_policy == "compute") {
+      cout << "Using Compute-only ComputeBandwidthPartitioner..." << endl;
+      auto compute_only_activation_fn = [](const Node &) -> double { return 0.0; };
+      partitioner = std::make_unique<ComputeBandwidthPartitioner>(
+          mesh, compute_cost_fn, compute_only_activation_fn, train_config.num_microbatches,
+          optimizer_step_time, zero_grads_time);
+    } else {
+      cout << "Using Compute+Bandwidth ComputeBandwidthPartitioner..." << endl;
+      auto activation_size_fn = [node_profiles](const Node &node) -> double {
+        auto it = node_profiles.find(node);
+        if (it != node_profiles.end()) {
+          return static_cast<double>(it->second) * 2.0;  // 2x for forward + backward communication
+        }
+        return 1048576.0;  // fallback to 1MB if unknown
+      };
+      partitioner = std::make_unique<ComputeBandwidthPartitioner>(
+          mesh, compute_cost_fn, activation_size_fn, train_config.num_microbatches,
+          optimizer_step_time, zero_grads_time);
+    }
     train_dataset->reset();
   } else {
     cout << "Warning: Could not get a batch to profile. Falling back to uniform GraphPartitioner."
@@ -178,6 +284,78 @@ int main(int argc, char *argv[]) {
 
   coordinator.initialize();
 
+  cout << "\n=== Unified Partition Metrics ===" << endl;
+  auto &partitions = coordinator.get_partitions();
+  for (size_t k = 0; k < partitions.size(); ++k) {
+    size_t start = partitions[k].start_layer;
+    size_t end = start + partitions[k].layer_count;
+    cout << "Worker " << (k + 1) << " edges: " << partitions[k].layer_count << " (edges " << start
+         << " to " << (end - 1) << ")" << endl;
+    if (k < partitions.size() - 1) {
+      double boundary_bytes = 0.0;
+      for (const auto &uid : partitions[k].output_uids) {
+        auto it = global_node_profiles.find(uid);
+        if (it != global_node_profiles.end()) {
+          boundary_bytes += static_cast<double>(it->second);
+        } else {
+          boundary_bytes += 1048576.0;  // 1MB fallback
+        }
+      }
+      cout << "Boundary " << (k + 1) << " -> " << (k + 2)
+           << " size (MiB): " << std::round(boundary_bytes / (1024.0 * 1024.0)) << endl;
+    }
+  }
+  cout << "=================================\n" << endl;
+
+  if (partitions.size() > 0 && !mesh.compute_powers.empty()) {
+    double sum_latencies = 0.0;
+    double bottleneck = 0.0;
+    double baseline_power = mesh.compute_powers.empty() ? 1.0 : mesh.compute_powers[0];
+    for (size_t k = 0; k < partitions.size(); ++k) {
+      double compute_time = 0.0;
+      for (const auto &edge : partitions[k].graph.edges()) {
+        auto it = global_edge_costs.find(edge->layer());
+        if (it != global_edge_costs.end()) {
+          compute_time += (it->second > 0.0 ? it->second * baseline_power : 1.0);
+        } else {
+          compute_time += 1.0;
+        }
+      }
+      compute_time /= mesh.compute_powers[k];
+
+      double comm_time = 0.0;
+      if (k < partitions.size() - 1) {
+        double boundary_bytes = 0.0;
+        for (const auto &uid : partitions[k].output_uids) {
+          auto it = global_node_profiles.find(uid);
+          if (it != global_node_profiles.end()) {
+            boundary_bytes += static_cast<double>(it->second) * 2.0;
+          } else {
+            boundary_bytes += 1048576.0;  // fallback to 1MB if unknown
+          }
+        }
+        comm_time = (boundary_bytes / mesh.link_speeds[k]) * 1000.0;
+      }
+
+      sum_latencies += std::max(compute_time, comm_time);
+      bottleneck = std::max({bottleneck, compute_time, comm_time});
+    }
+
+    double pipeline_bubble = (train_config.num_microbatches > 0)
+                                 ? (sum_latencies - bottleneck) / train_config.num_microbatches
+                                 : 0.0;
+    double predicted_step_time =
+        bottleneck + pipeline_bubble + optimizer_step_time + zero_grads_time;
+
+    cout << "\n=== Predicted Step Metrics ===" << endl;
+    cout << "Predicted Bottleneck J (ms): " << bottleneck << endl;
+    cout << "Pipeline Bubble (ms): " << pipeline_bubble << endl;
+    cout << "Optimizer Step (ms): " << optimizer_step_time << endl;
+    cout << "Zero Gradients (ms): " << zero_grads_time << endl;
+    cout << "Predicted Total Step Time (ms): " << predicted_step_time << endl;
+    cout << "================================\n" << endl;
+  }
+
   if (!coordinator.deploy_stages()) {
     cerr << "Failed to deploy stages. Make sure workers are running." << endl;
     return 1;
@@ -186,5 +364,7 @@ int main(int argc, char *argv[]) {
   coordinator.start();
   train_model(coordinator, train_dataset, val_dataset, criterion, train_config);
   coordinator.stop();
-  return 0;
+  cout.flush();
+  // Teardown segfaults after a completed run; skip destructors so the exit code reflects success.
+  std::_Exit(0);
 }

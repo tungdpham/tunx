@@ -32,8 +32,15 @@
 #include "nn/metrics_computer.hpp"
 #include "nn/metrics_logger.hpp"
 #include "nn/tensor_bundle.hpp"
+#include "nn/train_config.hpp"
 #include "threading/thread_wrapper.hpp"
 #include "type/type.hpp"
+
+#ifdef TUNX_USE_CUDA
+#include <cuda_runtime.h>
+
+#include "device/cuda_device.hpp"
+#endif
 
 using namespace std;
 
@@ -85,15 +92,28 @@ static void log_edge_profiles(const std::map<Edge, EdgeProfile> &profiles,
 }
 
 static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inputs,
-                                     std::unique_ptr<CsvLogger> &csv_logger) {
+                                     std::unique_ptr<CsvLogger> &csv_logger,
+                                     const TrainingConfig &config) {
   fmt::print("\n{:=^80}\n", " Execution Plan Stats ");
 
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
     auto &built_plan = executor.build_plans(inputs, opts);
     auto &macro_plan = built_plan.forward_plan;
+    auto *prev_allocator = executor.graph().workspace_allocator();
+    executor.graph().set_workspace_allocator(*built_plan.packed_allocator);
     auto macro_stats = executor.profile_forward_plan(inputs, macro_plan);
+    executor.graph().set_workspace_allocator(*prev_allocator);
+    for (auto &edge : executor.graph().edges()) {
+      edge->layer()->set_workspace_allocator(prev_allocator);
+    }
 
     fmt::print("{} Order Peak Memory: {} bytes\n", name, macro_stats.peak_mem);
+    fmt::print("{} Planning Timings:\n", name);
+    fmt::print("  - Extraction: {:.3f} ms\n", built_plan.extraction_time_ms);
+    fmt::print("  - Scheduling: {:.3f} ms\n", built_plan.scheduling_time_ms);
+    fmt::print("  - Lifetime:   {:.3f} ms\n", built_plan.lifetime_time_ms);
+    fmt::print("  - Packing:    {:.3f} ms\n", built_plan.packing_time_ms);
+    fmt::print("  - Total:      {:.3f} ms\n", built_plan.total_time_ms);
     fmt::print("{} Path: ", name);
     for (size_t i = 0; i < macro_plan.order.size(); ++i) {
       fmt::print("{}", macro_plan.order[i]->layer()->name());
@@ -116,26 +136,41 @@ static void log_execution_plan_stats(GraphExecutor &executor, TensorBundle &inpu
     }
   };
 
-  profile_solver("Naive", {true, false, false, false});
-  profile_solver("Ranked", {false, false, false, false});
-  profile_solver("Linear", {false, true, false, false});
-  profile_solver("Branch", {false, true, true, false});
-  profile_solver("Join", {false, true, false, true});
+  if (config.print_ablation) {
+    profile_solver("Naive", {true, false, false, false});
+    profile_solver("Ranked", {false, false, false, false});
+    profile_solver("Linear", {false, true, false, false});
+    profile_solver("Branch", {false, true, true, false});
+    profile_solver("Join", {false, true, false, true});
+  }
   profile_solver("Full Solver", {false, true, true, true});
 
   fmt::print("{:=^80}\n\n", "");
 }
 
 static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBundle &inputs,
-                                              std::unique_ptr<CsvLogger> &csv_logger) {
+                                              std::unique_ptr<CsvLogger> &csv_logger,
+                                              const TrainingConfig &config) {
   fmt::print("\n{:=^80}\n", " Backward Execution Plan Stats ");
 
   auto profile_solver = [&](const std::string &name, SolverOptions opts) {
     auto &built_plan = executor.build_plans(inputs, opts);
     auto &macro_plan = built_plan.backward_plan;
+    auto prev_allocator = executor.graph().workspace_allocator();
+    executor.graph().set_workspace_allocator(*built_plan.packed_allocator);
     auto macro_stats = executor.profile_backward_plan(inputs, built_plan.forward_plan, macro_plan);
+    executor.graph().set_workspace_allocator(*prev_allocator);
+    for (auto &edge : executor.graph().edges()) {
+      edge->layer()->set_workspace_allocator(prev_allocator);
+    }
 
     fmt::print("{} Order Peak Memory: {} bytes\n", name, macro_stats.peak_mem);
+    fmt::print("{} Planning Timings:\n", name);
+    fmt::print("  - Extraction: {:.3f} ms\n", built_plan.extraction_time_ms);
+    fmt::print("  - Scheduling: {:.3f} ms\n", built_plan.scheduling_time_ms);
+    fmt::print("  - Lifetime:   {:.3f} ms\n", built_plan.lifetime_time_ms);
+    fmt::print("  - Packing:    {:.3f} ms\n", built_plan.packing_time_ms);
+    fmt::print("  - Total:      {:.3f} ms\n", built_plan.total_time_ms);
     fmt::print("{} Path: ", name);
     for (size_t i = 0; i < macro_plan.order.size(); ++i) {
       fmt::print("{}", macro_plan.order[i]->layer()->name());
@@ -158,11 +193,15 @@ static void log_execution_plan_stats_backward(GraphExecutor &executor, TensorBun
     }
   };
 
-  profile_solver("Naive", {true, false, false, false});
-  profile_solver("Ranked", {false, false, false, false});
-  profile_solver("Linear", {false, true, false, false});
-  profile_solver("Branch", {false, true, true, false});
-  profile_solver("Join", {false, true, false, true});
+  // WARNING: Ablation can increase peak memory due to less optimized solutions
+  if (config.print_ablation) {
+    profile_solver("Naive", {true, false, false, false});
+    profile_solver("Ranked", {false, false, false, false});
+    profile_solver("Linear", {false, true, false, false});
+    profile_solver("Branch", {false, true, true, false});
+    profile_solver("Join", {false, true, false, true});
+  }
+
   profile_solver("Full Solver", {false, true, true, true});
 
   fmt::print("{:=^80}\n\n", "");
@@ -289,7 +328,7 @@ static Result train_epoch(Graph &graph, unique_ptr<Dataset> &train_dataset,
     return train_dataset->get_batch(config.batch_size, data, labels);
   };
 
-  GraphExecutor executor(graph);
+  GraphExecutor executor(graph, config.bootstrap_offload);
 
   cout << "Training batches: " << train_dataset->size() << endl;
   while (get_next(batch_data, batch_labels) &&
@@ -496,7 +535,7 @@ static void train_step(Graph &graph, unique_ptr<Dataset> &train_dataset,
     return train_dataset->get_batch(config.batch_size, data, labels);
   };
 
-  GraphExecutor executor(graph);
+  GraphExecutor executor(graph, config.bootstrap_offload);
   thread_wrapper.execute([&]() -> void {
     for (int steps = 0; steps < config.max_steps; ++steps) {
       if (!get_next(batch_data, batch_labels)) {
@@ -599,59 +638,104 @@ static void run_benchmark(Graph &graph, unique_ptr<Dataset> &train_dataset,
   graph.set_mode(ExecutionMode::TRAIN);
   train_dataset->shuffle();
   train_dataset->reset();
-  
+
   Tensor batch_data, batch_labels;
   Device &model_device = graph.device();
   auto &mem_pool = PoolAllocator::instance(model_device, model_device.default_stream());
-  
+
   if (!train_dataset->get_batch(config.batch_size, batch_data, batch_labels)) {
     cerr << "Failed to get batch for benchmark." << endl;
     return;
   }
-  
+
   Tensor device_input = to_device(batch_data, model_device);
   Tensor device_labels = to_device(batch_labels, model_device);
-  GraphExecutor executor(graph);
-  
-  auto step = [&]() {
+  GraphExecutor executor(graph, config.bootstrap_offload);
+
+#ifdef TUNX_USE_CUDA
+  cudaStream_t cu_stream = *(model_device.default_stream().as<cuda_stream>());
+  std::vector<cudaEvent_t> events(2000 * 5);
+  for (int i = 0; i < 2000 * 5; ++i) {
+    cudaEventCreate(&events[i]);
+  }
+#endif
+
+  auto step = [&](int i) {
+#ifdef TUNX_USE_CUDA
+    if (i >= 0) cudaEventRecord(events[i * 5 + 0], cu_stream);
+#endif
+
+    optimizer->zero_grads();
+
+#ifdef TUNX_USE_CUDA
+    if (i >= 0) cudaEventRecord(events[i * 5 + 1], cu_stream);
+#endif
+
     TensorBundle inputs{{"input", device_input}};
     TensorBundle outputs = executor.forward(inputs);
     Tensor predictions = outputs.get("output");
-    
+
     float loss;
     criterion->compute_loss(predictions, device_labels, loss);
-    
+
     Tensor loss_gradient = Tensor(predictions.shape(), predictions.dtype(), mem_pool);
     criterion->compute_gradient(predictions, device_labels, loss_gradient);
-    
+
     if (config.gradient_accumulation_steps > 1) {
       loss_gradient *= (1.0f / static_cast<float>(config.gradient_accumulation_steps));
     }
-    
+
+#ifdef TUNX_USE_CUDA
+    if (i >= 0) cudaEventRecord(events[i * 5 + 2], cu_stream);
+#endif
+
     TensorBundle output_grads{{"output", loss_gradient}};
     executor.backward(output_grads);
-    
+
+#ifdef TUNX_USE_CUDA
+    if (i >= 0) cudaEventRecord(events[i * 5 + 3], cu_stream);
+#endif
+
     optimizer->update();
-    optimizer->zero_grads();
+
+#ifdef TUNX_USE_CUDA
+    if (i >= 0) cudaEventRecord(events[i * 5 + 4], cu_stream);
+#endif
   };
-  
+
   cout << "Running 50 warmup steps..." << endl;
   for (int i = 0; i < 50; ++i) {
-    step();
+    step(-1);
   }
-  
+
   model_device.default_stream().sync();
   cout << "Warmup complete. Running 2000 measured steps..." << endl;
-  
+
   auto start_time = chrono::high_resolution_clock::now();
   for (int i = 0; i < 2000; ++i) {
-    step();
+    step(i);
   }
   model_device.default_stream().sync();
-  
+
   auto end_time = chrono::high_resolution_clock::now();
-  double elapsed_sec = chrono::duration_cast<chrono::microseconds>(end_time - start_time).count() / 1000000.0;
-  
+  double elapsed_sec =
+      chrono::duration_cast<chrono::microseconds>(end_time - start_time).count() / 1000000.0;
+
+#ifdef TUNX_USE_CUDA
+  float fwd_ms = 0, bwd_ms = 0, opt_ms = 0, zero_ms = 0;
+  for (int i = 0; i < 2000; ++i) {
+    float ms;
+    cudaEventElapsedTime(&ms, events[i * 5 + 0], events[i * 5 + 1]);
+    zero_ms += ms;
+    cudaEventElapsedTime(&ms, events[i * 5 + 1], events[i * 5 + 2]);
+    fwd_ms += ms;
+    cudaEventElapsedTime(&ms, events[i * 5 + 2], events[i * 5 + 3]);
+    bwd_ms += ms;
+    cudaEventElapsedTime(&ms, events[i * 5 + 3], events[i * 5 + 4]);
+    opt_ms += ms;
+  }
+#endif
+
   bool is_lm = (config.dataset_name == "openwebtext");
   if (is_lm) {
     double throughput = (2000.0 * config.batch_size * 1024) / elapsed_sec;
@@ -660,7 +744,19 @@ static void run_benchmark(Graph &graph, unique_ptr<Dataset> &train_dataset,
     double throughput = (2000.0 * config.batch_size) / elapsed_sec;
     cout << "Throughput: " << fixed << setprecision(2) << throughput << " samples/s" << endl;
   }
-  cout << "Elapsed time for 2000 steps: " << fixed << setprecision(3) << elapsed_sec << " s" << endl;
+  cout << "Elapsed time for 2000 steps: " << fixed << setprecision(3) << elapsed_sec << " s"
+       << endl;
+
+#ifdef TUNX_USE_CUDA
+  cout << "Total Forward time: " << fixed << setprecision(2) << fwd_ms << " ms" << endl;
+  cout << "Total Backward time: " << fixed << setprecision(2) << bwd_ms << " ms" << endl;
+  cout << "Total Optimizer time: " << fixed << setprecision(2) << opt_ms << " ms" << endl;
+  cout << "Total Zero Grad time: " << fixed << setprecision(2) << zero_ms << " ms" << endl;
+
+  for (int i = 0; i < 2000 * 5; ++i) {
+    cudaEventDestroy(events[i]);
+  }
+#endif
 }
 
 void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Dataset> &val_dataset,
@@ -737,17 +833,17 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
     TensorBundle inputs{{"input", device_input}};
     std::ofstream debug_file("debug_macro_logs.txt");
 
-    GraphExecutor executor(graph);
+    GraphExecutor executor(graph, config.bootstrap_offload);
     executor.set_log_stream(&debug_file);
 
-    auto &built_plan = executor.build_plans(inputs);
+    auto &built_plan = executor.build_plans(inputs, SolverOptions{false, true, true, true});
     graph.save_dot("current_graph.dot", &built_plan.forward_edge_profiles,
                    &built_plan.node_profiles);
     log_edge_profiles(built_plan.forward_edge_profiles, forward_profiles_logger);
-    log_execution_plan_stats(executor, inputs, forward_plan_logger);
+    log_execution_plan_stats(executor, inputs, forward_plan_logger, config);
 
     log_edge_profiles(built_plan.backward_edge_profiles, backward_profiles_logger);
-    log_execution_plan_stats_backward(executor, inputs, backward_plan_logger);
+    log_execution_plan_stats_backward(executor, inputs, backward_plan_logger, config);
 
     auto &pool_allocator = PoolAllocator::instance(graph.device(), graph.handle().get_stream());
     auto profile_memory = [&](const std::string &plan_name, SolverOptions opts) {
@@ -759,12 +855,16 @@ void train_model(Graph &graph, unique_ptr<Dataset> &train_dataset, unique_ptr<Da
                          memory_metrics_logger, "packed", plan_name, opts);
     };
 
-    profile_memory("Naive", {true, false, false, false});
-    // profile_memory("Ranked", {false, false, false, false});
-    // profile_memory("Linear", {false, true, false, false});
-    // profile_memory("Branch", {false, true, true, false});
-    // profile_memory("Join", {false, true, false, true});
-    profile_memory("Full Solver", {false, true, true, true});
+    if (config.print_ablation) {
+      profile_memory("Naive", {true, false, false, false});
+      profile_memory("Ranked", {false, false, false, false});
+      profile_memory("Linear", {false, true, false, false});
+      profile_memory("Branch", {false, true, true, false});
+      profile_memory("Join", {false, true, false, true});
+      profile_memory("Full Solver", {false, true, true, true});
+    }
+
+    graph.workspace_allocator()->evict_unused();
 
     if (optimizer) {
       optimizer->zero_grads();

@@ -40,12 +40,15 @@ struct Job {
 
 template <typename Archiver>
 void archive(Archiver &archiver, const Job &job) {
-  archiver(job.pid, job.data);
+  uint64_t pid = static_cast<uint64_t>(job.pid);
+  archiver(pid, job.data);
 }
 
 template <typename Archiver>
 void archive(Archiver &archiver, Job &job) {
-  archiver(job.pid, job.data);
+  uint64_t pid = static_cast<uint64_t>(job.pid);
+  archiver(pid, job.data);
+  job.pid = static_cast<size_t>(pid);
 }
 
 }  // namespace tunx

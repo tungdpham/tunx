@@ -263,13 +263,13 @@ FlashAttentionBlock::FlashAttentionBlock(size_t embed_dim, size_t num_heads, boo
   }
 
   impl_->register_layer(static_cast<std::shared_ptr<tunx::LayerImpl>>(
-      tunx::Layer(tunx::Dense(embed_dim, embed_dim, true, name + "_q"))));
+      tunx::Layer(tunx::Dense(embed_dim, embed_dim, false, name + "_q"))));
   impl_->register_layer(static_cast<std::shared_ptr<tunx::LayerImpl>>(
-      tunx::Layer(tunx::Dense(embed_dim, embed_dim, true, name + "_k"))));
+      tunx::Layer(tunx::Dense(embed_dim, embed_dim, false, name + "_k"))));
   impl_->register_layer(static_cast<std::shared_ptr<tunx::LayerImpl>>(
-      tunx::Layer(tunx::Dense(embed_dim, embed_dim, true, name + "_v"))));
+      tunx::Layer(tunx::Dense(embed_dim, embed_dim, false, name + "_v"))));
   impl_->register_layer(static_cast<std::shared_ptr<tunx::LayerImpl>>(
-      tunx::Layer(tunx::Dense(embed_dim, embed_dim, true, name + "_out"))));
+      tunx::Layer(tunx::Dense(embed_dim, embed_dim, false, name + "_out"))));
 }
 
 Layer FlashAttentionBlock::create_from_config(const LayerConfig &config) {

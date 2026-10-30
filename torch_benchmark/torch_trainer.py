@@ -16,6 +16,7 @@ Environment variables can override defaults (see .env or shell):
 import argparse
 import csv
 import datetime
+import io
 import math
 import os
 import time
@@ -265,9 +266,39 @@ class ImageNet100Dataset(Dataset):
     def __len__(self):
         return len(self.samples)
 
+    def preload_images(self, max_bytes):
+        """Load compressed source images into RAM without creating a disk cache.
+
+        Sample indices and transforms stay unchanged. Call before constructing a
+        shuffled sampler; decoding remains lazy to avoid a full float32 corpus.
+        The budget covers encoded image bytes, not Python or decoder overhead.
+        """
+        if not math.isfinite(max_bytes) or max_bytes <= 0:
+            raise ValueError("Image preload budget must be finite and positive")
+        if hasattr(self, "_encoded_images"):
+            return
+        required = sum(os.path.getsize(path) for path, _ in self.samples)
+        if required > max_bytes:
+            raise ValueError(
+                f"Image preload needs {required / 2**30:.2f} GiB of encoded bytes; "
+                f"budget is {max_bytes / 2**30:.2f} GiB")
+        encoded = []
+        loaded = 0
+        for path, _ in self.samples:
+            payload = Path(path).read_bytes()
+            loaded += len(payload)
+            if loaded > max_bytes:
+                raise ValueError("Image files grew beyond the preload budget")
+            encoded.append(payload)
+        self._encoded_images = encoded
+        print(f"Preloaded {len(encoded)} compressed images ({loaded / 2**30:.2f} GiB) into RAM")
+
     def __getitem__(self, idx):
         img_path, label = self.samples[idx]
-        img = Image.open(img_path).convert("RGB")
+        encoded = getattr(self, "_encoded_images", None)
+        source = io.BytesIO(encoded[idx]) if encoded is not None else img_path
+        with Image.open(source) as original:
+            img = original.convert("RGB")
         if self.transform:
             img = self.transform(img)
         return img, label
@@ -304,17 +335,17 @@ class BasicResidualBlock(nn.Module):
     def __init__(self, channels: int):
         super().__init__()
         self.conv1 = nn.Conv2d(channels, channels, kernel_size=3, stride=1,
-                               padding=1, bias=True)
+                               padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(channels, eps=1e-5, momentum=0.1)
         self.conv2 = nn.Conv2d(channels, channels, kernel_size=3, stride=1,
-                               padding=1, bias=True)
+                               padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(channels, eps=1e-5, momentum=0.1)
 
     def forward(self, x):
         identity = x
-        out = F.relu(self.bn1(self.conv1(x)), inplace=True)
+        out = F.relu(self.bn1(self.conv1(x)))
         out = self.bn2(self.conv2(out))
-        out = F.relu(out + identity, inplace=True)
+        out = F.relu(out + identity)
         return out
 
 
@@ -322,10 +353,10 @@ class ResNet9CIFAR10(nn.Module):
     def __init__(self, num_classes: int = 10):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 64, kernel_size=3,
-                               stride=1, padding=1, bias=True)
+                               stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
         self.conv2 = nn.Conv2d(64, 128, kernel_size=3,
-                               stride=1, padding=1, bias=True)
+                               stride=1, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(128, eps=1e-5, momentum=0.1)
         self.maxpool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
@@ -333,7 +364,7 @@ class ResNet9CIFAR10(nn.Module):
         self.res2 = BasicResidualBlock(128)
 
         self.conv3 = nn.Conv2d(128, 256, kernel_size=3,
-                               stride=1, padding=1, bias=True)
+                               stride=1, padding=1, bias=False)
         self.bn3 = nn.BatchNorm2d(256, eps=1e-5, momentum=0.1)
         self.maxpool2 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
@@ -341,7 +372,7 @@ class ResNet9CIFAR10(nn.Module):
         self.res4 = BasicResidualBlock(256)
 
         self.conv4 = nn.Conv2d(256, 512, kernel_size=3,
-                               stride=1, padding=1, bias=True)
+                               stride=1, padding=1, bias=False)
         self.bn4 = nn.BatchNorm2d(512, eps=1e-5, momentum=0.1)
         self.maxpool3 = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
 
@@ -352,16 +383,16 @@ class ResNet9CIFAR10(nn.Module):
         self.fc = nn.Linear(512, num_classes, bias=True)
 
     def forward(self, x):
-        x = F.relu(self.bn1(self.conv1(x)), inplace=True)
-        x = F.relu(self.bn2(self.conv2(x)), inplace=True)
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
         x = self.maxpool(x)
         x = self.res1(x)
         x = self.res2(x)
-        x = F.relu(self.bn3(self.conv3(x)), inplace=True)
+        x = F.relu(self.bn3(self.conv3(x)))
         x = self.maxpool2(x)
         x = self.res3(x)
         x = self.res4(x)
-        x = F.relu(self.bn4(self.conv4(x)), inplace=True)
+        x = F.relu(self.bn4(self.conv4(x)))
         x = self.maxpool3(x)
         x = self.res5(x)
         x = self.avgpool(x)
@@ -380,11 +411,11 @@ class WideResidualBlock(nn.Module):
         super().__init__()
         self.bn1 = nn.BatchNorm2d(in_channels, eps=1e-5, momentum=0.1)
         self.conv1 = nn.Conv2d(in_channels, out_channels, 3,
-                               stride=stride, padding=1, bias=True)
+                               stride=stride, padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels, eps=1e-5, momentum=0.1)
-        self.dropout = nn.Dropout(dropout_rate) if dropout_rate > 0.0 else None
+        self.dropout = nn.Dropout(0.0)
         self.conv2 = nn.Conv2d(out_channels, out_channels, 3,
-                               stride=1, padding=1, bias=True)
+                               stride=1, padding=1, bias=False)
 
         self.shortcut = None
         if stride != 1 or in_channels != out_channels:
@@ -393,9 +424,9 @@ class WideResidualBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         sc = self.shortcut(x) if self.shortcut is not None else x
-        out = F.relu(self.bn1(x), inplace=True)
+        out = F.relu(self.bn1(x))
         out = self.conv1(out)
-        out = F.relu(self.bn2(out), inplace=True)
+        out = F.relu(self.bn2(out))
         if self.dropout is not None:
             out = self.dropout(out)
         out = self.conv2(out)
@@ -413,7 +444,7 @@ class WRN16_8CIFAR100(nn.Module):
         c2 = 32 * width_factor   # 256
         c3 = 64 * width_factor   # 512
 
-        self.conv1 = nn.Conv2d(3, 16, 3, stride=1, padding=1, bias=True)
+        self.conv1 = nn.Conv2d(3, 16, 3, stride=1, padding=1, bias=False)
 
         # Group 1: 16 -> 128, stride 1
         self.group1_block1 = WideResidualBlock(
@@ -449,7 +480,7 @@ class WRN16_8CIFAR100(nn.Module):
         x = self.group2_block2(x)
         x = self.group3_block1(x)
         x = self.group3_block2(x)
-        x = F.relu(self.bn_final(x), inplace=True)
+        x = F.relu(self.bn_final(x))
         x = self.avgpool(x)
         x = self.flatten(x)
         x = self.fc(x)
@@ -474,6 +505,11 @@ class BottleneckBlock(nn.Module):
         self.conv3 = nn.Conv2d(mid_channels, out_channels, 1, bias=False)
         self.bn3 = nn.BatchNorm2d(out_channels, eps=1e-5, momentum=0.1)
 
+        self.relu1 = nn.ReLU()
+        self.relu2 = nn.ReLU()
+        self.relu3 = nn.ReLU()
+        self.relu4 = nn.ReLU()
+
         self.shortcut = None
         if stride != 1 or in_channels != out_channels:
             self.shortcut = nn.Sequential(
@@ -484,11 +520,11 @@ class BottleneckBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         sc = self.shortcut(x) if self.shortcut is not None else x
-        out = F.relu(self.bn1(self.conv1(x)), inplace=True)
-        out = F.relu(self.bn2(self.conv2(out)), inplace=True)
-        out = F.relu(self.bn3(self.conv3(out)), inplace=True)
+        out = self.relu1(self.bn1(self.conv1(x)))
+        out = self.relu2(self.bn2(self.conv2(out)))
+        out = self.relu3(self.bn3(self.conv3(out)))
         out = out + sc
-        out = F.relu(out, inplace=True)
+        out = self.relu4(out)
         return out
 
 
@@ -500,7 +536,7 @@ class ResNet50TinyImageNet(nn.Module):
     def __init__(self, num_classes: int = 200):
         super().__init__()
 
-        self.conv1 = nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=True)
+        self.conv1 = nn.Conv2d(3, 64, 3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
         self.maxpool = nn.MaxPool2d(3, stride=2, padding=1)
 
@@ -537,7 +573,7 @@ class ResNet50TinyImageNet(nn.Module):
         self.fc = nn.Linear(2048, num_classes, bias=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.relu(self.bn1(self.conv1(x)), inplace=True)
+        x = F.relu(self.bn1(self.conv1(x)))
         x = self.maxpool(x)
         x = self.layer1(x)
         x = self.layer2(x)
@@ -557,8 +593,9 @@ class ResNet50ImageNet100(nn.Module):
     def __init__(self, num_classes: int = 100):
         super().__init__()
 
-        self.conv1 = nn.Conv2d(3, 64, 7, stride=2, padding=3, bias=True)
+        self.conv1 = nn.Conv2d(3, 64, 7, stride=2, padding=3, bias=False)
         self.bn1 = nn.BatchNorm2d(64, eps=1e-5, momentum=0.1)
+        self.relu = nn.ReLU()
         self.maxpool = nn.MaxPool2d(3, stride=2, padding=1)
 
         self.layer1 = nn.Sequential(
@@ -594,7 +631,7 @@ class ResNet50ImageNet100(nn.Module):
         self.fc = nn.Linear(2048, num_classes, bias=True)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.relu(self.bn1(self.conv1(x)), inplace=True)
+        x = self.relu(self.bn1(self.conv1(x)))
         x = self.maxpool(x)
         x = self.layer1(x)
         x = self.layer2(x)
@@ -618,8 +655,8 @@ class CausalSelfAttention(nn.Module):
         self.head_dim = embed_dim // num_heads
         self.embed_dim = embed_dim
 
-        self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=True)
-        self.proj = nn.Linear(embed_dim, embed_dim, bias=True)
+        self.qkv = nn.Linear(embed_dim, 3 * embed_dim, bias=False)
+        self.proj = nn.Linear(embed_dim, embed_dim, bias=False)
         self.attn_drop = nn.Dropout(dropout)
         self.resid_drop = nn.Dropout(dropout)
 
@@ -676,7 +713,7 @@ class GPT2Small(nn.Module):
                  num_heads: int = 12,
                  num_layers: int = 12,
                  ffn_dim: int = 3072,
-                 dropout: float = 0.1):
+                 dropout: float = 0.0):
         super().__init__()
         self.seq_len = seq_len
         self.embed_dim = embed_dim
@@ -692,9 +729,8 @@ class GPT2Small(nn.Module):
 
         self.ln_f = nn.LayerNorm(embed_dim, eps=1e-5)
         self.head = nn.Linear(embed_dim, vocab_size, bias=True)
-
-        # Weight tying
-        self.head.weight = self.token_embed.weight
+        # Untie weights to match TunX implementation and allow separate gradient verification
+        self.head.weight = nn.Parameter(self.token_embed.weight.clone())
 
         self._init_weights()
 
@@ -822,25 +858,25 @@ class TunxV1(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # conv1 -> bn1 -> pool1
         x = self.conv1(x)
-        x = F.relu(self.bn1(x), inplace=True)
+        x = F.relu(self.bn1(x))
         x = self.pool1(x)
         
         b1 = self.b1_up1(x)
-        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = F.relu(self.b1_bn1(b1))
         b1 = self.b1_up2(b1)
-        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = F.relu(self.b1_bn2(b1))
         b1 = self.b1_down(b1)
         b1 = self.b1_pool(b1)
         
         # b2 branch
         b2 = self.b2_trans(x)
-        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = F.relu(self.b2_bn1(b2))
         b2 = self.b2_up2(b2)
-        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = F.relu(self.b2_bn2(b2))
         b2 = self.b2_conv(b2)
-        b2 = F.relu(self.b2_bn3(b2), inplace=True)
+        b2 = F.relu(self.b2_bn3(b2))
         b2 = self.b2_conv2(b2)
-        b2 = F.relu(self.b2_bn4(b2), inplace=True)
+        b2 = F.relu(self.b2_bn4(b2))
         b2 = -b2
         b2 = self.b2_pool(b2)
         
@@ -848,11 +884,11 @@ class TunxV1(nn.Module):
         b3 = self.b3_up2(b3)
         b3 = self.b3_pool(b3)
         b3 = self.b3_down1(b3)
-        b3 = F.relu(self.b3_bn2(b3), inplace=True)
+        b3 = F.relu(self.b3_bn2(b3))
         
         # merge
         y = b1 + b2 + b3
-        y = F.relu(y, inplace=True)
+        y = F.relu(y)
         y = self.flatten(y)
         return self.fc(y)
 
@@ -913,20 +949,20 @@ class TunxV2(nn.Module):
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
-        x = F.relu(self.bn1(x), inplace=True)
+        x = F.relu(self.bn1(x))
         x = self.pool1(x)
         
         b1 = self.b1_up1(x)
-        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = F.relu(self.b1_bn1(b1))
         b1 = self.b1_up2(b1)
-        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = F.relu(self.b1_bn2(b1))
         b1 = self.b1_down(b1)
         b1 = self.b1_pool(b1)
         
         b2 = self.b2_trans(x)
-        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = F.relu(self.b2_bn1(b2))
         b2 = self.b2_up2(b2)
-        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = F.relu(self.b2_bn2(b2))
         b2 = self.b2_conv(b2)
         b2 = self.b2_conv2(b2)
         b2 = -b2
@@ -937,7 +973,7 @@ class TunxV2(nn.Module):
         b3 = self.b3_block(b3)
         
         y = b1 + b2 + b3
-        y = F.relu(y, inplace=True)
+        y = F.relu(y)
         y = self.flatten(y)
         return self.fc(y)
 
@@ -999,20 +1035,20 @@ class TunxV3(nn.Module):
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv1(x)
-        x = F.relu(self.bn1(x), inplace=True)
+        x = F.relu(self.bn1(x))
         x = self.pool1(x)
         
         b1 = self.b1_up1(x)
-        b1 = F.relu(self.b1_bn1(b1), inplace=True)
+        b1 = F.relu(self.b1_bn1(b1))
         b1 = self.b1_up2(b1)
-        b1 = F.relu(self.b1_bn2(b1), inplace=True)
+        b1 = F.relu(self.b1_bn2(b1))
         b1 = self.b1_down(b1)
         b1 = self.b1_pool(b1)
         
         b2 = self.b2_trans(x)
-        b2 = F.relu(self.b2_bn1(b2), inplace=True)
+        b2 = F.relu(self.b2_bn1(b2))
         b2 = self.b2_up2(b2)
-        b2 = F.relu(self.b2_bn2(b2), inplace=True)
+        b2 = F.relu(self.b2_bn2(b2))
         b2 = self.b2_conv(b2)
         b2 = self.b2_conv2(b2)
         b2 = -b2
@@ -1024,7 +1060,7 @@ class TunxV3(nn.Module):
         b3 = self.b3_block(b3)
         
         y = b1 + b2 + b3
-        y = F.relu(y, inplace=True)
+        y = F.relu(y)
         y = self.flatten(y)
         return self.fc(y)
 
@@ -1093,13 +1129,13 @@ class TunxV4(nn.Module):
         
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.stem_conv(x)
-        x = F.relu(self.stem_bn(x), inplace=True)
+        x = F.relu(self.stem_bn(x))
         x = self.stem_pool(x)
         x = self.stem_project(x)
         
         x = self.rfj_d3(x)
         
-        x = F.relu(x, inplace=True)
+        x = F.relu(x)
         x = self.out_pool(x)
         x = self.flatten(x)
         return self.fc(x)
@@ -1461,7 +1497,7 @@ class WarmupCosineAnnealing(optim.lr_scheduler._LRScheduler):
 
 
 def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
-    print("\n>>> Starting Benchmark Mode (50 warmup steps + 2000 measured steps)...")
+    print(">>> Starting Benchmark Mode (50 warmup steps + 2000 measured steps)...")
     model.train()
     
     inputs, targets = next(iter(train_loader))
@@ -1472,6 +1508,10 @@ def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
 
     is_lm = cfg.get("is_language_model", False)
     compute_dtype = cfg.get("compute_dtype", torch.float32)
+    
+    tracker = None
+    if cfg.get("print_memory_usage", False):
+        print(">>> Memory profiling is disabled in benchmark mode as it interferes with torch.compile.")
 
     def step():
         optimizer.zero_grad()
@@ -1486,18 +1526,44 @@ def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
         optimizer.step()
 
     print("Running 50 warmup steps...")
-    for _ in range(50):
+    for i in range(50):
         step()
 
     torch.cuda.synchronize()
     print("Warmup complete. Running 2000 measured steps...")
     start_time = time.time()
     
-    for _ in range(2000):
-        step()
+    events = [[torch.cuda.Event(enable_timing=True) for _ in range(5)] for _ in range(2000)]
+    
+    for i in range(2000):
+        e_start, e_zero, e_fwd, e_bwd, e_opt = events[i]
+        
+        e_start.record()
+        optimizer.zero_grad()
+        e_zero.record()
+        
+        with torch.autocast(device_type=device.type, dtype=compute_dtype, enabled=(compute_dtype != torch.float32)):
+            outputs = model(inputs)
+            if is_lm:
+                B, T, V = outputs.shape
+                loss = criterion(outputs.view(B * T, V), targets.view(B * T))
+            else:
+                loss = criterion(outputs, targets)
+        e_fwd.record()
+        
+        loss.backward()
+        e_bwd.record()
+        
+        optimizer.step()
+        e_opt.record()
         
     torch.cuda.synchronize()
     elapsed = time.time() - start_time
+    
+    zero_ms = sum(e[0].elapsed_time(e[1]) for e in events)
+    fwd_ms = sum(e[1].elapsed_time(e[2]) for e in events)
+    bwd_ms = sum(e[2].elapsed_time(e[3]) for e in events)
+    opt_ms = sum(e[3].elapsed_time(e[4]) for e in events)
     
     batch_size = inputs.shape[0]
     if is_lm:
@@ -1508,6 +1574,10 @@ def run_benchmark(model, train_loader, criterion, optimizer, device, cfg):
         throughput = (2000 * batch_size) / elapsed
         print(f"Throughput: {throughput:.2f} samples/s")
     print(f"Elapsed time for 2000 steps: {elapsed:.3f} s")
+    print(f"Total Forward time: {fwd_ms:.2f} ms")
+    print(f"Total Backward time: {bwd_ms:.2f} ms")
+    print(f"Total Optimizer time: {opt_ms:.2f} ms")
+    print(f"Total Zero Grad time: {zero_ms:.2f} ms")
 
 
 def train_epoch(model, train_loader, criterion, optimizer, device, cfg, epoch, batch_writer):
@@ -1715,6 +1785,10 @@ def main():
         description="Unified tunx PyTorch Trainer")
     parser.add_argument("--config", type=str, required=True,
                         help="Path to JSON config file")
+    parser.add_argument("--compile", action="store_true", default=True,
+                        help="Enable torch.compile (default)")
+    parser.add_argument("--no-compile", action="store_false", dest="compile",
+                        help="Disable torch.compile")
     args = parser.parse_args()
 
     json_cfg = load_jsonc(args.config)
@@ -1738,6 +1812,7 @@ def main():
     cfg = get_model_config(internal_model_name)
 
     # Override with JSON config
+    cfg['model_name'] = json_cfg.get('model_name', 'resnet9_cifar10')
     cfg["epochs"] = json_cfg.get("epochs", cfg["epochs"])
     if json_cfg.get("max_steps", -1) > 0:
         cfg["epochs"] = 1  # We will handle max_steps later or rely on epochs for now
@@ -1745,6 +1820,7 @@ def main():
     cfg["batch_size"] = json_cfg.get("batch_size", cfg["batch_size"])
     cfg["num_workers"] = json_cfg.get("num_threads", cfg["num_workers"])
     cfg["progress_print_interval"] = json_cfg.get("progress_print_interval", 100);
+    cfg["print_memory_usage"] = json_cfg.get("print_memory_usage", False)
 
     opt_cfg = json_cfg.get("optimizer", {})
     cfg["optimizer_type"] = opt_cfg.get("type", cfg["optimizer_type"])
@@ -1758,6 +1834,8 @@ def main():
 
     device_str = json_cfg.get("device", "cuda:0").lower()
     device = torch.device(device_str if torch.cuda.is_available() else "cpu")
+    if device.type == 'cuda':
+        torch.backends.cudnn.benchmark = True
 
     cfg["io_dtype"] = str_to_dtype(json_cfg.get("io_dtype", "FP32"))
     cfg["param_dtype"] = str_to_dtype(json_cfg.get("param_dtype", "FP32"))
@@ -1801,11 +1879,17 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     print(f">>> Parameters: {total_params:,}")
 
-    # if hasattr(torch, "compile"):
-    #     print(">>> Compiling model with torch.compile...")
-    #     model = torch.compile(model, mode="reduce-overhead")
-    # else:
-    #     print(">>> torch.compile is not supported in this PyTorch version.")
+    if hasattr(torch, "compile"):
+        if args.compile:
+            if not cfg.get("print_memory_usage", False) or cfg.get("benchmark_mode", False):
+                print(">>> Compiling model with torch.compile...")
+                model = torch.compile(model, mode="max-autotune-no-cudagraphs")
+            else:
+                print(">>> Skipping torch.compile to allow accurate memory profiling.")
+        else:
+            print(">>> Skipping torch.compile (disabled by command-line argument).")
+    else:
+        print(">>> torch.compile is not supported in this PyTorch version.")
 
     # Loss function
     criterion = cfg["criterion"]
@@ -1867,10 +1951,10 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
 
     batch_csv_path = os.path.join(
-        log_dir, f"torch_{args.model}_batch_{ts}.csv")
+        log_dir, f"torch_{args.model}_{ts}_batch.csv")
     epoch_csv_path = os.path.join(
-        log_dir, f"torch_{args.model}_epoch_{ts}.csv")
-    val_csv_path = os.path.join(log_dir, f"torch_{args.model}_val_{ts}.csv")
+        log_dir, f"torch_{args.model}_{ts}_epoch.csv")
+    val_csv_path = os.path.join(log_dir, f"torch_{args.model}_{ts}_val.csv")
 
     batch_csv_file = open(batch_csv_path, "w", newline="")
     epoch_csv_file = open(epoch_csv_path, "w", newline="")

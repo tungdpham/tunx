@@ -106,6 +106,10 @@ GraphPartition build_partition(const Graph &graph, const Vec<Edge> &edges, size_
   partition.start_layer = start_layer;
   partition.layer_count = edges.size();
 
+  partition.graph.set_io_dtype(graph.get_io_dtype());
+  partition.graph.set_param_dtype(graph.get_param_dtype());
+  partition.graph.set_compute_dtype(graph.get_compute_dtype());
+
   std::unordered_map<std::string, Node> uid_to_node;
   std::vector<std::string> node_order;
   std::unordered_set<std::string> produced_in_partition;
@@ -185,17 +189,18 @@ std::vector<GraphPartition> GraphPartitioner::partition(const Graph &graph) cons
   partitions.reserve(layer_counts.size());
 
   size_t offset = 0;
-  for (size_t layer_count : layer_counts) {
+  for (size_t i = 0; i < layer_counts.size(); ++i) {
+    size_t layer_count = layer_counts[i];
+
     Vec<Edge> partition_edges;
     partition_edges.reserve(layer_count);
-    for (size_t i = 0; i < layer_count; ++i) {
-      partition_edges.push_back(sorted_edges[offset + i]);
+    for (size_t j = 0; j < layer_count; ++j) {
+      partition_edges.push_back(sorted_edges[offset + j]);
     }
 
     partitions.push_back(build_partition(graph, partition_edges, offset));
     offset += layer_count;
   }
-
   return partitions;
 }
 
@@ -260,12 +265,15 @@ std::vector<size_t> GraphPartitioner::resolve_layer_counts(size_t total_layers) 
 }
 
 ComputeBandwidthPartitioner::ComputeBandwidthPartitioner(
-    DeviceMesh mesh,
-    std::function<double(const Edge &)> compute_cost_fn,
-    std::function<double(const Node &)> activation_size_fn)
+    DeviceMesh mesh, std::function<double(const Edge &)> compute_cost_fn,
+    std::function<double(const Node &)> activation_size_fn,
+    size_t num_microbatches, double optimizer_step_time, double zero_grads_time)
     : mesh_(std::move(mesh)),
       compute_cost_fn_(std::move(compute_cost_fn)),
-      activation_size_fn_(std::move(activation_size_fn)) {
+      activation_size_fn_(std::move(activation_size_fn)),
+      num_microbatches_(num_microbatches),
+      optimizer_step_time_(optimizer_step_time),
+      zero_grads_time_(zero_grads_time) {
   if (compute_cost_fn_ == nullptr) {
     compute_cost_fn_ = [](const Edge &) { return 1.0; };
   }
@@ -280,13 +288,16 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
   const size_t K = mesh_.compute_powers.size();
 
   if (K == 0) {
-    throw std::runtime_error("ComputeBandwidthPartitioner requires at least one machine in the mesh");
+    throw std::runtime_error(
+        "ComputeBandwidthPartitioner requires at least one machine in the mesh");
   }
   if (mesh_.link_speeds.size() != K - 1) {
-    throw std::runtime_error("ComputeBandwidthPartitioner link_speeds size must be compute_powers size - 1");
+    throw std::runtime_error(
+        "ComputeBandwidthPartitioner link_speeds size must be compute_powers size - 1");
   }
   if (N < K) {
-    throw std::runtime_error("ComputeBandwidthPartitioner cannot partition graph with fewer edges than machines");
+    throw std::runtime_error(
+        "ComputeBandwidthPartitioner cannot partition graph with fewer edges than machines");
   }
   for (double p : mesh_.compute_powers) {
     if (p <= 0.0) throw std::runtime_error("Compute power must be positive");
@@ -305,11 +316,11 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
       const std::string &uid = input_node->uid();
       uid_to_node[uid] = input_node;
       if (producer_idx.find(uid) == producer_idx.end()) {
-        producer_idx[uid] = 0; 
+        producer_idx[uid] = 0;
       }
       last_consumer_idx[uid] = std::max(last_consumer_idx[uid], i + 1);
     }
-    
+
     for (const auto &output_node : edge->consumers()) {
       const std::string &uid = output_node->uid();
       uid_to_node[uid] = output_node;
@@ -356,7 +367,7 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
         if (dp[k - 1][p] == INF) continue;
 
         double compute_time = (prefix_compute[i] - prefix_compute[p]) / P_k;
-        double comm_time = (k < K) ? (boundary_size[i] / L_k) : 0.0;
+        double comm_time = (k < K) ? ((boundary_size[i] / L_k) * 1000.0) : 0.0;
 
         double bottleneck = std::max({dp[k - 1][p], compute_time, comm_time});
 
@@ -379,6 +390,12 @@ std::vector<GraphPartition> ComputeBandwidthPartitioner::partition(const Graph &
     cuts[k - 1] = parent[k][curr];
     curr = cuts[k - 1];
   }
+
+
+
+
+
+
 
   std::vector<GraphPartition> partitions;
   partitions.reserve(K);

@@ -43,7 +43,8 @@ struct TrainingConfig {
   int64 num_threads = 8;
   ProfilerType profiler_type = ProfilerType::NONE;
   bool print_layer_profiling = false;
-  bool print_layer_memory_usage = false;
+  bool print_memory_usage = false;
+  bool print_ablation = false;
   std::string model_name = "cifar10_resnet9";
   std::string model_path = "";
   std::string dataset_name = "";
@@ -54,12 +55,13 @@ struct TrainingConfig {
   DType_t compute_dtype = DType_t::FP32;
   std::string log_dir = "logs";
 
-  bool prefetch_data = false;
-  size_t prefetch_depth = 2;
+  bool prefetch_data = true;
+  size_t prefetch_depth = 4;
   bool async_pipeline = true;
   bool augmentation = true;
   bool benchmark_mode = false;
-  
+  bool bootstrap_offload = true;
+
   LogMode log_mode;
 
   size_t num_microbatches = 2;
